@@ -61,7 +61,7 @@ def mask_sphere(vertices: pt.Tensor,
     :return: boolean mask that's *True* for every vertex inside the sphere
     :rtype: pt.Tensor
     """
-    center = pt.tensor(center)
+    center = pt.tensor(center).type(vertices.dtype)
     assert len(
         vertices.shape) < 3, "The vertices tensor cannot have more than two axes."
     if len(vertices.shape) == 1:
