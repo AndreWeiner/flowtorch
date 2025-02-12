@@ -8,7 +8,7 @@ from flowtorch import DATASETS
 from flowtorch.data import TecplotDataloader
 
 
-class TestTecplotDataloader():
+class TestTecplotDataloader:
     path = DATASETS["plt_naca2409_surface"]
     loader = TecplotDataloader.from_tau(
         path, "alfa16.surface.pval.unsteady_")

@@ -284,7 +284,7 @@ class TestFOAMDataloader:
             for time in times[1:]:
                 field = loader.load_snapshot("p", time)
                 # the sum operation is more sensitive to floating point inaccuracies
-                # then a direct comparison of field values; therefore the tolerance is increased
+                # than a direct comparison of field values; therefore, the tolerance is increased
                 assert pt.abs(pt.sum(field) -
                               p_sum[time]).item() < 1.0e-4
 
@@ -299,7 +299,7 @@ class TestFOAMDataloader:
                 difference = pt.sum(
                     pt.abs(pt.sum(field, dim=0) - pt.tensor(U_sum[time])))
                 # the sum operation is more sensitive to floating point inaccuracies
-                # then a direct comparison of field values; therefore the tolerance is increased
+                # than a direct comparison of field values; therefore, the tolerance is increased
                 assert difference.item() < 1.0e-4
 
     def test_load_unsupported_field(self, get_test_data):

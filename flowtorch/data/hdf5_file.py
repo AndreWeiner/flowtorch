@@ -11,15 +11,15 @@ of reconstructed OpenFOAM simulation cases into the HDF5-based flowTorch format.
 # standard library packages
 from os.path import isfile, exists, join
 from os import remove
-from typing import List, Tuple, Dict, Union
-import sys
+from typing import List, Dict, Union
+
 # third party packages
 import torch as pt
 from h5py import File
 # flowtorch packages
 from flowtorch import DEFAULT_DTYPE
 from .dataloader import Dataloader
-from .foam_dataloader import FOAMCase, FOAMMesh, FOAMDataloader, POLYMESH_PATH, MAX_LINE_HEADER, FIELD_TYPE_DIMENSION
+from .foam_dataloader import FOAMDataloader, POLYMESH_PATH, MAX_LINE_HEADER, FIELD_TYPE_DIMENSION
 from .utils import check_list_or_str, check_and_standardize_path
 
 
@@ -165,7 +165,7 @@ class HDF5Writer(object):
     """Class to write flowTorch data to HDF5 file.
 
     Two types of data are supported:
-    - variable: (field) data that changes with times, e.g, snapshots
+    - variable: (field) data that changes with times, e.g., snapshots
     - constant: constant data like mesh vertices or cell volumes
 
     An XDMF accessor file can be created to support visual post-processing
@@ -261,7 +261,7 @@ class FOAM2HDF5(object):
     """
 
     def __init__(self, path: str, dtype=DEFAULT_DTYPE):
-        """Create FOAM2HDF5 converter from path.
+        """Create FOAM2HDF5 converter from a path.
 
         :param path: path to OpenFOAM case
         :type path: str
@@ -390,7 +390,7 @@ Workaround:
 
     def _convert_fields(self, writer: HDF5Writer, fields: List[str],
                         times: List[str]):
-        """Convert convert OpenFOAM fields to HDF5.
+        """Convert OpenFOAM fields to HDF5.
 
         :param writer: HDF5 writer
         :type writer: :class:`HDF5Writer`
@@ -412,11 +412,13 @@ Workaround:
                                   ) -> List[tuple]:
         """Gather field information for parallel writing.
 
-        - check if field type is supported
+        - check if a field type is supported
         - determine data size
 
-        :param skip_zero: skip zero folder if true
-        :type skip_zero: bool
+        :param fields: list of the field names
+        :type fields: List[str]
+        :param times: write times
+        :type times: List[str]
         :return: list of all fields; each list element is a tuple
             with the entries (name, time, shape)
         :rtype: List[tuple]
@@ -482,7 +484,7 @@ class XDMFWriter(object):
 
     @classmethod
     def from_filepath(cls, file_path: str):
-        """Create XDMFWriter from file path.
+        """Create XDMFWriter from a file path.
 
         :param file_path: path to HDF5 file
         :type file_path: str
@@ -510,7 +512,7 @@ class XDMFWriter(object):
         return n_cells
 
     def _add_grid(self, time: str, offset: str = "") -> str:
-        """Create XDMF grid element.
+        """Create an XDMF grid element.
 
         :param time: snapshot write time
         :type time: str
@@ -537,7 +539,7 @@ class XDMFWriter(object):
 
         :param time: snapshot write time
         :type time: str
-        :return: list of attributes to write in XDMF file
+        :return: a list of attributes to write in XDMF file
         :rtype: List[str]
         """
         location = "/{:s}/{:s}".format(VAR_GROUP, time)
@@ -551,7 +553,7 @@ class XDMFWriter(object):
         return valid_attr
 
     def _add_topology(self, offset: str = "") -> str:
-        """Create XDMF topology element.
+        """Create an XDMF topology element.
 
         :param offset: number of spaces for indentation, defaults to ""
         :type offset: str, optional
@@ -583,7 +585,7 @@ class XDMFWriter(object):
         return geometry
 
     def _add_attribute(self, time: str, name: str, offset: str = "") -> str:
-        """Create XDMF attribute element.
+        """Create an XDMF attribute element.
 
         :param time: snapshot write time
         :type time: str
@@ -607,7 +609,7 @@ class XDMFWriter(object):
         return attribute
 
     def _add_dataitem(self, location: str,  offset: str = "") -> str:
-        """Create XDMF dataitem element.
+        """Create an XDMF dataitem element.
 
         :param location: location of dataset in the HDF5 file
         :type location: str
@@ -629,7 +631,7 @@ class XDMFWriter(object):
         dataitem += offset + "</DataItem>\n"
         return dataitem
 
-    def create_xdmf(self, filename: str = None):
+    def create_xdmf(self, filename: str = None) -> None:
         """Create XDMF wrapper to access flowTorch HDF5 file in ParaView.
 
         :param filename: name of the XDMF file, defaults to None
@@ -661,14 +663,14 @@ class XDMFWriter(object):
             file.write(xdmf_str)
 
 
-def copy_hdf5_mesh(path: str, from_file: str, to_file: str):
-    """Create a copy of an flowTorch hdf5 file containing only the mesh.
+def copy_hdf5_mesh(path: str, from_file: str, to_file: str) -> None:
+    """Create a copy of a flowTorch hdf5 file containing only the mesh.
 
-    Sometimes, it is helpul to create a new copy of an existing hdf5 file
+    Sometimes, it is helpful to create a new copy of an existing hdf5 file
     that contains only the mesh, e.g., to create a separate file for
     POD or DMD modes.
 
-    :param path: location of the flowtorch hdf5 file exclusing the filename
+    :param path: location of the flowtorch hdf5 file excluding the filename
     :type path: str
     :param from_file: name of the file from which to copy the mesh
     :type from_file: str

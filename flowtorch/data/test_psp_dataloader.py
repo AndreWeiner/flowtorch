@@ -7,7 +7,7 @@ from flowtorch import DATASETS
 from flowtorch.data import PSPDataloader
 
 
-class TestPSPDataloader():
+class TestPSPDataloader:
     def test_zone(self):
         loader = PSPDataloader(DATASETS["ipsp_fake.hdf5"])
         names = loader.zone_names

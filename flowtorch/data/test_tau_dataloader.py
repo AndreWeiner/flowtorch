@@ -13,7 +13,7 @@ from flowtorch.data.tau_dataloader import (
 )
 
 
-class TestTAUConfig():
+class TestTAUConfig:
     path_0 = DATASETS["tau_backward_facing_step"]
     path_1 = DATASETS["tau_cylinder_2D"]
     path_2 = DATASETS["tau_surface_wing"]
@@ -75,7 +75,7 @@ class TestTAUConfig():
         assert "cylinder" in config_values[BMAP_FILE_KEY].keys()
 
 
-class TestTAUDataloader():
+class TestTAUDataloader:
     path_0 = DATASETS["tau_backward_facing_step"]
     path_1 = DATASETS["tau_cylinder_2D"]
     file_name = "simulation.para"
@@ -114,8 +114,6 @@ class TestTAUDataloader():
         assert loader._file_name("4.69800000000e-02") == file_name
         # 2D cylinder
         loader = TAUDataloader(join(self.path_1, self.file_name))
-        file_name = join(self.path_0, "solution/solution") + \
-            ".pval.unsteady_i=1000_t=6.0000e+02.domain_0"
         assert loader._file_name("6.0000e+02", ".domain_0")
 
     def test_load_domain_mesh_data(self):

@@ -1,7 +1,6 @@
 # standard library packages
 import os
 import pytest
-import sys
 # third party packages
 import torch as pt
 from h5py import File
@@ -29,7 +28,7 @@ def get_test_data():
     yield HDF5TestData()
 
 
-class TestHDF5Writer():
+class TestHDF5Writer:
     def test_write(self, get_test_data):
         file_path = DATASET_PATH + "test_file.hdf5"
         writer = HDF5Writer(file_path)

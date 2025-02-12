@@ -15,7 +15,7 @@ from os.path import join
 from os import sep
 from glob import glob
 import re
-from typing import List, Dict, Tuple, Union
+from typing import List, Dict, Union
 # third party packages
 import torch as pt
 from pandas import read_csv, DataFrame

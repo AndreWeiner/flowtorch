@@ -13,14 +13,14 @@ from abc import abstractmethod
 from os.path import join, split
 from glob import glob
 from collections import defaultdict
-from typing import List, Dict, Tuple, Union, Set
+from typing import List, Dict, Union
 # third party packages
 from netCDF4 import Dataset
 import torch as pt
 # flowtorch packages
 from flowtorch import DEFAULT_DTYPE
 from .dataloader import Dataloader
-from .utils import check_list_or_str, check_and_standardize_path
+from .utils import check_list_or_str
 
 VOL_SOLUTION_NAME = ".pval.unsteady_"
 SURF_SOLUTION_NAME = ".surface.pval.unsteady_"
@@ -54,7 +54,7 @@ class TAUConfig(object):
         """Create a `TauConfig` instance from the file path.
 
         :param file_path: path to the parameter file
-        :type path: str
+        :type file_path: str
         """
         self._path, self._file_name = split(file_path)
         with open(join(self._path, self._file_name), "r") as config:
@@ -66,14 +66,14 @@ class TAUConfig(object):
 
         Every line of the parameter file follows the structure:
             parameter : value
-        This function extracts the value as string and remove potential
+        This function extracts the value as string and removes potential
         white spaces or comments (#). The separator is expected to be a
         colon.
         Note: if the parameter is found multiple times, the value of the
         last occurrence is returned.
 
         :param parameter: the parameter of which to extract the value
-        :type pattern: str
+        :type parameter: str
         :return: extracted value or empty string
         :rtype: str
         """

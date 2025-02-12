@@ -9,10 +9,8 @@ research group.
 """
 
 # standard library packages
-from math import ceil
 from os.path import exists
 from typing import List, Dict, Union
-import sys
 # third party packages
 from h5py import File
 import numpy as np
@@ -35,10 +33,10 @@ FREQUENCY_KEY = "SamplingFrequency"
 
 
 class PSPDataloader(Dataloader):
-    """Load iPSP data and meta data.
+    """Load iPSP data and metadata.
 
     iPSP data comes as an HDF5 file with datasets organized in
-    different zones. Each zone has additional meta data related
+    different zones. Each zone has additional metadata related
     to flow conditions and camera setting. The active zone may be
     switched by seeting the `zone` attribute.
 
@@ -95,7 +93,7 @@ class PSPDataloader(Dataloader):
         This function finds the index in the dataset's time dimension
         corresponding to a physical write time.
 
-        :param time: write time of list of write times
+        :param time: write time of a list of write times
         :type time: Union[List[str], str]
         :return: index or list of indices
         :rtype: Union[List[int], int]
@@ -259,7 +257,7 @@ class PSPDataloader(Dataloader):
         n_snapshots = self._file[f"{self._zone}/{FIELDS[field_name]}"].shape[-1]
         times = [n/freq for n in range(n_snapshots)]
         # loading the time dataset directly does not always work since the dataset
-        # keys sometimes have spelling mistakes, e.g, TimValues instead of TimeValues
+        # keys sometimes have spelling mistakes, e.g., TimValues instead of TimeValues
         # times = self._file[f"{self._zone}/{TIME_KEY}"][:]
         return [str(round(t, 8)) for t in times]
 
