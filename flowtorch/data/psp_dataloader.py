@@ -11,6 +11,7 @@ research group.
 # standard library packages
 from os.path import exists
 from typing import List, Dict, Union
+import logging
 # third party packages
 from h5py import File
 import numpy as np
@@ -20,6 +21,8 @@ from flowtorch import DEFAULT_DTYPE
 from .dataloader import Dataloader
 from .utils import check_list_or_str
 
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 COORDINATE_KEYS = ["CoordinatesX", "CoordinatesY", "CoordinatesZ"]
 INFO_KEY = "Info"
@@ -66,13 +69,13 @@ class PSPDataloader(Dataloader):
 
     """
 
-    def __init__(self, path: str, dtype: str = DEFAULT_DTYPE):
-        """Create PSPDataloader instance from file path.
+    def __init__(self, path: str, dtype: pt.dtype = DEFAULT_DTYPE):
+        """Create PSPDataloader instance from a file path.
 
         :param path: path to iPSP file
         :type path: str
         :param dtype: tensor type, defaults to DEFAULT_DTYPE
-        :type dtype: str, optional
+        :type dtype: pt.dtype, optional
         """
         self._path = path
         self._dtype = dtype
@@ -180,8 +183,7 @@ class PSPDataloader(Dataloader):
             self._mask_names = None
             self._mask = self.mask_names[0]
         else:
-            print(f"{zone_name} not found. Available zones are:")
-            print(self._zone_names)
+            logger.warning(f"{zone_name} not found. Available zones are {self._zone_names}")
 
     @property
     def mask_names(self) -> List[str]:
@@ -214,8 +216,7 @@ class PSPDataloader(Dataloader):
         if mask_name in self._mask_names:
             self._mask = mask_name
         else:
-            print(f"{mask_name} not found. Available masks are:")
-            print(self._mask_names)
+            logger.warning(f"{mask_name} not found. Available masks are {self._mask_names}")
 
     @property
     def info(self) -> Dict[str, tuple]:
