@@ -9,6 +9,7 @@ to snapshot data.
 
 """
 # standard library packages
+import logging
 from abc import abstractmethod
 from os.path import join, split
 from glob import glob
@@ -21,6 +22,9 @@ import torch as pt
 from flowtorch import DEFAULT_DTYPE
 from .dataloader import Dataloader
 from .utils import check_list_or_str
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 VOL_SOLUTION_NAME = ".pval.unsteady_"
 SURF_SOLUTION_NAME = ".surface.pval.unsteady_"
@@ -156,7 +160,7 @@ class TAUBase(Dataloader):
     """
 
     def __init__(self, parameter_file: str, distributed: bool = False,
-                 dtype: str = DEFAULT_DTYPE):
+                 dtype: pt.dtype = DEFAULT_DTYPE):
         self._para = TAUConfig(parameter_file)
         self._distributed = distributed
         self._dtype = dtype
@@ -284,8 +288,8 @@ class TAUDataloader(TAUBase):
     """
 
     def __init__(self, parameter_file: str, distributed: bool = False,
-                 dtype: str = DEFAULT_DTYPE):
-        """Create loader instance from TAU parameter file.
+                 dtype: pt.dtype = DEFAULT_DTYPE):
+        """Create loader instance from a TAU parameter file.
 
         :param parameter_file: path to TAU simulation parameter file
         :type parameter_file: str
@@ -293,7 +297,7 @@ class TAUDataloader(TAUBase):
             files; defaults to False
         :type distributed: bool, optional
         :param dtype: tensor type, defaults to DEFAULT_DTYPE
-        :type dtype: str, optional
+        :type pt.dtype: str, optional
         """
         super(TAUDataloader, self).__init__(parameter_file, distributed, dtype)
         self._solution_name = VOL_SOLUTION_NAME
@@ -354,8 +358,7 @@ class TAUDataloader(TAUBase):
                     weights = pt.tensor(
                         data.variables[WEIGHT_KEY][:], dtype=self._dtype)
                 else:
-                    print(
-                        f"Warning: could not find cell volumes in file {path}")
+                    logger.warning(f"Could not find cell volumes in file {path}")
                     weights = pt.ones(vertices.shape[0], dtype=self._dtype)
             self._mesh_data = pt.cat((vertices, weights.unsqueeze(-1)), dim=-1)
 
@@ -454,7 +457,7 @@ class TAUSurfaceDataloader(TAUBase):
 
     """
 
-    def __init__(self, parameter_file: str, dtype: str = DEFAULT_DTYPE):
+    def __init__(self, parameter_file: str, dtype: pt.dtype = DEFAULT_DTYPE):
         super().__init__(parameter_file, False, dtype)
         self._solution_name = SURF_SOLUTION_NAME
         self._time_iter = self._decompose_file_name()
@@ -476,16 +479,16 @@ class TAUSurfaceDataloader(TAUBase):
         path = join(self._para.path, self._para.config[GRID_FILE_KEY])
         with Dataset(path) as data:
             boundary_markers = pt.tensor(
-                data.variables["boundarymarker_of_surfaces"][:], dtype=int)
+                data.variables["boundarymarker_of_surfaces"][:], dtype=pt.int)
             surface_tri, surface_quad = None, None
             surface_tri_key = "points_of_surfacetriangles"
             if surface_tri_key in data.variables.keys():
                 surface_tri = pt.tensor(
-                    data.variables[surface_tri_key][:], dtype=int)
+                    data.variables[surface_tri_key][:], dtype=pt.int)
             surface_quad_key = "points_of_surfacequadrilaterals"
             if surface_quad_key in data.variables.keys():
                 surface_quad = pt.tensor(
-                    data.variables[surface_quad_key][:], dtype=int)
+                    data.variables[surface_quad_key][:], dtype=pt.int)
             self._zone_ids = {}
             for zone_name, zone_markers in self._para.config[BMAP_FILE_KEY].items():
                 marker_selection = pt.isin(
@@ -497,9 +500,9 @@ class TAUSurfaceDataloader(TAUBase):
                     merged = pt.unique(
                         pt.cat((expanded, surface_quad), dim=0)[marker_selection].flatten())
                     
-                    sorted, indices = pt.sort(merged[~pt.isnan(
+                    sorted_zones, indices = pt.sort(merged[~pt.isnan(
                         merged)].type(pt.int64))
-                    self._zone_ids[zone_name] = sorted
+                    self._zone_ids[zone_name] = sorted_zones
                     del expanded, merged
                 elif surface_tri is not None:
                     self._zone_ids[zone_name] = pt.unique(
@@ -612,5 +615,4 @@ class TAUSurfaceDataloader(TAUBase):
         if value in self.zone_names:
             self._zone = value
         else:
-            print(f"Zone '{value}' not found. Available zones are:")
-            print(self.zone_names)
+            logger.warning(f"Zone '{value}' not found. Available zones are {self.zone_names}")

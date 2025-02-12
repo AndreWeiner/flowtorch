@@ -2,6 +2,7 @@
 """
 
 # standard library packages
+import logging
 from os.path import join
 from os import sep
 from glob import glob
@@ -16,6 +17,8 @@ from flowtorch import DEFAULT_DTYPE
 from .dataloader import Dataloader
 from .utils import check_and_standardize_path, check_list_or_str
 
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 class TecplotDataloader(Dataloader):
     """Dataloader for Tecplot binary format.
@@ -43,7 +46,7 @@ class TecplotDataloader(Dataloader):
     """
 
     def __init__(self, path: str, file_names: Dict[str, str],
-                 reader: VisItTecplotBinaryReader, dtype: str = DEFAULT_DTYPE):
+                 reader: VisItTecplotBinaryReader, dtype: pt.dtype = DEFAULT_DTYPE):
         """Default constructor function.
 
         :param path: path to snapshot location
@@ -53,7 +56,7 @@ class TecplotDataloader(Dataloader):
         :param reader: ParaView reader for Tecplot binary format
         :type reader: VisItTecplotBinaryReader
         :param dtype: tensor data type, defaults to DEFAULT_DTYPE
-        :type dtype: str, optional
+        :type dtype: pt.dtype, optional
         """
         self._path = path
         self._file_names = file_names
@@ -63,7 +66,7 @@ class TecplotDataloader(Dataloader):
         self._zone = self.zone_names[0]
 
     @classmethod
-    def from_tau(cls, path: str, base_name: str = "", suffix: str = ".plt", dtype: str = DEFAULT_DTYPE):
+    def from_tau(cls, path: str, base_name: str = "", suffix: str = ".plt", dtype: pt.dtype = DEFAULT_DTYPE):
         """Construct TecplotDataloader from TAU snapshots.
 
         :param path: path to snapshot location
@@ -73,7 +76,7 @@ class TecplotDataloader(Dataloader):
         :param suffix: snapshot file suffix, defaults to ".plt"
         :type suffix: str, optional
         :param dtype: tensor data type, defaults to DEFAULT_DTYPE
-        :type dtype: str, optional
+        :type dtype: pt.dtype, optional
         :raises FileNotFoundError: if no snapshots are found
         :return: Tecplot dataloader object
         :rtype: TecplotDataloader
@@ -88,7 +91,7 @@ class TecplotDataloader(Dataloader):
         file_names = {time: name for time, name in sorted_names}
         if len(file_names.keys()) < 1:
             raise FileNotFoundError(
-                f"Could not find solution files in {self._sol_path}/")
+                f"Could not find solution files in {path}")
         return cls(path, file_names, VisItTecplotBinaryReader, dtype)
 
     def _assemble_file_path(self, time: str) -> str:
@@ -101,7 +104,8 @@ class TecplotDataloader(Dataloader):
         """
         return join(self._path, self._file_names[time])
 
-    def _parse_block_name(self, meta_data: str) -> str:
+    @staticmethod
+    def _parse_block_name(meta_data: str) -> str:
         """Extract block name from a reader's metadata.
 
         :param meta_data: output of `GetMetaData()` as string
@@ -231,8 +235,7 @@ class TecplotDataloader(Dataloader):
         if value in self.zone_names:
             self._zone = value
         else:
-            print(f"{value} not found. Available zones are:")
-            print(self.zone_names)
+            logger.warning(f"{value} not found. Available zones are {self.zone_names}")
 
     @property
     def write_times(self) -> List[str]:

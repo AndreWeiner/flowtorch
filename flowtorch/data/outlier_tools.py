@@ -2,10 +2,13 @@
 """
 
 # standard library packages
+import logging
 from typing import Callable
 # third party packages
 import torch as pt
 
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 def iqr_outlier_replacement(data: pt.Tensor, k: float = 1.5, nb: int = 3,
                             replace: Callable = pt.median) -> pt.Tensor:
@@ -39,14 +42,14 @@ def iqr_outlier_replacement(data: pt.Tensor, k: float = 1.5, nb: int = 3,
     outlier_indices = pt.logical_or(
         outliers_low, outliers_high).nonzero(as_tuple=True)
     clean_data = data.clone().detach()
-    print("Detected {:d} outliers ({:3.2f}%).".format(
+    logger.info("Detected {:d} outliers ({:3.2f}%).".format(
         outlier_indices[0].shape[0],
         outlier_indices[0].shape[0] / (data.shape[0]*data.shape[1]) * 100
     ))
     if outlier_indices[0].shape[0] == 0:
-        print("Nothing to do ...")
+        logger.info("Couldn't find any outliers.")
     else:
-        print("Start to replace outliers ...")
+        logger.info("Start to replace outliers ...")
     for row, col in zip(*outlier_indices):
         i, j = row.item(), col.item()
         clean_data[i, j] = replace(

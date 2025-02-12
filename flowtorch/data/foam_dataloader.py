@@ -9,11 +9,13 @@ the finite volume mesh.
 """
 
 # standard library packages
-import glob
-from os.path import isdir, isfile, join
-from os import listdir
 import struct
-import sys
+import logging
+
+from sys import exit
+from glob import glob
+from os import listdir
+from os.path import isdir, isfile, join
 from typing import List, Dict, Tuple, Union
 
 # third party packages
@@ -24,10 +26,17 @@ from flowtorch import DEFAULT_DTYPE
 from .dataloader import Dataloader
 from .utils import check_and_standardize_path, check_list_or_str
 
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
+
+# volSymmTensorField as 6 entries since it symmetric, compare
+# https://www.openfoam.com/documentation/guides/latest/api/classFoam_1_1SymmTensor.html
+# the order is: XX, XY, XZ, YY, YZ, ZZ
 FIELD_TYPE_DIMENSION = {
     b"volScalarField": 1,
-    b"volVectorField": 3
+    b"volVectorField": 3,
+    b"volSymmTensorField": 6
 }
 CONSTANT_PATH = "constant"
 POLYMESH_PATH = join("constant", "polyMesh")
@@ -105,22 +114,23 @@ class FOAMDataloader(Dataloader):
         """
         field_type = self._field_type(data[:MAX_LINE_HEADER])
         if not field_type in FIELD_TYPE_DIMENSION.keys():
-            raise ValueError(f"Field type {field_type} not supported.")
+            raise ValueError(f"Field type {field_type.decode('utf-8')} not supported.")
         try:
-            if self._case._is_binary(data[:MAX_LINE_HEADER]):
-                field_data = self._unpack_internalfield_binary(
+            if self._case.is_binary(data[:MAX_LINE_HEADER]):
+                field_data = self._unpack_internal_field_binary(
                     data, FIELD_TYPE_DIMENSION[field_type]
                 )
             else:
-                field_data = self._unpack_internalfield_ascii(
+                field_data = self._unpack_internal_field_ascii(
                     data, FIELD_TYPE_DIMENSION[field_type]
                 )
         except Exception as e:
-            print(e)
+            logger.error(e)
         else:
             return field_data
 
-    def _find_nonuniform(self, data: List[str]) -> Tuple[int, int]:
+    @staticmethod
+    def _find_nonuniform(data: List[Union[str, bytes]]) -> Tuple[int, int]:
         """Determine the start index and size of a nonuniform field.
 
         OpenFOAM output files with nonuniform fields contain the line
@@ -143,7 +153,8 @@ class FOAMDataloader(Dataloader):
                 return i, int(data[i+1])
         return 0, 0
 
-    def _field_type(self, data: List[str]) -> str:
+    @staticmethod
+    def _field_type(data: List[Union[str, bytes]]) -> Union[str, bytes, None]:
         """Determine the tensor type of a field.
 
         :param data: content of an OpenFoam output file
@@ -154,10 +165,7 @@ class FOAMDataloader(Dataloader):
         """
         for line in data:
             if b"class" in line:
-                for field_type in FIELD_TYPE_DIMENSION.keys():
-                    if field_type in line:
-                        return field_type
-                return None
+                return line.split()[-1].strip(b";")
         return None
 
     def _unpack_internal_field_ascii(self, data: List[str], dim: int) -> pt.Tensor:
@@ -216,8 +224,8 @@ class FOAMDataloader(Dataloader):
         :rtype: pt.Tensor
         """
         file_paths = []
-        if self._case._distributed:
-            for proc in range(self._case._processors):
+        if self._case.distributed:
+            for proc in range(self._case.processors):
                 file_paths.append(
                     self._case.build_file_path(field_name, time, proc))
         else:
@@ -270,7 +278,7 @@ class FOAMDataloader(Dataloader):
         :getter: returns the available write times
         :type: List[str]
         """
-        return self._case._time_folders
+        return self._case.time_folders
 
     @property
     def field_names(self) -> Dict[str, List[str]]:
@@ -281,7 +289,7 @@ class FOAMDataloader(Dataloader):
         :getter: returns names of available fields
         :type: Dict[str, List[str]]
         """
-        return self._case._field_names
+        return self._case.field_names
 
     @property
     def vertices(self) -> pt.Tensor:
@@ -338,9 +346,10 @@ class FOAMCase(object):
         self._time_folders = self._eval_write_times()
         self._field_names = self._eval_field_names()
         if not self._check_mesh_files():
-            sys.exit("Error: could not find valid mesh in case {:s}".format(self._path))
+            exit("Error: could not find valid mesh in case {:s}".format(self._path))
 
-    def _is_binary(self, header: List[Union[bytes, str]]) -> bool:
+    @staticmethod
+    def _is_binary(header: List[Union[bytes, str]]) -> bool:
         """Determine if the writing format is binary.
 
         :param header: header of the OpenFOAM file
@@ -390,7 +399,7 @@ class FOAMCase(object):
         :return: `True` if distributed
         :rtype: bool
         """
-        proc_dirs = glob.glob(self._path + "/processor*")
+        proc_dirs = glob(join(self._path, "processor*"))
         return len(proc_dirs) > 0
 
     def _eval_processors(self) -> int:
@@ -400,7 +409,7 @@ class FOAMCase(object):
         :rtype: int
         """
         if self._distributed:
-            return len(glob.glob(join(self._path, "processor*")))
+            return len(glob(join(self._path, "processor*")))
         else:
             return 1
 
@@ -414,12 +423,8 @@ class FOAMCase(object):
             For distributed simulations, it is assumed that all processor
             folders contain the same time folders.
         """
-        if self._distributed:
-            time_path = self._path + "/processor0"
-        else:
-            time_path = self._path
-        dirs = [folder for folder in listdir(time_path) if
-                isdir(join(time_path, folder))]
+        time_path = join(self._path, "processor0") if self._distributed else self._path
+        dirs = [folder for folder in listdir(time_path) if isdir(join(time_path, folder))]
         time_dirs = []
         for entry in dirs:
             try:
@@ -429,10 +434,7 @@ class FOAMCase(object):
             except ValueError:
                 continue
         if len(time_dirs) < 2:
-            print(
-                "Warning: found only one or less time folders in {:s}"
-                .format(self._path)
-            )
+            logger.warning("Found only one or less time folders in {:s}".format(self._path))
         return sorted(time_dirs, key=float)
 
     def _eval_field_names(self) -> Dict[str, List[str]]:
@@ -446,17 +448,9 @@ class FOAMCase(object):
             for each time as values
         :rtype: Dict[str, List[str]]
         """
-        all_time_folders = [
-            self.build_file_path("", time, 0)
-            for time in self._time_folders
-        ]
-        all_fields = {}
-        for i, folder in enumerate(all_time_folders):
-            all_fields[self._time_folders[i]] = [
-                field for field in listdir(folder)
-                if isfile(join(folder, field))
-            ]
-        return all_fields
+        all_time_folders = [self.build_file_path("", time, 0) for time in self._time_folders]
+        return {self._time_folders[i]: [field for field in listdir(folder) if isfile(join(folder, field))]
+                      for i, folder in enumerate(all_time_folders)}
 
     def build_file_path(self, field_name: str, time: str, processor: int = 0) -> str:
         """Create the path to file inside the time folder of a simulation.
@@ -492,6 +486,30 @@ class FOAMCase(object):
         else:
             file_path = join(self._path, time, field_name)
         return file_path
+
+    @property
+    def distributed(self) -> bool:
+        return self._distributed
+
+    @property
+    def processors(self) -> int:
+        return self._processors
+
+    @property
+    def is_binary(self):
+        return self._is_binary
+
+    @property
+    def path(self):
+        return self._path
+
+    @property
+    def field_names(self):
+        return self._field_names
+
+    @property
+    def time_folders(self):
+        return self._time_folders
 
 
 class FOAMMesh(object):
@@ -544,8 +562,7 @@ class FOAMMesh(object):
         Create FOAMMesh object based on :class:`FOAMCase`.
         """
         if not isinstance(case, FOAMCase):
-            sys.exit("Error: case must be of type FOAMCase, not {:s}"
-                     .format(type(case).__name__))
+            exit("Error: case must be of type FOAMCase, not {:s}".format(type(case).__name__))
         self._case = case
         self._dtype = dtype
         self._itype = pt.int64
@@ -565,7 +582,8 @@ class FOAMMesh(object):
         """
         return cls(FOAMCase(path), dtype)
 
-    def _get_list_length(self, data: List[str]) -> Tuple[int, int]:
+    @staticmethod
+    def _get_list_length(data: List[str]) -> Tuple[int, int]:
         """Find list length of points, faces, and cells.
 
         :param data: content of points, faces, or owner/neighbor file
@@ -577,13 +595,14 @@ class FOAMMesh(object):
         for i, line in enumerate(data):
             try:
                 n_entries = int(line)
-            except:
+            except ValueError:
                 pass
             else:
                 return i, n_entries
         return 0, 0
 
-    def _get_n_cells(self, mesh_path: str) -> int:
+    @staticmethod
+    def _get_n_cells(mesh_path: str) -> int:
         """Extract number of cells from *owner* file.
 
         :param mesh_path: mesh location
@@ -615,7 +634,7 @@ class FOAMMesh(object):
         with open(join(mesh_path, "points"), "rb") as file:
             data = file.readlines()
             start, length = self._get_list_length(data[:MAX_LINE_HEADER])
-            if self._case._is_binary(data[:MAX_LINE_HEADER]):
+            if self._case.is_binary(data[:MAX_LINE_HEADER]):
                 start += 1
                 buffer = b"".join(data[start:])
                 values = struct.unpack(
@@ -653,7 +672,7 @@ class FOAMMesh(object):
         with open(join(mesh_path, "faces"), "rb") as file:
             data = file.readlines()
             start, length = self._get_list_length(data[:MAX_LINE_HEADER])
-            if self._case._is_binary(data[:MAX_LINE_HEADER]):
+            if self._case.is_binary(data[:MAX_LINE_HEADER]):
                 n_points_faces = pt.zeros((length-1, 1), dtype=self._itype)
                 faces = pt.zeros_like(n_points_faces, dtype=self._itype)
                 start += 1
@@ -711,7 +730,7 @@ class FOAMMesh(object):
         with open(join(mesh_path, "owner"), "rb") as file:
             data = file.readlines()
             start, length = self._get_list_length(data[:MAX_LINE_HEADER])
-            if self._case._is_binary(data[:MAX_LINE_HEADER]):
+            if self._case.is_binary(data[:MAX_LINE_HEADER]):
                 start += 1
                 buffer = b"".join(data[start:])
                 owner_values = struct.unpack(
@@ -727,7 +746,7 @@ class FOAMMesh(object):
         with open(join(mesh_path, "neighbour"), "rb") as file:
             data = file.readlines()
             start, length = self._get_list_length(data[:MAX_LINE_HEADER])
-            if self._case._is_binary(data[:MAX_LINE_HEADER]):
+            if self._case.is_binary(data[:MAX_LINE_HEADER]):
                 start += 1
                 buffer = b"".join(data[start:])
                 neighbor_values = struct.unpack(
@@ -745,7 +764,8 @@ class FOAMMesh(object):
             pt.tensor(neighbor_values, dtype=self._itype)
         )
 
-    def _centers_and_volumes_computed(self, path: str) -> bool:
+    @staticmethod
+    def _centers_and_volumes_computed(path: str) -> bool:
         """Check if files *C* and *V* exist in the specified location.
 
         :param path: mesh location
@@ -766,7 +786,7 @@ class FOAMMesh(object):
         with open(join(path, "C"), "rb") as file:
             data = file.readlines()
             start, length = self._get_list_length(data[:MAX_LINE_HEADER])
-            if self._case._is_binary(data[:MAX_LINE_HEADER]):
+            if self._case.is_binary(data[:MAX_LINE_HEADER]):
                 start += 1
                 buffer = b"".join(data[start:])
                 values = struct.unpack(
@@ -793,7 +813,7 @@ class FOAMMesh(object):
         with open(join(path, "V"), "rb") as file:
             data = file.readlines()
             start, length = self._get_list_length(data[:MAX_LINE_HEADER])
-            if self._case._is_binary(data[:MAX_LINE_HEADER]):
+            if self._case.is_binary(data[:MAX_LINE_HEADER]):
                 start += 1
                 buffer = b"".join(data[start:])
                 values = struct.unpack(
@@ -929,15 +949,14 @@ class FOAMMesh(object):
         are simply concatenated. This reconstruction does not yield volumes
         and centers in the same order as the reconstructed OpenFOAM mesh.
         """
-        if self._case._distributed:
+        if self._case.distributed:
             proc_data = []
-            for proc in range(self._case._processors):
+            for proc in range(self._case.processors):
                 if self._centers_and_volumes_computed(
-                    join(self._case._path, f"processor{proc:d}", CONSTANT_PATH)
+                    join(self._case.path, f"processor{proc:d}", CONSTANT_PATH)
                 ):
-                    print(
-                        f"Loading precomputed cell centers and volumes from processor{proc:d}/{CONSTANT_PATH}")
-                    mesh_location = join(self._case._path, f"processor{proc:d}", CONSTANT_PATH)
+                    logger.info(f"Loading precomputed cell centers and volumes from processor{proc:d}/{CONSTANT_PATH}")
+                    mesh_location = join(self._case.path, f"processor{proc:d}", CONSTANT_PATH)
                     proc_data.append(
                         (
                             self._parse_cell_centers(mesh_location),
@@ -945,8 +964,8 @@ class FOAMMesh(object):
                         )
                     )
                 else:
-                    mesh_location = join(self._case._path, f"processor{proc:d}", POLYMESH_PATH)
-                    print(
+                    mesh_location = join(self._case.path, f"processor{proc:d}", POLYMESH_PATH)
+                    logger.warning(
                         f"Could not find precomputed cell centers and volumes (processor{proc:d}).\n" +
                         "Computing cell geometry from scratch (slow, not recommended for large meshes).\n" +
                         "To compute cell centers and volumes in OpenFOAM, use:\n\n" +
@@ -960,17 +979,16 @@ class FOAMMesh(object):
             volumes = pt.cat(list(zip(*proc_data))[1])
         else:
             if self._centers_and_volumes_computed(
-                join(self._case._path, CONSTANT_PATH)
+                join(self._case.path, CONSTANT_PATH)
             ):
-                print(
-                    f"Loading precomputed cell centers and volumes from {CONSTANT_PATH}")
+                logger.info(f"Loading precomputed cell centers and volumes from {CONSTANT_PATH}")
                 centers = self._parse_cell_centers(
-                    join(self._case._path, CONSTANT_PATH))
+                    join(self._case.path, CONSTANT_PATH))
                 volumes = self._parse_cell_volumes(
-                    join(self._case._path, CONSTANT_PATH))
+                    join(self._case.path, CONSTANT_PATH))
             else:
-                mesh_location = join(self._case._path, POLYMESH_PATH)
-                print(
+                mesh_location = join(self._case.path, POLYMESH_PATH)
+                logger.warning(
                     "Could not find precomputed cell centers and volumes.\n" +
                     "Computing cell geometry from scratch (slow, not recommended for large meshes).\n" +
                     "To compute cell centers and volumes in OpenFOAM, run:\n\n" +
@@ -988,7 +1006,7 @@ class FOAMMesh(object):
         :return: control volume centers
         :rtype: pt.Tensor
         """
-        if self._cell_centers == None:
+        if self._cell_centers is None:
             self._load_mesh()
         return self._cell_centers
 
@@ -998,6 +1016,6 @@ class FOAMMesh(object):
         :return: cell volumes
         :rtype: pt.Tensor
         """
-        if self._cell_volumes == None:
+        if self._cell_volumes is None:
             self._load_mesh()
         return self._cell_volumes
