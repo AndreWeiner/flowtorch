@@ -7,12 +7,12 @@ from typing import Tuple, List, Union
 
 
 def format_byte_size(size: int) -> Tuple[float, str]:
-    """Convert number of bytes into human-readable format.
+    """Convert a number of bytes into human-readable format.
 
     The function is based on `this <https://stackoverflow.com/questions/12523586/python-format-size-application-converting-b-to-kb-mb-gb-tb>` Stackoverflow question.
 
     :param size: size in bytes
-    :type path: int
+    :type size: int
     :return: converted size corresponding unit
     :rtype: tuple(float, str)
 

@@ -9,7 +9,7 @@ import torch as pt
 
 def iqr_outlier_replacement(data: pt.Tensor, k: float = 1.5, nb: int = 3,
                             replace: Callable = pt.median) -> pt.Tensor:
-    """Detect and replace outliers based on the inter quantile range (IRQ).
+    """Detect and replace outliers based on the inter-quantile range (IRQ).
 
     :param data: time series data; time is expected to be the last dimension
     :type data: pt.Tensor
@@ -51,5 +51,4 @@ def iqr_outlier_replacement(data: pt.Tensor, k: float = 1.5, nb: int = 3,
         i, j = row.item(), col.item()
         clean_data[i, j] = replace(
             data[i, max(0, j-nb):min(shape[-1], j+nb+1)])
-    data = data.reshape(initial_shape)
     return clean_data.reshape(initial_shape)

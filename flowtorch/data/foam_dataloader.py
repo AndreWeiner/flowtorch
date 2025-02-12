@@ -11,12 +11,14 @@ the finite volume mesh.
 # standard library packages
 import glob
 from os.path import isdir, isfile, join
-from os import sep, listdir
+from os import listdir
 import struct
 import sys
 from typing import List, Dict, Tuple, Union
+
 # third party packages
 import torch as pt
+
 # flowtorch packages
 from flowtorch import DEFAULT_DTYPE
 from .dataloader import Dataloader
@@ -44,7 +46,7 @@ class FOAMDataloader(Dataloader):
     """Load internal fields and mesh properties of OpenFOAM cases.
 
     The project ofpp_ by Xu Xianghua has been a great
-    help to implement some of the methods.
+    help to implement some methods.
 
     .. _ofpp: https://github.com/xu-xianghua/ofpp
 
@@ -85,15 +87,14 @@ class FOAMDataloader(Dataloader):
         :param distributed: case is considered distributed if True; if None,
             the case type (parallel/serial) is determined automatically;
             defaults to None
-        :type distributed: bool 
-
+        :type distributed: bool
         """
         self._case = FOAMCase(path, distributed)
         self._mesh = FOAMMesh(self._case, dtype)
         self._dtype = dtype
 
-    def _parse_data(self, data: List[str]) -> pt.Tensor:
-        """Prase field data from an OpenFOAM snapshot.
+    def _parse_data(self, data: List[Union[str, bytes]]) -> pt.Tensor:
+        """Parse field data from an OpenFOAM snapshot.
 
         :param data: full content of the snapshot file (including header
             and metadata)
@@ -128,15 +129,14 @@ class FOAMDataloader(Dataloader):
             (...
             )
         where ##### is an integer number indicating the number of list
-        entries. This number is needed,
+        entries.
+        This number is needed.
 
         :param data: [description]
         :type data: List[str]
-        :return: line index containing the keyword *nonuniform* and the
-            size if the nonuniform list; if the keyword is not found, two
-            zeros are returned
+        :return: line index containing the keyword *nonuniform* and the size of the nonuniform list;
+                 if the keyword is not found, two zeros are returned
         :rtype: Tuple[int, int]
-
         """
         for i, line in enumerate(data):
             if b"nonuniform" in line:
@@ -151,7 +151,6 @@ class FOAMDataloader(Dataloader):
         :return: the field type; if the type is not supported or not found,
         `None` is returned
         :rtype: str
-
         """
         for line in data:
             if b"class" in line:
@@ -161,7 +160,7 @@ class FOAMDataloader(Dataloader):
                 return None
         return None
 
-    def _unpack_internalfield_ascii(self, data: List[str], dim: int) -> pt.Tensor:
+    def _unpack_internal_field_ascii(self, data: List[str], dim: int) -> pt.Tensor:
         """Parse internal field given as ASCII-encoded text.
 
         :param data: content of output file
@@ -184,17 +183,15 @@ class FOAMDataloader(Dataloader):
                 dtype=self._dtype
             )
 
-    def _unpack_internalfield_binary(self, data: List[str], dim: int) -> pt.Tensor:
-        """Prase internal field given in binary encoding.
+    def _unpack_internal_field_binary(self, data: List[str], dim: int) -> pt.Tensor:
+        """Parse internal field given in binary encoding.
 
         :param data: content of output file
         :type data: List[str]
-        :param dim: dimensionality of the field, e.g., 1 for a scalar or
-            3 for a vector
+        :param dim: dimensionality of the field, e.g., 1 for a scalar, 3 for a vector or 9 for a tensor
         :type dim: int
         :return: tensor holding the field data
         :rtype: pt.Tensor
-
         """
         start, n_values = self._find_nonuniform(data[:MAX_LINE_INTERNAL_FIELD])
         start += 2
@@ -217,7 +214,6 @@ class FOAMDataloader(Dataloader):
         :type time: str
         :return: tensor holding the field
         :rtype: pt.Tensor
-
         """
         file_paths = []
         if self._case._distributed:
@@ -242,7 +238,6 @@ class FOAMDataloader(Dataloader):
         :return: tensor holding multiple snapshots; the time dimension is always
             the last dimension
         :rtype: pt.Tensor
-
         """
         return pt.stack(
             [self._load_single_snapshot(field_name, time) for time in times],
@@ -267,7 +262,7 @@ class FOAMDataloader(Dataloader):
             else:
                 return self._load_single_snapshot(field_name, time)
 
-    @ property
+    @property
     def write_times(self) -> List[str]:
         """
         Access to available snapshot/write times via :func:`FOAMCase._eval_write_times`.
@@ -277,18 +272,18 @@ class FOAMDataloader(Dataloader):
         """
         return self._case._time_folders
 
-    @ property
+    @property
     def field_names(self) -> Dict[str, List[str]]:
         """
         Access to the available field names for all available write times via
         :func:`FOAMCase._eval_field_names`.
 
-        :getter: returns names of availabe fields
+        :getter: returns names of available fields
         :type: Dict[str, List[str]]
         """
         return self._case._field_names
 
-    @ property
+    @property
     def vertices(self) -> pt.Tensor:
         """
         In OpenFOAM, field for post-processing are defined at the control volume's
@@ -300,12 +295,12 @@ class FOAMDataloader(Dataloader):
         """
         return self._mesh.get_cell_centers()
 
-    @ property
+    @property
     def weights(self) -> pt.Tensor:
         """
         For results obtained using a finite volume method with co-located
         arrangement (OpenFOAM), a sensible weight for a cell-centered value
-        is the cell volume. The cell volumes are availabe via the
+        is the cell volume. The cell volumes are available via the
         :class:`FOAMMesh` class.
 
         :getter: returns cell volumes
@@ -335,27 +330,23 @@ class FOAMCase(object):
             the presence of processor folders is checked to evaluate the
             parameter; defaults to False
         :type distributed: bool
-
         """
         self._path = check_and_standardize_path(path)
 
-        self._distributed = distributed if distributed is not None \
-            else self._eval_distributed()
+        self._distributed = distributed if distributed is not None else self._eval_distributed()
         self._processors = self._eval_processors()
         self._time_folders = self._eval_write_times()
         self._field_names = self._eval_field_names()
         if not self._check_mesh_files():
-            sys.exit("Error: could not find valid mesh in case {:s}".format(
-                self._path))
+            sys.exit("Error: could not find valid mesh in case {:s}".format(self._path))
 
-    def _is_binary(self, header: List[str]) -> bool:
-        """Determine if the write format is binary.
+    def _is_binary(self, header: List[Union[bytes, str]]) -> bool:
+        """Determine if the writing format is binary.
 
         :param header: header of the OpenFOAM file
         :type header: List[str]
         :return: True if the format is binary
         :rtype: bool
-
         """
         for line in header:
             if b"format" in line:
@@ -370,7 +361,6 @@ class FOAMCase(object):
 
         :return: True if all required files are available.
         :rtype: bool
-
         """
         if self._distributed:
             files_found = []
@@ -399,7 +389,6 @@ class FOAMCase(object):
 
         :return: `True` if distributed
         :rtype: bool
-
         """
         proc_dirs = glob.glob(self._path + "/processor*")
         return len(proc_dirs) > 0
@@ -409,7 +398,6 @@ class FOAMCase(object):
 
         :return: number of processor folders or 1 for serial runs
         :rtype: int
-
         """
         if self._distributed:
             return len(glob.glob(join(self._path, "processor*")))
@@ -435,10 +423,11 @@ class FOAMCase(object):
         time_dirs = []
         for entry in dirs:
             try:
+                # check if the time step can be converted to a real number
                 _ = float(entry)
                 time_dirs.append(entry)
-            except:
-                pass
+            except ValueError:
+                continue
         if len(time_dirs) < 2:
             print(
                 "Warning: found only one or less time folders in {:s}"
@@ -456,7 +445,6 @@ class FOAMCase(object):
         :return: dictionary with write times as keys and a list of field names
             for each time as values
         :rtype: Dict[str, List[str]]
-
         """
         all_time_folders = [
             self.build_file_path("", time, 0)
@@ -498,12 +486,9 @@ class FOAMCase(object):
             'U', 'p', 'phi'], '0.4': ['U', 'p', 'phi'], '0.5': ['U', 'p', 'phi']}
         >>> case.build_file_path("U", "0.1", 1)
         './cavity_binary_parallel/processor1/0.1/U'
-
         """
         if self._distributed:
-            file_path = (
-                join(self._path, f"processor{processor:d}", time, field_name)
-            )
+            file_path = join(self._path, f"processor{processor:d}", time, field_name)
         else:
             file_path = join(self._path, time, field_name)
         return file_path
@@ -552,11 +537,11 @@ class FOAMMesh(object):
 
     .. automethod:: _compute_face_centers_and_areas
     .. automethod:: _compute_cell_centers_and_volumes
-
     """
 
     def __init__(self, case: FOAMCase, dtype: pt.dtype = DEFAULT_DTYPE):
-        """Create FOAMMesh object based on :class:`FOAMCase`.
+        """
+        Create FOAMMesh object based on :class:`FOAMCase`.
         """
         if not isinstance(case, FOAMCase):
             sys.exit("Error: case must be of type FOAMCase, not {:s}"
@@ -567,7 +552,7 @@ class FOAMMesh(object):
         self._cell_centers = None
         self._cell_volumes = None
 
-    @ classmethod
+    @classmethod
     def from_path(cls, path: str, dtype: pt.dtype = DEFAULT_DTYPE):
         """Create a new instance based on the simulation's path.
 
@@ -577,19 +562,17 @@ class FOAMMesh(object):
         :type dtype: str, optional
         :return: FOAMMesh instance
         :rtype: FOAMMesh
-
         """
         return cls(FOAMCase(path), dtype)
 
     def _get_list_length(self, data: List[str]) -> Tuple[int, int]:
         """Find list length of points, faces, and cells.
 
-        :param data: content of points, faces, or owner/neighbour file
+        :param data: content of points, faces, or owner/neighbor file
         :type data: List[str]
-        :return: line with first list entry and number of elements in list;
+        :return: line with first list entry and number of elements in a list;
             returns zeros if the number of elements could not be determined
         :rtype: Tuple[int, int]
-
         """
         for i, line in enumerate(data):
             try:
@@ -607,7 +590,6 @@ class FOAMMesh(object):
         :type mesh_path: str
         :return: number of cells; defaults to 0
         :rtype: int
-
         """
         n_cells = 0
         with open(join(mesh_path, "owner"), "rb") as file:
@@ -629,7 +611,6 @@ class FOAMMesh(object):
         :type mesh_path: str
         :return: tensor holding the mesh vertices
         :rtype: pt.Tensor
-
         """
         with open(join(mesh_path, "points"), "rb") as file:
             data = file.readlines()
@@ -661,10 +642,9 @@ class FOAMMesh(object):
             point label tensor is determined by the face with the highest
             number of points; faces with fewer points are padded with zeros
         :rtype: Tuple[pt.Tensor, pt.Tensor]
-
         """
         def zero_pad(tensor, new_size):
-            """Increase size of second tensor dimension.
+            """Increase the size of second tensor dimension.
             """
             diff = new_size - tensor.size()[1]
             pad = pt.zeros((tensor.size()[0], diff), dtype=self._itype)
@@ -684,7 +664,7 @@ class FOAMMesh(object):
                 )
 
                 # search or the next opening bracket to see where the second list starts
-                # the length of the second list is interpreted as a sequence of characters
+                # the length of the second list is interpreted as a sequence of characters,
                 # so looking 50 characters ahead allows for a very large number of faces
                 list_0_end = SIZE_OF_INT*length
                 offset = 0
@@ -720,11 +700,11 @@ class FOAMMesh(object):
         """Parse face owners and neighbors.
 
         - owners are parsed from *constant/polyMesh/owner*
-        - neighbors are parsed from *constant/polyMesh/neighbour*
+        - neighbors are parsed from *constant/polyMesh/neighbor*
 
         :param mesh_path: mesh location
         :type mesh_path: str
-        :return: tensor holding the cell labels owning or neighbouring
+        :return: tensor holding the cell labels owning or neighboring
             a face
         :rtype: Tuple[pt.Tensor, pt.Tensor]
         """
@@ -772,7 +752,6 @@ class FOAMMesh(object):
         :type path: str
         :return: True if volumes and cell centers are available
         :rtype: bool
-
         """
         return isfile(join(path, "C")) and isfile(join(path, "V"))
 
@@ -783,7 +762,6 @@ class FOAMMesh(object):
         :type path: str
         :return: tensor holding the cell center coordinates
         :rtype: pt.Tensor
-
         """
         with open(join(path, "C"), "rb") as file:
             data = file.readlines()
@@ -811,7 +789,6 @@ class FOAMMesh(object):
         :type path: str
         :return: tensor holding the cell volumes
         :rtype: pt.Tensor
-
         """
         with open(join(path, "V"), "rb") as file:
             data = file.readlines()
@@ -831,11 +808,8 @@ class FOAMMesh(object):
                     dtype=self._dtype
                 )
 
-    def _compute_face_centers_and_areas(self,
-                                        points: pt.Tensor,
-                                        faces: pt.Tensor,
-                                        n_points_faces: pt.Tensor
-                                        ) -> Tuple[pt.Tensor, pt.Tensor]:
+    def _compute_face_centers_and_areas(self, points: pt.Tensor, faces: pt.Tensor,
+                                        n_points_faces: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor]:
         """Compute face centers and areas.
 
         The implemented algorithm is close to the one in makeFaceCentresAndAreas_.
@@ -858,7 +832,6 @@ class FOAMMesh(object):
         :return: tuple of two tensors; the first one holds the face centers
             and the second one holds the face areas
         :rtype: Tuple[pt.Tensor, pt.Tensor]
-
         """
         face_centers = pt.zeros(
             (n_points_faces.size()[0], 3), dtype=self._dtype)
@@ -882,10 +855,7 @@ class FOAMMesh(object):
                 next_point = pt.zeros_like(face_centers, dtype=self._dtype)
             next_point += points[faces[:, 0]] * last_point_mask
             c = center_estimates * this_point_mask + this_point + next_point
-            n = pt.cross(
-                next_point - this_point, center_estimates * this_point_mask - this_point,
-                dim=1
-            )
+            n = pt.cross(next_point - this_point, center_estimates * this_point_mask - this_point, dim=1)
             a = pt.norm(n, dim=1).unsqueeze(1)
             face_centers += c * a
             area_sums += a
@@ -915,14 +885,11 @@ class FOAMMesh(object):
         :return: tuple of two tensors; the first one holds the cell centers and
             the second one holds the cell volumes
         :rtype: Tuple[pt.Tensor, pt.Tensor]
-
         """
         points = self._parse_points(mesh_path)
         n_points_faces, faces = self._parse_faces(mesh_path)
         owners, neighbors = self._parse_owners_and_neighbors(mesh_path)
-        face_centers, face_areas = self._compute_face_centers_and_areas(
-            points, faces, n_points_faces
-        )
+        face_centers, face_areas = self._compute_face_centers_and_areas(points, faces, n_points_faces)
         n_cells = self._get_n_cells(mesh_path)
         cell_centers = pt.zeros((n_cells, 3), dtype=self._dtype)
         cell_volumes = pt.zeros(n_cells, dtype=self._dtype)
@@ -939,20 +906,13 @@ class FOAMMesh(object):
         center_estimate /= n_faces_cell.unsqueeze(-1)
 
         for i, owner in enumerate(owners):
-            pyr_3vol = pt.dot(
-                face_areas[i],
-                face_centers[i] - center_estimate[owner]
-            )
-
+            pyr_3vol = pt.dot(face_areas[i], face_centers[i] - center_estimate[owner])
             pyr_ctr = 3.0/4.0 * face_centers[i] + center_estimate[owner] / 4.0
             cell_centers[owner] += pyr_3vol * pyr_ctr
             cell_volumes[owner] += pyr_3vol
 
         for i, neigh in enumerate(neighbors):
-            pyr_3vol = pt.dot(
-                face_areas[i],
-                center_estimate[neigh] - face_centers[i]
-            )
+            pyr_3vol = pt.dot(face_areas[i], center_estimate[neigh] - face_centers[i])
             pyr_ctr = 3.0/4.0 * face_centers[i] + center_estimate[neigh] / 4.0
             cell_centers[neigh] += pyr_3vol * pyr_ctr
             cell_volumes[neigh] += pyr_3vol
@@ -968,7 +928,6 @@ class FOAMMesh(object):
         .. warning:: For distributed cases, individual processor fields
         are simply concatenated. This reconstruction does not yield volumes
         and centers in the same order as the reconstructed OpenFOAM mesh.
-
         """
         if self._case._distributed:
             proc_data = []
@@ -1028,7 +987,6 @@ class FOAMMesh(object):
 
         :return: control volume centers
         :rtype: pt.Tensor
-
         """
         if self._cell_centers == None:
             self._load_mesh()
@@ -1039,7 +997,6 @@ class FOAMMesh(object):
 
         :return: cell volumes
         :rtype: pt.Tensor
-
         """
         if self._cell_volumes == None:
             self._load_mesh()

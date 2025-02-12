@@ -16,7 +16,7 @@ The animation shows the shock buffet on a NACA-0012 airfoil at $Re=10^7$, $Ma=0.
 
 The *flowTorch* project was started to make the analysis and modeling of fluid data **easy** and **accessible** to everyone. The library design intends to strike a balance between **usability** and **flexibility**. Instead of a monolithic, black-box analysis tool, the library offers modular components that allow assembling custom analysis and modeling workflows with ease. *flowTorch* helps to fuse data from a wide range of file formats typical for fluid flow data, for example, to compare experiments simulations. The available analysis and modeling tools are rigorously tested and demonstrated on a variety of different fluid flow datasets. Moreover, one can significantly accelerate the entire process of accessing, cleaning, analyzing, and modeling fluid flow data by starting with one of the pipelines available in the *flowTorch* [documentation](https://flowmodelingcontrol.github.io/flowtorch-docs/1.2/index.html).
 
-To get a first impression of how working with *flowTorch* looks like, the code snippet below shows part of a pipeline for performing a dynamic mode decomposition (DMD) of a transient *OpenFOAM* simulation.
+To get a first impression of what working with *flowTorch* looks like, the code snippet below shows part of a pipeline for performing a dynamic mode decomposition (DMD) of a transient *OpenFOAM* simulation.
 
 ```
 import torch as pt
@@ -47,7 +47,7 @@ dmd = DMD(data_matrix, rank=19)
 # ...
 ```
 
-Currently, the following sub-packages are under active development. Note that some of the components are not yet available in the public release because further developments and testing are required:
+Currently, the following sub-packages are under active development. Note that some components are not yet available in the public release because further developments and testing are required:
 
 | package | content |
 | :------ | :-------|
@@ -61,7 +61,7 @@ Currently, the following sub-packages are under active development. Note that so
 - most algorithms run on CPU as well as on GPU
 - mixed-precision operations (single/double); switching to single precision makes your life significantly easier when dealing with large datasets
 - user-friendly Python library that integrates easily with popular tools and libraries like *Jupyterlab*, *Matplotlib*, *Pandas*, or *Numpy*
-- a rich tutorial collection to help you getting started
+- a rich tutorial collection to help you get started
 - interfaces to common data formats like [OpenFOAM](https://www.openfoam.com/), [VTK](https://vtk.org/) (for Flexi and SU2), [TAU](https://www.dlr.de/as/desktopdefault.aspx/tabid-395/526_read-694/), [iPSP](https://www.dlr.de/as/en/desktopdefault.aspx/tabid-183/251_read-13334/), CSV (for DaVis PIV data and raw OpenFOAM output)
 
 *flowTorch* can be also used easily in combination with existing Python packages for analysis and reduced-order modeling thanks to the interoperability between PyTorch and NumPy. Great examples are (by no means a comprehensive list):
@@ -119,7 +119,7 @@ echo "export FLOWTORCH_DATASETS=\"$(pwd)/datasets_minimal/\"" >> ~/.bashrc
 
 **Note:** the following installation of ParaView is only necessary if the *TecplotDataloader* is needed.
 
-*flowTorch* uses the ParaView Python module for accessing [Tecplot](https://www.tecplot.com/) data. When installing ParaView, special attention must be paid to the installed Python and VTK versions. Therefore, the following manual installation is recommend instead of using a standard package installation of ParaView.
+*flowTorch* uses the ParaView Python module for accessing [Tecplot](https://www.tecplot.com/) data. When installing ParaView, special attention must be paid to the installed Python and VTK versions. Therefore, the following manual installation is recommended instead of using a standard package installation of ParaView.
 
 1. Determine the version of Python:
 ```

@@ -5,7 +5,7 @@
 from os.path import join
 from os import sep
 from glob import glob
-from typing import Callable, Union, List, Dict
+from typing import Union, List, Dict
 # third party packages
 import torch as pt
 from paraview import servermanager as sm
@@ -92,7 +92,7 @@ class TecplotDataloader(Dataloader):
         return cls(path, file_names, VisItTecplotBinaryReader, dtype)
 
     def _assemble_file_path(self, time: str) -> str:
-        """Assemble path to a single snapshot.
+        """Assemble a path to a single snapshot.
 
         :param time: snapshot write time
         :type time: str
@@ -286,7 +286,7 @@ class TecplotDataloader(Dataloader):
         wrapper = dsa.WrapDataObject(reader.GetBlock(0).GetBlock(
             self.zone_names.index(self.zone)
         ))
-        # volume or area are not contained in file; therefore, a tensor
+        # volume or area are not contained in the file; therefore, a tensor
         # of ones is returned for now
         n_points = wrapper.Points.shape[0]
         return pt.ones(n_points, dtype=self._dtype)

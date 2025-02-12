@@ -7,9 +7,9 @@ from torch.utils.data import Dataset
 
 class SequenceTensorDataset(Dataset):
     def __init__(self, sequence: pt.Tensor, delays: int = 1, horizon: int = 1) -> None:
-        """Create a times series dataset from a tensor.
+        """Create a time series dataset from a tensor.
 
-        Note: this class takes times series data an creates feature-labels-pairs
+        Note: this class takes times series data and creates feature-labels-pairs
         by rolling a window across the sequence. The window length is the sum of
         time delays (look back) and time horizon (look ahead). The overall number
         of feature-label-pairs is determined by the sequence and window lengths.

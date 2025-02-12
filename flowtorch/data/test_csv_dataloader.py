@@ -82,7 +82,7 @@ def test_from_davis():
     fields = fields[times[0]]
     n_points = 3741
     vertices = loader.vertices
-    # DaVis files have only x and y component
+    # DaVis files have only x and y components
     assert vertices.shape == (n_points, 2)
     weights = loader.weights
     assert weights.shape == (n_points,)
