@@ -1,4 +1,4 @@
-![FOR2895Logo](media/for2895_logo.png)
+![FOR2895Logo](media/flowTorch_Logo_Wide.png)
 
 # flowTorch
 
