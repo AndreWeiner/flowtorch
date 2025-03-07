@@ -84,7 +84,8 @@ class TAUConfig(object):
         value = ""
         for line in self._file_content:
             if parameter in line:
-                value = line.split(CONFIG_SEP)[-1].split(COMMENT_CHAR)[0].strip()
+                if not COMMENT_CHAR in line.split(CONFIG_SEP)[0]:
+                    value = line.split(CONFIG_SEP)[-1].split(COMMENT_CHAR)[0].strip()
         return value
 
     def _parse_bmap(self) -> dict:
