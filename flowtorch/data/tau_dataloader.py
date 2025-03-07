@@ -84,7 +84,7 @@ class TAUConfig(object):
         value = ""
         for line in self._file_content:
             if parameter in line:
-                if not '#' in line.split(CONFIG_SEP)[0]:
+                if not COMMENT_CHAR in line.split(CONFIG_SEP)[0]:
                     value = line.split(CONFIG_SEP)[-1].split(COMMENT_CHAR)[0].strip()
         return value
 
