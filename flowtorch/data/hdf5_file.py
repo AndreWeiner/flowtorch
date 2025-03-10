@@ -288,17 +288,18 @@ class FOAM2HDF5(object):
         """
         file_path = join(self._loader._case.path, filename)
         self._remove_file_if_present(file_path)
-        # this is currently redundant since the loader is initialized
-        # with distributed set to False
-        if self._loader._case.distributed:
+        # trigger error message when the case is distributed
+        if self._loader._case._eval_processors():
             message = """The direct conversion of distributed cases is currently not supported.\n
-Workaround:
-    1. run reconstructPar (OpenFOAM utility)
-    1.1 if there is no reconstructed mesh, run also reconstructParMesh
-    2. remove all processor* folders
-    3. perform the conversion again (flowTorch)
+        Workaround:
+            1.  run reconstructPar (OpenFOAM utility)
+            1.1 if there is no reconstructed mesh, run also reconstructParMesh
+            2.  remove all processor* folders
+            3.  perform the conversion again (flowTorch)
             """
-            logger.info(message)
+            logger.critical(message)
+            logger.critical("Exiting due to previous encountered errors.")
+            exit()
         else:
             logger.info("Writing data to file {:s}".format(file_path))
             writer = HDF5Writer(file_path)
