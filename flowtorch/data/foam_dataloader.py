@@ -86,7 +86,7 @@ class FOAMDataloader(Dataloader):
     """
 
     def __init__(self, path: str, dtype: pt.dtype = DEFAULT_DTYPE,
-                 distributed: Union[bool, None] = None):
+                 distributed: Union[bool, None] = None, verbose: bool = False):
         """Create a FOAMDataloader instance from a path.
 
         :param path: path to an OpenFOAM simulation folder.
@@ -97,10 +97,14 @@ class FOAMDataloader(Dataloader):
             the case type (parallel/serial) is determined automatically;
             defaults to None
         :type distributed: bool
+        :param verbose: display status information about the current field and time step when loading snapshots;
+                        recommended for large fields and/or large number of time steps to load
+        :type verbose: bool
         """
         self._case = FOAMCase(path, distributed)
         self._mesh = FOAMMesh(self._case, dtype)
         self._dtype = dtype
+        self._verbose = verbose
 
     def _parse_data(self, data: List[Union[str, bytes]]) -> pt.Tensor:
         """Parse field data from an OpenFOAM snapshot.
@@ -223,6 +227,9 @@ class FOAMDataloader(Dataloader):
         :return: tensor holding the field
         :rtype: pt.Tensor
         """
+        # print some info because for large fields and large number of time steps it takes quite a while to load
+        if self._verbose:
+            logger.info(f"Loading time step {time}s for field {field_name}.")
         file_paths = []
         if self._case.distributed:
             for proc in range(self._case.processors):

@@ -4,7 +4,7 @@ import torch as pt
 # flowtorch packages
 from flowtorch import DATASETS
 from flowtorch.data import FOAMDataloader
-from flowtorch.analysis import SVD, inexact_alm_matrix_complection
+from flowtorch.analysis import SVD, inexact_alm_matrix_completion
 
 
 def create_noisy_low_rank_data():
@@ -16,7 +16,7 @@ def create_noisy_low_rank_data():
     return L+S, L, S
 
 
-class TestSVD():
+class TestSVD:
     def setup_method(self, test_method):
         loader = FOAMDataloader(DATASETS["of_cavity_ascii"])
         self.data = loader.load_snapshot("p", loader.write_times[1:])
@@ -69,7 +69,7 @@ class TestSVD():
 
 def test_inexact_alm_matrix_completion():
     X, low, noise = create_noisy_low_rank_data()
-    L, S = inexact_alm_matrix_complection(X)
+    L, S = inexact_alm_matrix_completion(X)
     assert L.shape == low.shape
     assert S.shape == noise.shape
     # very rough test to see is low rank tensor was found
