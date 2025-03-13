@@ -2,6 +2,7 @@
 """
 
 # standard library packages
+import logging
 from math import sqrt
 from typing import Tuple, Union
 # third party packages
@@ -9,10 +10,13 @@ import torch as pt
 # flowtorch packages
 from flowtorch.data.utils import format_byte_size
 
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
-def inexact_alm_matrix_complection(data_matrix: pt.Tensor, sparsity: float = 1.0,
-                                   tol: float = 1.0e-6, max_iter: int = 100,
-                                   verbose: bool = False) -> Tuple[pt.Tensor, pt.Tensor]:
+
+def inexact_alm_matrix_completion(data_matrix: pt.Tensor, sparsity: float = 1.0,
+                                  tol: float = 1.0e-6, max_iter: int = 100,
+                                  verbose: bool = False) -> Tuple[pt.Tensor, pt.Tensor]:
     """Split a data matrix in low rank and sparse contributions.
 
     This function implements the *inexact augmented Lagrange multiplier
@@ -26,8 +30,8 @@ def inexact_alm_matrix_complection(data_matrix: pt.Tensor, sparsity: float = 1.0
     :param data_matrix: input data matrix; snapshots must be
         organized as column vectors
     :type data_matrix: pt.Tensor
-    :param sparsity: factor to compute Lagrangian multiplyer for sparsity
-        (typically named *lambda*); lower values lead to more agressive
+    :param sparsity: factor to compute Lagrangian multiplier for sparsity
+        (typically named *lambda*); lower values lead to more aggressive
         filtering
     :type sparsity: float, optional
     :param tol: tolerance for the normalized Frobenius norm of the difference
@@ -42,9 +46,14 @@ def inexact_alm_matrix_complection(data_matrix: pt.Tensor, sparsity: float = 1.0
     :return: tuple holding the low rank and the sparse matrices
     :rtype: Tuple[pt.Tensor, pt.Tensor]
     """
+    logger.info("Performing inexact augmented Lagrange multiplier matrix completion.")
+    # make sure we do at least one iteration
+    if max_iter <= 0:
+        logger.warning(f"A value of max_iter={max_iter} is invalid. Changed max_iter to 1.")
+        max_iter = 1
     row, col = data_matrix.shape
     lambda_0 = sparsity / sqrt(row)
-    # low rank and sparse matices
+    # low rank and sparse matrices
     L, S = pt.zeros_like(data_matrix), pt.zeros_like(data_matrix)
     # matrix of Lagrange multipliers
     Y = data_matrix.detach().clone()
@@ -79,14 +88,13 @@ def inexact_alm_matrix_complection(data_matrix: pt.Tensor, sparsity: float = 1.0
         # check convergence
         residual = pt.linalg.norm(Z) / norm_data
         if residual < tol:
-            print(f"Inexact ALM converged after {i+1} iterations")
-            print("Final residual: {:2.4e}".format(residual))
+            logger.info(f"Inexact ALM converged after {i+1} iterations")
+            logger.info("Final residual: {:2.4e}".format(residual))
             return L, S
         if verbose:
-            print("Residual after iteration {:5d}: {:10.4e}".format(
-                i+1, residual.item()))
-    print(f"Inexact ALM did not converge within {max_iter} iterations")
-    print("Final residual: {:10.4e}".format(residual))
+            logger.info("Residual after iteration {:5d}: {:10.4e}".format(i+1, residual.item()))
+    logger.warning(f"Inexact ALM did not converge within {max_iter} iterations")
+    logger.info("Final residual: {:10.4e}".format(residual))
     return L, S
 
 
@@ -157,15 +165,15 @@ class SVD(object):
         self._robust = robust
         if bool(self._robust):
             if isinstance(robust, dict):
-                L, S = inexact_alm_matrix_complection(data_matrix, **robust)
+                L, S = inexact_alm_matrix_completion(data_matrix, **robust)
             else:
-                L, S = inexact_alm_matrix_complection(data_matrix)
+                L, S = inexact_alm_matrix_completion(data_matrix)
             self._L, self._S = L, S
             U, s, VH = pt.linalg.svd(L, full_matrices=False)
         else:
             self._L, self._S = None, None
             U, s, VH = pt.linalg.svd(data_matrix, full_matrices=False)
-        self._opt_rank = self._optimal_rank(s)
+        self._opt_rank = self._optimal_rank(pt.from_numpy(s))
         self.rank = self.opt_rank if rank is None else rank
         self._U = U[:, :self.rank]
         self._s = s[:self.rank]
@@ -256,7 +264,7 @@ class SVD(object):
     def required_memory(self) -> int:
         """Compute the memory size in bytes of the truncated SVD.
 
-        :return: cumulative size of truncated U, s, and V tensors in bytes
+        :return: cumulative size of truncated U, s, and V tensors in byte
         :rtype: int
         """
         return (self.U.element_size() * self.U.nelement() +
@@ -267,10 +275,8 @@ class SVD(object):
         return f"{self.__class__.__qualname__}(data_matrix, rank={self.rank})"
 
     def __str__(self) -> str:
-        ms = []
-        ms.append(f"SVD of a {self._rows}x{self._cols} data matrix")
-        ms.append(f"Selected/optimal rank: {self.rank}/{self.opt_rank}")
-        ms.append(f"data type: {self.U.dtype} ({self.U.element_size()}b)")
         size, unit = format_byte_size(self.required_memory)
-        ms.append("truncated SVD size: {:1.4f}{:s}".format(size, unit))
+        ms = [f"SVD of a {self._rows}x{self._cols} data matrix", f"Selected/optimal rank: {self.rank}/{self.opt_rank}",
+              f"data type: {self.U.dtype} ({self.U.element_size()}b)",
+              "truncated SVD size: {:1.4f}{:s}".format(size, unit)]
         return "\n".join(ms)

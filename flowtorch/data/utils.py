@@ -1,4 +1,4 @@
-"""Collection of utilities realted to data and dataloaders."""
+"""Collection of utilities related to data and dataloaders."""
 
 # standard library packages
 from os.path import exists
@@ -26,7 +26,7 @@ def format_byte_size(size: int) -> Tuple[float, str]:
 
 
 def check_and_standardize_path(path: str, folder: bool = True):
-    """Check if path exists and remove trailing slash if present.
+    """Check if the path exists and remove trailing slash if present.
 
     :param path: path to folder or file
     :type path: str

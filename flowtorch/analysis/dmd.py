@@ -2,13 +2,11 @@
 """
 
 # standard library packages
-from typing import Tuple, Set, Union, List, Any
+from typing import Tuple, Set, Union, List
 from math import sqrt
 from collections import defaultdict
 
 # third party packages
-from matplotlib.pyplot import step
-from tenacity import retry
 import torch as pt
 from numpy import pi
 from scipy.linalg import solve_sylvester
@@ -21,13 +19,13 @@ from flowtorch.data.utils import format_byte_size
 def _dft_properties(dt: float, n_times: int) -> Tuple[float, float, float]:
     """Compute general properties of a discrete Fourier transformation.
 
-    DFT properties like maximum frequency and frequency resolution can
-    be a helpful guidance for building sensible data matrices used for
+    DFT properties, such as maximum frequency and frequency resolution, can
+    be helpful guidance for building sensible data matrices used for
     modal decomposition.
 
     :param dt: timestep between two samples; assumed constant
     :type dt: float
-    :param n_times: number of timesteps
+    :param n_times: number of time steps
     :type n_times: int
     :return: sampling frequency, maximum frequency, frequency resolution
     :rtype: Tuple[float, float, float]
@@ -276,7 +274,7 @@ class DMD(object):
         """Compute amplitudes for exact DMD modes.
 
         If *optimal* is False, the amplitudes are computed based on the first
-        snapshot in the data matrix; otherwise, a least-squares problem as
+        snapshot in the data matrix; otherwise, a least-square problem as
         introduced by Janovic et al. is solved (refer to the documentation
         in the constructor for more information).
         """
@@ -371,7 +369,7 @@ class DMD(object):
         :type initial_condition: pt.Tensor
         :param n_steps: number of steps to predict
         :type n_steps: int
-        :return: predicted evolution including the initial state (N+1 states are returned)
+        :return: predicted evolution, including the initial state (N+1 states are returned)
         :rtype: pt.Tensor
         """
         b = pt.linalg.pinv(self._modes) @ initial_condition.type(self._modes.dtype)
@@ -524,7 +522,7 @@ class DMD(object):
         return f"{self.__class__.__qualname__}(data_matrix, rank={self._svd.rank})"
 
     def __str__(self):
-        ms = ["SVD:", str(self.svd), "LSQ:"]
+        ms = ["SVD:", str(self.svd), "LSQ:", str(self._tlsq)]
         size, unit = format_byte_size(self.required_memory)
         ms.append("Overall DMD size: {:1.4f}{:s}".format(size, unit))
         ms.append("DFT frequencies (sampling, max., res.):")
