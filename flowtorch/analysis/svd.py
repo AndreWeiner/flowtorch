@@ -173,7 +173,7 @@ class SVD(object):
         else:
             self._L, self._S = None, None
             U, s, VH = pt.linalg.svd(data_matrix, full_matrices=False)
-        self._opt_rank = self._optimal_rank(pt.from_numpy(s))
+        self._opt_rank = self._optimal_rank(s)
         self.rank = self.opt_rank if rank is None else rank
         self._U = U[:, :self.rank]
         self._s = s[:self.rank]
