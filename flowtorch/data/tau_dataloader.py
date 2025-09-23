@@ -229,6 +229,10 @@ class TAUBase(Dataloader):
         """
         pass
 
+    @abstractmethod
+    def _load_mesh_weights(self, n_points):
+        pass
+
     def load_snapshot(self, field_name: Union[List[str], str],
                       time: Union[List[str], str]) -> Union[List[pt.Tensor], pt.Tensor]:
         check_list_or_str(field_name, "field_name")
@@ -355,13 +359,28 @@ class TAUDataloader(TAUBase):
                      for key in VERTEX_KEYS],
                     dim=-1
                 )
+            weights = self._load_mesh_weights(vertices.shape[0])
+            self._mesh_data = pt.cat((vertices, weights.unsqueeze(-1)), dim=-1)
+    
+    def _load_mesh_weights(self, n_points: int) -> pt.Tensor:
+        """Load mesh cell volumes.
+
+        Load the cell volumes as tensor of dimension n_points from the last 
+        snapshot and return a tensor of ones if that fails.
+        """
+        if self._distributed:
+            raise NotImplementedError
+        else:
+            path = join(self._para.path, self._file_name(self.write_times[-1]))
+            with Dataset(path) as data:
                 if WEIGHT_KEY in data.variables.keys():
                     weights = pt.tensor(
                         data.variables[WEIGHT_KEY][:], dtype=self._dtype)
                 else:
-                    logger.warning(f"Could not find cell volumes in file {path}")
-                    weights = pt.ones(vertices.shape[0], dtype=self._dtype)
-            self._mesh_data = pt.cat((vertices, weights.unsqueeze(-1)), dim=-1)
+                    logger.warning(f"Could not fine cell in volumes in file {path}")
+                    weights = pt.ones(n_points, dtype=self._dtype)
+            return weights
+
 
     def _load_single_snapshot(self, field_name: str, time: str) -> pt.Tensor:
         """Load a single snapshot of a single field from the netCDF4 file(s).
@@ -520,7 +539,8 @@ class TAUSurfaceDataloader(TAUBase):
         The mesh data is saved as class member `_mesh_data`. The tensor for each zone
         has the dimension n_points x 4; the first three columns correspond to the x/y/z
         coordinates. Loading or computing the face area is currently not implemented;
-        instead, the weight of each element is set to unity.
+        instead, the cell volumes of the first layer cells are loaded, and if they are
+        not present the weights are set to unity.
         """
         path = join(self._para.path, self._para.config[GRID_FILE_KEY])
         with Dataset(path) as data:
@@ -529,11 +549,30 @@ class TAUSurfaceDataloader(TAUBase):
                  for key in VERTEX_KEYS],
                 dim=-1
             )
-            self._mesh_data = {}
-            for zone_name, zone_ids in self.zone_ids.items():
-                self._mesh_data[zone_name] = pt.ones(
-                    (zone_ids.size(0), 4), dtype=self._dtype)
-                self._mesh_data[zone_name][:, :3] = vertices[zone_ids]
+        weights = self._load_mesh_weights(vertices.shape[0])
+        self._mesh_data = {}
+        for zone_name, zone_ids in self.zone_ids.items():
+            self._mesh_data[zone_name] = pt.ones(
+                (zone_ids.size(0), 4), dtype=self._dtype)
+            self._mesh_data[zone_name][:, :3] = vertices[zone_ids]
+            self._mesh_data[zone_name][:,3] = weights[zone_ids]
+    
+    def _load_mesh_weights(self, n_points: int) -> pt.Tensor:
+        """Load mesh cell volumes of the first layer cells.
+
+        Load the cell volumes as tensor of dimension n_points from the last 
+        snapshot and return a tensor of ones if that fails.
+        """
+        path = join(self._para.path, self._file_name(self.write_times[-1]))
+        with Dataset(path) as data:
+            if WEIGHT_KEY in data.variables.keys():
+                weights = pt.tensor(
+                    data.variables[WEIGHT_KEY][:], dtype=self._dtype)
+            else:
+                logger.warning(f"Could not fine cell in volumes in file {path}")
+                weights = pt.ones(n_points, dtype=self._dtype)
+        return weights
+
 
     def _load_single_snapshot(self, field_name: str, time: str) -> pt.Tensor:
         with Dataset(self._file_name(time)) as data:
