@@ -377,7 +377,7 @@ class TAUDataloader(TAUBase):
                     weights = pt.tensor(
                         data.variables[WEIGHT_KEY][:], dtype=self._dtype)
                 else:
-                    logger.warning(f"Could not fine cell in volumes in file {path}")
+                    logger.warning(f"Could not find cell volumes in file {path}")
                     weights = pt.ones(n_points, dtype=self._dtype)
             return weights
 
@@ -569,7 +569,7 @@ class TAUSurfaceDataloader(TAUBase):
                 weights = pt.tensor(
                     data.variables[WEIGHT_KEY][:], dtype=self._dtype)
             else:
-                logger.warning(f"Could not fine cell in volumes in file {path}")
+                logger.warning(f"Could not find cell volumes in file {path}")
                 weights = pt.ones(n_points, dtype=self._dtype)
         return weights
 
