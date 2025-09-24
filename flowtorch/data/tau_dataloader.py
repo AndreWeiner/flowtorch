@@ -230,7 +230,12 @@ class TAUBase(Dataloader):
         pass
 
     @abstractmethod
-    def _load_mesh_weights(self, n_points):
+    def _load_mesh_weights(self, n_points: int):
+        """Load cell volumes from last snapshot
+
+        :param n_points: number of points in the mesh
+        :type n_points: int
+        """
         pass
 
     def load_snapshot(self, field_name: Union[List[str], str],
