@@ -1,8 +1,10 @@
 # third party packages
 import pytest
+from torch import rand, cat, zeros
 # flowtorch packages
 from flowtorch.data.utils import (format_byte_size, check_and_standardize_path,
                                   check_list_or_str)
+from flowtorch.data.utils import CellVolumeEstimator
 
 
 def test_byte_formatting():
@@ -30,3 +32,32 @@ def test_check_list_or_str():
         check_list_or_str(0, "test")
     with pytest.raises(ValueError):
         check_list_or_str(["", 0], "test")
+
+
+@pytest.mark.parametrize("dims, n_points", [(2, 100), (3, 200)])
+def test_cell_volume_estimator(dims: int, n_points: int):
+    # make up some coordinates
+    coords = rand(n_points, dims)
+
+    # add a flat dimension to simulate 2D simulation when passing 3D points
+    if dims == 2:
+        coords = cat([coords, zeros(n_points, 1)], dim=1)
+
+    estimator = CellVolumeEstimator(coords, k=4, lr=1e-2, max_iterations=500)
+
+    # ensure dimensionality detection works
+    if dims == 2:
+        assert len(estimator._dims) == 2
+    else:
+        assert len(estimator._dims) == 3
+
+    # execute estimation
+    estimator.estimate_cell_volume()
+
+    # check weights shape matches number of points
+    assert estimator.weights.shape[0] == n_points
+
+    # volumes should be positive
+    assert estimator._volume_original > 0
+    assert all(estimator.weights > 0)
+
