@@ -131,7 +131,12 @@ class TAUConfig(object):
                     else:
                         continue
                 if block_end_found and write_surface_data:
-                    bmap[name] = markers
+                    if name in bmap.keys():
+                        name_with_marker = f"{name}_marker{str(int(markers[0]))}"
+                        bmap[name_with_marker] = markers
+                        logger.warning(f"Duplicate zone name {name} replaced by {name_with_marker}.")
+                    else:
+                        bmap[name] = markers
         return bmap
 
     def _gather_config(self):
