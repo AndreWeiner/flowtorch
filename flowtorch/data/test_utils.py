@@ -43,7 +43,7 @@ def test_cell_volume_estimator(dims: int, n_points: int):
     if dims == 2:
         coords = cat([coords, zeros(n_points, 1)], dim=1)
 
-    estimator = CellVolumeEstimator(coords, k=4, lr=1e-2, max_iterations=500)
+    estimator = CellVolumeEstimator(coords, k=4, normalize=True)
 
     # ensure dimensionality detection works
     if dims == 2:
@@ -59,5 +59,8 @@ def test_cell_volume_estimator(dims: int, n_points: int):
 
     # volumes should be positive
     assert estimator._volume_original > 0
-    assert all(estimator.weights > 0)
+
+    # since we normalize the weights they should be in [0, 1]
+    assert all(estimator.weights >= 0)
+    assert all(estimator.weights <= 1)
 
