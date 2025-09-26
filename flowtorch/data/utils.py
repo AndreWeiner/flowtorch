@@ -79,10 +79,6 @@ def check_list_or_str(arg_value: Union[List[str], str], arg_name: str):
 class CellVolumeEstimator:
     """
     Estimate cell volumes based on a point cloud of coordinates.
-    TODO: don't use optimization, just multiply with inverse on volume ratio to get alpha.
-          Normalize weights to [0, 1] to avoid issue with different orders
-          issue if domain is nor rectangluar and not alinged with coord. axis
-            -> overall computation of cell volume not working, maybe compute convex hull instead
 
     The algorithm works in three main steps:
         1. Build a KD-tree to compute the mean distances between each point and its
