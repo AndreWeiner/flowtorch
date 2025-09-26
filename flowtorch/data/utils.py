@@ -7,10 +7,8 @@ from os import sep
 from typing import Tuple, List, Union
 
 from time import time
-from torch.nn import Parameter
-from scipy.spatial import KDTree
-from torch.optim import Adam, lr_scheduler
-from torch import Tensor, tensor, float32, from_numpy, where, manual_seed
+from scipy.spatial import KDTree, ConvexHull
+from torch import Tensor, float32, from_numpy, where
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)-8s %(message)s', datefmt='%Y-%m-%d %H:%M:%S',
@@ -81,14 +79,19 @@ def check_list_or_str(arg_value: Union[List[str], str], arg_name: str):
 class CellVolumeEstimator:
     """
     Estimate cell volumes based on a point cloud of coordinates.
+    TODO: don't use optimization, just multiply with inverse on volume ratio to get alpha.
+          Normalize weights to [0, 1] to avoid issue with different orders
+          issue if domain is nor rectangluar and not alinged with coord. axis
+            -> overall computation of cell volume not working, maybe compute convex hull instead
 
     The algorithm works in three main steps:
         1. Build a KD-tree to compute the mean distances between each point and its
            :math:`k` nearest neighbors.
         2. Approximate local volumes as the mean neighbor distance raised to the
            power of the dimension (:math:`d`).
-        3. Optimize a scaling factor :math:`\\alpha` such that the sum of all
+        3. Calculate a scaling factor :math:`\\alpha` such that the sum of all
            estimated volumes matches the true bounding-box volume.
+        4. Normalization of weights to [0, 1] using min-max- scaling and :math:\\sqrt(weights) (optional)
 
     Example
     -------
@@ -102,8 +105,6 @@ class CellVolumeEstimator:
         >>>
         >>> # Access estimated volumes per point
         >>> print(estimator.weights.shape)
-        >>> # Access the optimization loss history
-        >>> print(estimator.loss[-5:])
 
     :param coordinates: Input tensor of coordinates with shape
         ``(n_points, n_dims)``.
@@ -111,37 +112,27 @@ class CellVolumeEstimator:
     :param k: Number of nearest neighbors to use for distance estimation
         (default: 8 for 3D, 4 for 2D).
     :type k: int
-    :param lr: Learning rate for optimizing :math:`\\alpha`.
-    :type lr: float
-    :param max_iterations: Maximum number of optimization iterations.
-    :type max_iterations: int
-    :param stop_at: Stopping criterion for relative error in optimization.
-    :type stop_at: float
     :param n_workers: Number of parallel workers for KD-tree queries.
     :type n_workers: int
+    :param normalize: Normalize the computed volumes to [0, 1].
+    :type normalize: bool
     """
 
-    def __init__(self, coordinates: Tensor, k: int = 8, lr: float = 1e-2, max_iterations: int = 2500,
-                 stop_at: float = 1e-8, n_workers: int = 4, seed: int = 0):
+    def __init__(self, coordinates: Tensor, k: int = 8, n_workers: int = 4, normalize: bool = True):
+        self._normalize = normalize
         self._vertices = coordinates
         self._n_workers = n_workers
-
-        # ensure reproducibility
-        manual_seed(seed)
 
         # get the dimensions which are not zero, since e.g. in OpenFOAM we have 3D coordinates even for 2D simulations
         _tmp = (self._vertices == self._vertices[0]).all(dim=0)
         self._dims = where(_tmp == False)[0]
-        self._volume_original = (coordinates.max(dim=0).values -
-                                 coordinates.min(dim=0).values)[self._dims].prod().type(float32)
 
-        # optimization
+        # compute the overall volume of the domain
+        self._hull = ConvexHull(self._vertices[:, self._dims])
+        self._volume_original = self._hull.volume
+
+        # distances
         self._k = k if len(self._dims) == 3 else 4
-        self._max_steps = max_iterations if max_iterations > 0 else 1
-        self._stop = stop_at
-        self._alpha = Parameter(tensor(2, dtype=float32))
-        self._optimizer = Adam([self._alpha], lr=lr, weight_decay=1e-3)
-        self._scheduler = lr_scheduler.ReduceLROnPlateau(optimizer=self._optimizer, min_lr=1e-4, patience=10)
 
         # initialization
         self._n_dims = self._vertices.size(1)
@@ -150,7 +141,8 @@ class CellVolumeEstimator:
 
         # public
         self.weights = None
-        self.loss = []
+        self.alpha = 1
+        self.min_max_sqrt = ()
 
     def estimate_cell_volume(self) -> None:
         """
@@ -160,12 +152,14 @@ class CellVolumeEstimator:
             - Computes mean distances to neighbors.
             - Optimizes scaling factor :math:`\\alpha`.
             - Scales the weights accordingly.
+            - Normalizes the weights if specified.
             - Prints information summary to the logger.
         """
         self._time_start = time()
         self._compute_mean_distance()
-        self._optimize_alpha()
-        self.weights *= self._alpha.detach()
+        self._compute_alpha()
+        if self._normalize:
+            self._normalize_weights()
         self._print_info()
 
     def _compute_mean_distance(self) -> None:
@@ -190,35 +184,24 @@ class CellVolumeEstimator:
         self._sum_weights = self.weights.sum().type(float32)
         logger.info("Done.")
 
-    def _optimize_alpha(self) -> None:
+    def _compute_alpha(self) -> None:
         """
-        Optimize the scaling factor :math:`\\alpha` such that the total sum of
+        Computes the scaling factor :math:`\\alpha` such that the total sum of
         estimated volumes matches the original bounding-box volume.
 
         :return: None
         """
-        logger.info("Optimizing cell volumes.")
-        converged = False
-        for step in range(self._max_steps):
-            self._optimizer.zero_grad()
-            loss = abs(self._alpha * self._sum_weights - self._volume_original) / self._volume_original
-            loss.backward()
-            self._optimizer.step()
-            self._scheduler.step(loss)
+        self.alpha = self._volume_original / self.weights.sum()
+        self.weights *= self.alpha
 
-            if step % 100 == 0:
-                logger.info(f"Epoch {step:04d}, alpha = {self._alpha.item():.3f}, loss = {loss.item():.4e}")
+    def _normalize_weights(self) -> None:
+        """
+        Normalizes the weights to [0, 1] using min-max. normalization
 
-            if loss.item() < self._stop:
-                logger.info(f"Found optimal alpha = {self._alpha.item():.3f} after {step + 1} iterations with an "
-                            f"error of {loss.item():.3e}")
-                converged = True
-                break
-            self.loss.append(loss.detach().item())
-
-        if not converged:
-            logger.warning(f"Optimization of alpha did not converge after {step + 1} iterations. "
-                           f"Current alpha = {self._alpha.item():.3f}")
+        :return: None
+        """
+        self.min_max_sqrt = (self.weights.sqrt().min(), self.weights.sqrt().max())
+        self.weights = (self.weights.sqrt() - self.min_max_sqrt[0]) / (self.min_max_sqrt[1] - self.min_max_sqrt[0])
 
     def _print_info(self) -> None:
         """
@@ -235,16 +218,17 @@ class CellVolumeEstimator:
         """
         msg = f"""
 
-                Overall cell volume estimated from coordinates:\t{self._volume_original.item():.5f}
+                Overall cell volume estimated from coordinates:\t{self._volume_original:.5f}
                 Overall cell volume estimated before optimization:\t{self._sum_weights.item():.5f}
-                \t\t -> approximation of {self._sum_weights / self._volume_original.item() * 100:.3f} %.
-                Overall cell volume estimated after optimization:\t{self._alpha * self._sum_weights.item():.5f}
-                \t\t -> approximation of {self._sum_weights * self._alpha / self._volume_original.item() * 100:.3f} %.
+                \t\t -> approximation of {self._sum_weights / self._volume_original * 100:.3f} %.
+                Overall cell volume estimated after optimization:\t{self.alpha * self._sum_weights.item():.5f}
+                \t\t -> approximation of {self._sum_weights * self.alpha / self._volume_original * 100:.3f} %.
                 Computed cell volumes (min. / max.):\t{self.weights.min().item():.3e}, {self.weights.max().item():.3e}
 
                 Approximation took {time() - self._time_start:.3f} s.
         """
         logger.info(msg)
+
 
 if __name__ == "__main__":
     pass
