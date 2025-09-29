@@ -137,25 +137,33 @@ class CellWeightEstimator:
 
         # public
         self.weights = None
+        self._dist = None
         self.alpha = 1
         self.min_max_sqrt = ()
+
+        # compute the mean distance for each point
+        self._duration = 0
+        _time_start = time()
+        self._compute_mean_distance()
+        self._duration_fit = time() - _time_start
 
     def estimate_cell_weights(self) -> None:
         """
         Main entry point for estimating cell volumes.
 
         Runs the full pipeline:
-            - Computes mean distances to neighbors.
             - Optimizes scaling factor :math:`\\alpha`.
             - Scales the weights accordingly.
-            - Normalizes the weights if specified.
+            - Normalizes the sqrt of the weights if specified.
             - Prints information summary to the logger.
         """
-        self._time_start = time()
-        self._compute_mean_distance()
+        _time_start = time()
         self._compute_alpha()
         if self._normalize:
             self._normalize_weights()
+        else:
+            self.weights = self._dist
+        self._duration = self._duration_fit + (time() - _time_start)
         self._print_info()
 
     def _compute_mean_distance(self) -> None:
@@ -168,7 +176,7 @@ class CellWeightEstimator:
         :return: None
         """
         logger.info("Computing mean distances between the coordinates.")
-        # TODO: large memory requirement -> how can we get this cheaper?
+        # TODO: - large memory requirement -> how can we get this cheaper?
         tree = KDTree(self._vertices)
         dists, _ = tree.query(self._vertices, k=self._k, workers=self._n_workers)
 
@@ -176,7 +184,7 @@ class CellWeightEstimator:
         self._vertices = None
 
         # mean distance to nearest neighbor
-        self.weights = from_numpy(dists.mean(axis=1)) ** self._n_dims
+        self._dist = from_numpy(dists.mean(axis=1)) ** self._n_dims
         self._sum_weights = self.weights.sum().type(float32)
         logger.info("Done.")
 
@@ -196,8 +204,8 @@ class CellWeightEstimator:
 
         :return: None
         """
-        self.min_max_sqrt = (self.weights.sqrt().min(), self.weights.sqrt().max())
-        self.weights = (self.weights.sqrt() - self.min_max_sqrt[0]) / (self.min_max_sqrt[1] - self.min_max_sqrt[0])
+        self.min_max_sqrt = (self._dist.sqrt().min(), self._dist.sqrt().max())
+        self.weights = (self._dist.sqrt() - self.min_max_sqrt[0]) / (self.min_max_sqrt[1] - self.min_max_sqrt[0])
 
     def _print_info(self) -> None:
         """
