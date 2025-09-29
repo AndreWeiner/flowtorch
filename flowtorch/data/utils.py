@@ -76,7 +76,7 @@ def check_list_or_str(arg_value: Union[List[str], str], arg_name: str):
             raise ValueError(message)
 
 
-class CellVolumeEstimator:
+class CellWeightEstimator:
     """
     Estimate cell volumes based on a point cloud of coordinates.
 
@@ -92,12 +92,12 @@ class CellVolumeEstimator:
     Example
     -------
         >>> import torch
-        >>> from flowtorch.data.utils import CellVolumeEstimator
+        >>> from flowtorch.data.utils import CellWeightEstimator
         >>>
         >>> # Generate a synthetic point cloud inside a unit square
         >>> coords = torch.rand(100, 2)
-        >>> estimator = CellVolumeEstimator(coords, k=4, lr=1e-2, max_iterations=1000)
-        >>> estimator.estimate_cell_volume()
+        >>> estimator = CellWeightEstimator(coords, n_workers=4, normalize=True)
+        >>> estimator.estimate_cell_weights()
         >>>
         >>> # Access estimated volumes per point
         >>> print(estimator.weights.shape)
@@ -114,7 +114,7 @@ class CellVolumeEstimator:
     :type normalize: bool
     """
 
-    def __init__(self, coordinates: Tensor, k: int = 8, n_workers: int = 4, normalize: bool = True):
+    def __init__(self, coordinates: Tensor, n_workers: int = 4, normalize: bool = True, k: int = 8):
         self._normalize = normalize
         self._vertices = coordinates
         self._n_workers = n_workers
@@ -140,7 +140,7 @@ class CellVolumeEstimator:
         self.alpha = 1
         self.min_max_sqrt = ()
 
-    def estimate_cell_volume(self) -> None:
+    def estimate_cell_weights(self) -> None:
         """
         Main entry point for estimating cell volumes.
 

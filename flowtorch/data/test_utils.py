@@ -4,7 +4,7 @@ from torch import rand, cat, zeros
 # flowtorch packages
 from flowtorch.data.utils import (format_byte_size, check_and_standardize_path,
                                   check_list_or_str)
-from flowtorch.data.utils import CellVolumeEstimator
+from flowtorch.data.utils import CellWeightEstimator
 
 
 def test_byte_formatting():
@@ -35,7 +35,7 @@ def test_check_list_or_str():
 
 
 @pytest.mark.parametrize("dims, n_points", [(2, 100), (3, 200)])
-def test_cell_volume_estimator(dims: int, n_points: int):
+def test_cell_weight_estimator(dims: int, n_points: int):
     # make up some coordinates
     coords = rand(n_points, dims)
 
@@ -43,7 +43,7 @@ def test_cell_volume_estimator(dims: int, n_points: int):
     if dims == 2:
         coords = cat([coords, zeros(n_points, 1)], dim=1)
 
-    estimator = CellVolumeEstimator(coords, k=4, normalize=True)
+    estimator = CellWeightEstimator(coords, normalize=True)
 
     # ensure dimensionality detection works
     if dims == 2:
@@ -52,7 +52,7 @@ def test_cell_volume_estimator(dims: int, n_points: int):
         assert len(estimator._dims) == 3
 
     # execute estimation
-    estimator.estimate_cell_volume()
+    estimator.estimate_cell_weights()
 
     # check weights shape matches number of points
     assert estimator.weights.shape[0] == n_points
