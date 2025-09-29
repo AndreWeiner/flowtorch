@@ -195,8 +195,8 @@ class CellWeightEstimator:
 
         :return: None
         """
-        self.alpha = self._volume_original / self.weights.sum()
-        self.weights *= self.alpha
+        self.alpha = self._volume_original / self._dist.sum()
+        self.weights = self.alpha * self._dist
 
     def _normalize_weights(self) -> None:
         """
@@ -229,7 +229,7 @@ class CellWeightEstimator:
                 \t\t -> approximation of {self._sum_weights * self.alpha / self._volume_original * 100:.3f} %.
                 Computed cell volumes (min. / max.):\t{self.weights.min().item():.3e}, {self.weights.max().item():.3e}
 
-                Approximation took {time() - self._time_start:.3f} s.
+                Approximation took {self._duration:.3f} s.
         """
         logger.info(msg)
 
