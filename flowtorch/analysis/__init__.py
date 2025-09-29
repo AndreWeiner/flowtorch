@@ -10,3 +10,4 @@ from .svd import SVD
 from .svd import inexact_alm_matrix_completion
 from .linear_control import LinearControl
 from .linear_model import LinearModel
+from .dft import DFT, PDFT
