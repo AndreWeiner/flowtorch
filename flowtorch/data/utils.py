@@ -141,6 +141,7 @@ class CellWeightEstimator:
         # compute the mean distance for each point
         self._compute_mean_distance()
         self._alpha = self._volume_original / self._dist.sum()
+        self._max_sqrt = (self._alpha * self._dist).sqrt().max()
 
     def _compute_mean_distance(self) -> None:
         """
@@ -162,7 +163,6 @@ class CellWeightEstimator:
         # mean distance to nearest neighbor
         self._dist = from_numpy(dists.mean(axis=1)) ** self._n_dims
         self._sum_weights = self._dist.sum().type(float32)
-        self._max_sqrt = self._dist.sqrt().max()
         logger.info("Done.")
 
     def _normalize_weights(self) -> None:
@@ -171,7 +171,7 @@ class CellWeightEstimator:
 
         :return: None
         """
-        return self._alpha * self._dist.sqrt() / self._max_sqrt
+        return (self._alpha * self._dist).sqrt() / self._max_sqrt
 
     @property
     def alpha(self) -> float:

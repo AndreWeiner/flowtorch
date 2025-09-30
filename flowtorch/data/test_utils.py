@@ -59,4 +59,5 @@ def test_cell_weight_estimator(dims: int, n_points: int):
 
     # since we normalize the weights they should be in [0, 1]
     assert all(estimator.weights >= 0)
+    assert all(estimator.weights <= 1)
 
