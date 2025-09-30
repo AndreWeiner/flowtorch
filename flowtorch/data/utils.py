@@ -6,7 +6,6 @@ from os.path import exists
 from os import sep
 from typing import Tuple, List, Union
 
-from time import time
 from scipy.spatial import KDTree, ConvexHull
 from torch import Tensor, float32, from_numpy, where
 
@@ -97,10 +96,13 @@ class CellWeightEstimator:
         >>> # Generate a synthetic point cloud inside a unit square
         >>> coords = torch.rand(100, 2)
         >>> estimator = CellWeightEstimator(coords, n_workers=4, normalize=True)
-        >>> estimator.estimate_cell_weights()
         >>>
         >>> # Access estimated volumes per point
         >>> print(estimator.weights.shape)
+        >>> # Access unscaled weights
+        >>> estimator.normalize = False
+        >>> print(estimator.weights.shape)
+
 
     :param coordinates: Input tensor of coordinates with shape
         ``(n_points, n_dims)``.
@@ -134,37 +136,11 @@ class CellWeightEstimator:
         self._n_dims = self._vertices.size(1)
         self._sum_weights = None
         self._time_start = 0
-
-        # public
-        self.weights = None
-        self._dist = None
-        self.alpha = 1
-        self.max_sqrt = 1
+        self._max_sqrt = 1
 
         # compute the mean distance for each point
-        self._duration = 0
-        _time_start = time()
         self._compute_mean_distance()
-        self._duration_fit = time() - _time_start
-
-    def estimate_cell_weights(self) -> None:
-        """
-        Main entry point for estimating cell volumes.
-
-        Runs the full pipeline:
-            - Optimizes scaling factor :math:`\\alpha`.
-            - Scales the weights accordingly.
-            - Normalizes the sqrt of the max. weights if specified.
-            - Prints information summary to the logger.
-        """
-        _time_start = time()
-        self._compute_alpha()
-        if self._normalize:
-            self._normalize_weights()
-        else:
-            self.weights = self._dist
-        self._duration = self._duration_fit + (time() - _time_start)
-        self._print_info()
+        self._alpha = self._volume_original / self._dist.sum()
 
     def _compute_mean_distance(self) -> None:
         """
@@ -185,18 +161,9 @@ class CellWeightEstimator:
 
         # mean distance to nearest neighbor
         self._dist = from_numpy(dists.mean(axis=1)) ** self._n_dims
-        self._sum_weights = self.weights.sum().type(float32)
+        self._sum_weights = self._dist.sum().type(float32)
+        self._max_sqrt = self._dist.sqrt().max()
         logger.info("Done.")
-
-    def _compute_alpha(self) -> None:
-        """
-        Computes the scaling factor :math:`\\alpha` such that the total sum of
-        estimated volumes matches the original bounding-box volume.
-
-        :return: None
-        """
-        self.alpha = self._volume_original / self._dist.sum()
-        self.weights = self.alpha * self._dist
 
     def _normalize_weights(self) -> None:
         """
@@ -204,34 +171,61 @@ class CellWeightEstimator:
 
         :return: None
         """
-        self.max_sqrt = self._dist.sqrt().max()
-        self.weights = self._dist.sqrt() / self.max_sqrt
+        return self._alpha * self._dist.sqrt() / self._max_sqrt
 
-    def _print_info(self) -> None:
+    @property
+    def alpha(self) -> float:
         """
-        Print a summary of the volume estimation before and after optimization.
-
-        The summary includes:
-            - Bounding box volume
-            - Approximated volume before optimization
-            - Approximated volume after optimization
-            - Min/max local cell volumes
-            - Total runtime
+        Computes the scaling factor :math:`\\alpha` such that the total sum of
+        estimated volumes matches the original bounding-box volume.
 
         :return: None
         """
-        msg = f"""
+        return self._alpha
 
-                Overall cell volume estimated from coordinates:\t{self._volume_original:.5f}
-                Overall cell volume estimated before optimization:\t{self._sum_weights.item():.5f}
-                \t\t -> approximation of {self._sum_weights / self._volume_original * 100:.3f} %.
-                Overall cell volume estimated after optimization:\t{self.alpha * self._sum_weights.item():.5f}
-                \t\t -> approximation of {self._sum_weights * self.alpha / self._volume_original * 100:.3f} %.
-                Computed cell volumes (min. / max.):\t{self.weights.min().item():.3e}, {self.weights.max().item():.3e}
-
-                Approximation took {self._duration:.3f} s.
+    @property
+    def weights(self) -> Tensor:
         """
-        logger.info(msg)
+        Returns the estimated cell volumes. If ``normalize = True`` the normalized square-root of the volumes with its
+        maximum cell volume.
+
+        :return: Estimated cell volume, either the absolute value or scaled with the maximum value.
+        :rtype: Tensor
+        """
+        if self._normalize:
+            return self._normalize_weights()
+        else:
+            return self.alpha * self._dist
+
+    @property
+    def normalize(self) -> bool:
+        """
+        Get the current status for normalization
+
+        :return: Flag if normalization is turned on or off
+        :rtype: bool
+        """
+        return self._normalize
+
+    @normalize.setter
+    def normalize(self, value: bool) -> None:
+        """
+        Set a new value for normalizing the cell volumes.
+
+        :param value: bool
+        :return: None
+        """
+        self._normalize = value
+
+    @property
+    def max_sqrt(self) -> Tensor:
+        """
+        Get the max. value of the sqrt() of the estimated cell volumes.
+
+        :return: max(sqrt(cell volumes))
+        :rtype: Tensor
+        """
+        return self._max_sqrt
 
 
 if __name__ == "__main__":
