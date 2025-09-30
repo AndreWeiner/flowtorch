@@ -151,6 +151,7 @@ class CellWeightEstimator:
         dimensionality to obtain an initial approximation of local cell volumes.
 
         :return: None
+        :rtype: None
         """
         logger.info("Computing mean distances between the coordinates.")
         # TODO: - large memory requirement -> how can we get this cheaper?
@@ -165,21 +166,23 @@ class CellWeightEstimator:
         self._sum_weights = self._dist.sum().type(float32)
         logger.info("Done.")
 
-    def _normalize_weights(self) -> None:
+    def _normalize_weights(self) -> Tensor:
         """
         Normalizes the weights with the sqrt(max).
 
         :return: None
+        :rtype; None
         """
         return (self._alpha * self._dist).sqrt() / self._max_sqrt
 
     @property
     def alpha(self) -> float:
         """
-        Computes the scaling factor :math:`\\alpha` such that the total sum of
-        estimated volumes matches the original bounding-box volume.
+        Returns the scaling factor :math:`\\alpha` such that the total sum of
+        estimated volumes matches the convex hull of the original volume.
 
         :return: None
+        :rtype: float
         """
         return self._alpha
 
