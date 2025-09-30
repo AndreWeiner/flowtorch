@@ -139,7 +139,7 @@ class CellWeightEstimator:
         self.weights = None
         self._dist = None
         self.alpha = 1
-        self.min_max_sqrt = ()
+        self.max_sqrt = 1
 
         # compute the mean distance for each point
         self._duration = 0
@@ -154,7 +154,7 @@ class CellWeightEstimator:
         Runs the full pipeline:
             - Optimizes scaling factor :math:`\\alpha`.
             - Scales the weights accordingly.
-            - Normalizes the sqrt of the weights if specified.
+            - Normalizes the sqrt of the max. weights if specified.
             - Prints information summary to the logger.
         """
         _time_start = time()
@@ -200,12 +200,12 @@ class CellWeightEstimator:
 
     def _normalize_weights(self) -> None:
         """
-        Normalizes the weights to [0, 1] using min-max. normalization
+        Normalizes the weights with the sqrt(max).
 
         :return: None
         """
-        self.min_max_sqrt = (self._dist.sqrt().min(), self._dist.sqrt().max())
-        self.weights = (self._dist.sqrt() - self.min_max_sqrt[0]) / (self.min_max_sqrt[1] - self.min_max_sqrt[0])
+        self.max_sqrt = self._dist.sqrt().max()
+        self.weights = self._dist.sqrt() / self.max_sqrt
 
     def _print_info(self) -> None:
         """
