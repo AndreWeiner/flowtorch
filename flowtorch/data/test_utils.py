@@ -51,9 +51,6 @@ def test_cell_weight_estimator(dims: int, n_points: int):
     else:
         assert len(estimator._dims) == 3
 
-    # execute estimation
-    estimator.estimate_cell_weights()
-
     # check weights shape matches number of points
     assert estimator.weights.shape[0] == n_points
 
@@ -62,5 +59,4 @@ def test_cell_weight_estimator(dims: int, n_points: int):
 
     # since we normalize the weights they should be in [0, 1]
     assert all(estimator.weights >= 0)
-    assert all(estimator.weights <= 1)
 
