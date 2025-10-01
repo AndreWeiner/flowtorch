@@ -79,7 +79,14 @@ def test_DFT():
         pt.testing.assert_close(dft.modes.norm(dim=0), pt.ones(nfreq))
         rec = dft.reconstruction
         assert not pt.is_complex(rec)
-        assert rec.shape == (2, nfft)
+        assert rec.shape == (2, dm_real_odd.shape[-1])
+    # windowing
+    dft = DFT(dm_real_even, 1.0, window="hann")
+    rec = dft.reconstruction
+    assert pt.isfinite(rec).all()
+    assert dft.amplitude.shape == (nfreq // 2,)
+    with raises(ValueError):
+        _ = DFT(dm_complex_even, 1.0, window="hanning")
 
 
 def test_PDFT():

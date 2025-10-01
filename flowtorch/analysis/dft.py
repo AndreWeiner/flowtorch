@@ -8,7 +8,16 @@ from math import sqrt
 import torch as pt
 
 # flowtorch packages
+from ..constants import FLOAT_TOLERANCE
 from .svd import SVD
+
+
+WINDOWS = {
+    "boxcar" : pt.ones,
+    "hann" : pt.hann_window,
+    "hamming" : pt.hamming_window,
+    "blackman" : pt.blackman_window,
+}
 
 
 class DFT(object):
@@ -19,6 +28,7 @@ class DFT(object):
         data_matrix: pt.Tensor,
         dt: float,
         nfft: int | None = None,
+        window: str = "boxcar",
         device: str = "cpu",
     ):
         """Compute the discrete Fourier transform (DFT) of a data matrix.
@@ -30,9 +40,11 @@ class DFT(object):
         :type data_matrix: pt.Tensor
         :param dt: timestep between snapshots; must be constant
         :type dt: float
-        :param nfft: number of FFT frequency bin; zero-padding or truncation is
-            used if nfft > N or nfft < N, respectively, defaults to N
+        :param nfft: number of FFT frequency bin; zero-padding is used if nfft > N;
+            truncation is not allowed, defaults to N
         :type nfft: int | None, optional
+        :param window: weighting used for tapering the signal, defaults to "boxcar"
+        :type window: str, optional
         :param device: device on which to perform the DFT, defaults to "cpu"
         :type device: str, optional
         """
@@ -40,6 +52,14 @@ class DFT(object):
         self._mean = data_matrix.mean(dim=-1)
         self._dt = dt
         self._nfft = nfft if nfft is not None else self._dm.shape[-1]
+        self._nfft = max(self._nfft, self._dm.shape[-1])
+        self._wfunc = WINDOWS.get(window)
+        if self._wfunc is None:
+            raise ValueError(
+                f"Unkown window option {window}. Available windows are:" +
+                ", ".join(WINDOWS.keys())
+            )
+        self._window = self._wfunc(self._dm.shape[-1])
         self._device = device
         self._frequency = (
             pt.fft.fftfreq(self._nfft, dt)
@@ -47,8 +67,9 @@ class DFT(object):
             else pt.fft.rfftfreq(self._nfft, dt)
         )
         fft = pt.fft.fft if pt.is_complex(self._dm) else pt.fft.rfft
+        wdm = (self._dm - self._mean.unsqueeze(-1)) * self._window.type(self._dm.dtype)
         self._modes = fft(
-            (self._dm - self._mean.unsqueeze(-1)).to(device), self._nfft, -1, "ortho"
+            wdm.to(device), self._nfft, -1, "ortho"
         ).cpu()
         self._amplitude = self._modes.norm(dim=0)
 
@@ -59,7 +80,8 @@ class DFT(object):
         :return: mode amplitudes (vector norm of the raw modes)
         :rtype: pt.Tensor
         """
-        return self._amplitude[1:]**2 / self._dm.shape[0]
+        w = self._window.square().mean()
+        return self._amplitude[1:]**2 / self._dm.shape[0] / w
 
     @property
     def frequency(self) -> pt.Tensor:
@@ -121,10 +143,12 @@ class DFT(object):
         mask[indices] = 1.0
         options = ((self._modes * mask).to(self._device), self._nfft, -1, "ortho")
         offset = self._mean.unsqueeze(-1) if include_mean else 0
+        w_inv = 1.0 / pt.clamp(self._window, FLOAT_TOLERANCE).type(self._dm.dtype)
+        N = self._dm.shape[-1]
         if pt.is_complex(self._dm):
-            return pt.fft.ifft(*options).cpu() + offset
+            return pt.fft.ifft(*options).cpu()[:, :N] * w_inv + offset
         else:
-            return pt.fft.irfft(*options).cpu().real + offset
+            return pt.fft.irfft(*options).cpu().real[:, :N] * w_inv + offset
 
     def top_modes(
         self,
@@ -169,6 +193,7 @@ class PDFT(DFT):
         dt: float,
         rank: int | None = None,
         nfft: int | None = None,
+        window: str = "boxcar",
         device: str = "cpu",
     ):
         """Compute the DFT of the POD time coefficients.
@@ -188,9 +213,11 @@ class PDFT(DFT):
         :param rank: truncation parameter for the POD basis, defaults to None
             (automatic selection in the SVD class)
         :type rank: int | None, optional
-        :param nfft: number of FFT frequency bin; zero-padding or truncation is
-            used if nfft > N or nfft < N, respectively, defaults to N
+        :param nfft: number of FFT frequency bin; zero-padding is used if nfft > N;
+            truncation is not allowed, defaults to N
         :type nfft: int | None, optional
+        :param window: weighting used for tapering the signal, defaults to "boxcar"
+        :type window: str, optional
         :param device: device on which to perform the DFT, defaults to "cpu"
         :type device: str, optional
         """
@@ -200,6 +227,7 @@ class PDFT(DFT):
             (self._svd.V * self._svd.s).T,
             dt,
             nfft,
+            window,
             device,
         )
 
