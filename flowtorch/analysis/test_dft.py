@@ -64,7 +64,7 @@ def test_DFT():
     part = dft.partial_reconstruction({0, 2})
     assert part.shape == dm_real_even.shape
     assert part.dtype == dm_real_even.dtype
-    assert len(dft.top_modes(2)) == 2
+    assert len(dft.top_modes(2, False)) == 2
     with raises(Exception):
         _ = dft.partial_reconstruction(99)
     # real inputs, GPU
