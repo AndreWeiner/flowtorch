@@ -428,7 +428,7 @@ class TAUDataloader(TAUBase):
     def weights(self) -> pt.Tensor:
         if self._mesh_data is None:
             self._load_mesh_data()
-        return self._mesh_data[:, 3]
+        return self._mesh_data[:, 3] / self._mesh_data[:, 3].max()
 
 
 class TAUSurfaceDataloader(TAUBase):
@@ -531,10 +531,10 @@ class TAUSurfaceDataloader(TAUBase):
                 dim=-1
             )
         try:
-            weights = self._load_single_snapshot(WEIGHT_KEY, self.write_times[-1])
+            weights = self._load_single_snapshot(WEIGHT_KEY, self.write_times[-1], return_all_zones=True)
         except KeyError:
             logger.warning(f"Could not find cell volumes in last snapshot.")
-            weights = pt.ones(vertices.shape[0])
+            weights = pt.ones(vertices.shape[0], dtype=self._dtype)
         self._mesh_data = {}
         for zone_name, zone_ids in self.zone_ids.items():
             self._mesh_data[zone_name] = pt.ones(
@@ -542,13 +542,16 @@ class TAUSurfaceDataloader(TAUBase):
             self._mesh_data[zone_name][:, :3] = vertices[zone_ids]
             self._mesh_data[zone_name][:,  3] = weights[zone_ids]
 
-    def _load_single_snapshot(self, field_name: str, time: str) -> pt.Tensor:
+    def _load_single_snapshot(self, field_name: str, time: str, return_all_zones=False) -> pt.Tensor:
         with Dataset(self._file_name(time)) as data:
             global_ids = pt.from_numpy(data.variables["global_id"][:])
             ids = pt.where(pt.isin(global_ids, self.zone_ids[self.zone]))[0].numpy()
             field = pt.tensor(
                 data.variables[field_name][:], dtype=self._dtype)
-        return field[ids]
+        if return_all_zones:
+            return field
+        else:
+            return field[ids]
 
     @property
     def field_names(self) -> Dict[str, List[str]]:
@@ -585,7 +588,7 @@ class TAUSurfaceDataloader(TAUBase):
 
     @property
     def weights(self) -> pt.Tensor:
-        return self.mesh_data[self.zone][:, 3]
+        return self.mesh_data[self.zone][:, 3] / self.mesh_data[self.zone][:, 3].max()
 
     @property
     def zone_ids(self) -> Dict[str, pt.Tensor]:
