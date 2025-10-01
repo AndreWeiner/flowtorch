@@ -2,7 +2,7 @@
 
 # standard library packages
 from typing import Set
-from math import sqrt
+import logging
 
 # third party packages
 import torch as pt
@@ -12,11 +12,14 @@ from ..constants import FLOAT_TOLERANCE
 from .svd import SVD
 
 
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
+
 WINDOWS = {
-    "boxcar" : pt.ones,
-    "hann" : pt.hann_window,
-    "hamming" : pt.hamming_window,
-    "blackman" : pt.blackman_window,
+    "boxcar": pt.ones,
+    "hann": pt.hann_window,
+    "hamming": pt.hamming_window,
+    "blackman": pt.blackman_window,
 }
 
 
@@ -53,11 +56,12 @@ class DFT(object):
         self._dt = dt
         self._nfft = nfft if nfft is not None else self._dm.shape[-1]
         self._nfft = max(self._nfft, self._dm.shape[-1])
+        self._wname = window
         self._wfunc = WINDOWS.get(window)
         if self._wfunc is None:
             raise ValueError(
-                f"Unkown window option {window}. Available windows are:" +
-                ", ".join(WINDOWS.keys())
+                f"Unkown window option {window}. Available windows are:"
+                + ", ".join(WINDOWS.keys())
             )
         self._window = self._wfunc(self._dm.shape[-1])
         self._device = device
@@ -68,9 +72,7 @@ class DFT(object):
         )
         fft = pt.fft.fft if pt.is_complex(self._dm) else pt.fft.rfft
         wdm = (self._dm - self._mean.unsqueeze(-1)) * self._window.type(self._dm.dtype)
-        self._modes = fft(
-            wdm.to(device), self._nfft, -1, "ortho"
-        ).cpu()
+        self._modes = fft(wdm.to(device), self._nfft, -1, "ortho").cpu()
         self._amplitude = self._modes.norm(dim=0)
 
     @property
@@ -81,7 +83,7 @@ class DFT(object):
         :rtype: pt.Tensor
         """
         w = self._window.square().mean()
-        return self._amplitude[1:]**2 / self._dm.shape[0] / w
+        return self._amplitude[1:] ** 2 / self._dm.shape[0] / w
 
     @property
     def frequency(self) -> pt.Tensor:
@@ -135,6 +137,11 @@ class DFT(object):
         :return: partial reconstruction of the input data matrix
         :rtype: pt.Tensor
         """
+        if self._wname in ("hann", "blackman"):
+            logger.warning(
+                "The first and last snapshots of the reconstruction are unphysical when using the " +
+                f"'{self._wname}' window. Consider using the 'hamming' window."
+            )
         if isinstance(mode_indices, int):
             mode_indices = {mode_indices}
         indices = pt.tensor(list(mode_indices), dtype=pt.int64) + 1
