@@ -29,11 +29,9 @@ logging.basicConfig(level=logging.INFO)
 VOL_SOLUTION_NAME = ".pval.unsteady_"
 SURF_SOLUTION_NAME = ".surface.pval.unsteady_"
 PSOLUTION_POSTFIX = ".domain_"
-PMESH_NAME = "domain_{:s}_grid_1"
-PVERTEX_KEY = "pcoord"
-PWEIGHT_KEY = "pvolume"
-PADD_POINTS_KEY = "addpoint_idx"
-PGLOBAL_ID_KEY = "globalidx"
+PMESH_NAME = "domain_{:s}"
+PADD_POINTS_KEY = "addpoint_id"
+PGLOBAL_ID_KEY = "global_id"
 VERTEX_KEYS = ("points_xc", "points_yc", "points_zc")
 WEIGHT_KEY = "volume"
 
@@ -319,23 +317,22 @@ class TAUDataloader(TAUBase):
             coordinates of the vertices (x, y, z) and the cell volumes
         :rtype: pt.Tensor
         """
-        prefix = self._para.config[GRID_PREFIX_KEY]
+        prefix = self._para.config[GRID_FILE_KEY]
         name = PMESH_NAME.format(pid)
         if not (prefix == "(none)"):
             name = f"{prefix}_{name}"
         path = join(self._para.path, name)
         with Dataset(path) as data:
-            vertices = pt.tensor(data[PVERTEX_KEY][:], dtype=self._dtype)
-            global_ids = pt.tensor(data[PGLOBAL_ID_KEY][:], dtype=pt.int64)
+            vertices = pt.stack([pt.tensor(data[key][:], dtype=self._dtype) 
+                                 for key in VERTEX_KEYS], dim=-1)
             n_add_points = data[PADD_POINTS_KEY].shape[0]
 
         n_points = vertices.shape[0] - n_add_points
         data = pt.zeros((n_points, 4), dtype=self._dtype)
-        sorting = pt.argsort(global_ids[:n_points])
-        data[:, 0] = vertices[:n_points, 0][sorting]
-        data[:, 1] = vertices[:n_points, 1][sorting]
-        data[:, 2] = vertices[:n_points, 2][sorting]
-        data[:, 3] = pt.ones(n_points, self._dtype)
+        data[:, 0] = vertices[:n_points, 0]
+        data[:, 1] = vertices[:n_points, 1]
+        data[:, 2] = vertices[:n_points, 2]
+        data[:, 3] = pt.ones(n_points, dtype=self._dtype)
         return data
 
     def _load_mesh_data(self):
@@ -359,7 +356,7 @@ class TAUDataloader(TAUBase):
                      for key in VERTEX_KEYS],
                     dim=-1
                 )
-            weights = pt.ones(vertices.shape[0], self._dtype)
+            weights = pt.ones(vertices.shape[0], dtype=self._dtype)
             self._mesh_data = pt.cat((vertices, weights.unsqueeze(-1)), dim=-1)
         try:
             self._mesh_data[:,3] = self._load_single_snapshot(WEIGHT_KEY, self.write_times[-1])
