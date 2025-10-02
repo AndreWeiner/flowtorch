@@ -29,11 +29,9 @@ logging.basicConfig(level=logging.INFO)
 VOL_SOLUTION_NAME = ".pval.unsteady_"
 SURF_SOLUTION_NAME = ".surface.pval.unsteady_"
 PSOLUTION_POSTFIX = ".domain_"
-PMESH_NAME = "domain_{:s}_grid_1"
-PVERTEX_KEY = "pcoord"
-PWEIGHT_KEY = "pvolume"
-PADD_POINTS_KEY = "addpoint_idx"
-PGLOBAL_ID_KEY = "globalidx"
+PMESH_NAME = "domain_{:s}"
+PADD_POINTS_KEY = "addpoint_id"
+PGLOBAL_ID_KEY = "global_id"
 VERTEX_KEYS = ("points_xc", "points_yc", "points_zc")
 WEIGHT_KEY = "volume"
 
@@ -319,24 +317,22 @@ class TAUDataloader(TAUBase):
             coordinates of the vertices (x, y, z) and the cell volumes
         :rtype: pt.Tensor
         """
-        prefix = self._para.config[GRID_PREFIX_KEY]
+        prefix = self._para.config[GRID_FILE_KEY]
         name = PMESH_NAME.format(pid)
         if not (prefix == "(none)"):
             name = f"{prefix}_{name}"
         path = join(self._para.path, name)
         with Dataset(path) as data:
-            vertices = pt.tensor(data[PVERTEX_KEY][:], dtype=self._dtype)
-            volumes = pt.tensor(data[PWEIGHT_KEY][:], dtype=self._dtype)
-            global_ids = pt.tensor(data[PGLOBAL_ID_KEY][:], dtype=pt.int64)
+            vertices = pt.stack([pt.tensor(data[key][:], dtype=self._dtype) 
+                                 for key in VERTEX_KEYS], dim=-1)
             n_add_points = data[PADD_POINTS_KEY].shape[0]
 
-        n_points = volumes.shape[0] - n_add_points
+        n_points = vertices.shape[0] - n_add_points
         data = pt.zeros((n_points, 4), dtype=self._dtype)
-        sorting = pt.argsort(global_ids[:n_points])
-        data[:, 0] = vertices[:n_points, 0][sorting]
-        data[:, 1] = vertices[:n_points, 1][sorting]
-        data[:, 2] = vertices[:n_points, 2][sorting]
-        data[:, 3] = volumes[:n_points][sorting]
+        data[:, 0] = vertices[:n_points, 0]
+        data[:, 1] = vertices[:n_points, 1]
+        data[:, 2] = vertices[:n_points, 2]
+        data[:, 3] = pt.ones(n_points, dtype=self._dtype)
         return data
 
     def _load_mesh_data(self):
@@ -360,13 +356,12 @@ class TAUDataloader(TAUBase):
                      for key in VERTEX_KEYS],
                     dim=-1
                 )
-                if WEIGHT_KEY in data.variables.keys():
-                    weights = pt.tensor(
-                        data.variables[WEIGHT_KEY][:], dtype=self._dtype)
-                else:
-                    logger.warning(f"Could not find cell volumes in file {path}")
-                    weights = pt.ones(vertices.shape[0], dtype=self._dtype)
+            weights = pt.ones(vertices.shape[0], dtype=self._dtype)
             self._mesh_data = pt.cat((vertices, weights.unsqueeze(-1)), dim=-1)
+        try:
+            self._mesh_data[:,3] = self._load_single_snapshot(WEIGHT_KEY, self.write_times[-1])
+        except KeyError:
+            logger.warning(f"Could not find cell volumes in last snapshot.")
 
     def _load_single_snapshot(self, field_name: str, time: str) -> pt.Tensor:
         """Load a single snapshot of a single field from the netCDF4 file(s).
@@ -433,7 +428,7 @@ class TAUDataloader(TAUBase):
     def weights(self) -> pt.Tensor:
         if self._mesh_data is None:
             self._load_mesh_data()
-        return self._mesh_data[:, 3]
+        return self._mesh_data[:, 3] / self._mesh_data[:, 3].max()
 
 
 class TAUSurfaceDataloader(TAUBase):
@@ -525,7 +520,8 @@ class TAUSurfaceDataloader(TAUBase):
         The mesh data is saved as class member `_mesh_data`. The tensor for each zone
         has the dimension n_points x 4; the first three columns correspond to the x/y/z
         coordinates. Loading or computing the face area is currently not implemented;
-        instead, the weight of each element is set to unity.
+        instead, the cell volumes of the first layer cells are loaded, and if they are
+        not present the weights are set to unity.
         """
         path = join(self._para.path, self._para.config[GRID_FILE_KEY])
         with Dataset(path) as data:
@@ -534,19 +530,28 @@ class TAUSurfaceDataloader(TAUBase):
                  for key in VERTEX_KEYS],
                 dim=-1
             )
-            self._mesh_data = {}
-            for zone_name, zone_ids in self.zone_ids.items():
-                self._mesh_data[zone_name] = pt.ones(
-                    (zone_ids.size(0), 4), dtype=self._dtype)
-                self._mesh_data[zone_name][:, :3] = vertices[zone_ids]
+        try:
+            weights = self._load_single_snapshot(WEIGHT_KEY, self.write_times[-1], return_all_zones=True)
+        except KeyError:
+            logger.warning(f"Could not find cell volumes in last snapshot.")
+            weights = pt.ones(vertices.shape[0], dtype=self._dtype)
+        self._mesh_data = {}
+        for zone_name, zone_ids in self.zone_ids.items():
+            self._mesh_data[zone_name] = pt.ones(
+                (zone_ids.size(0), 4), dtype=self._dtype)
+            self._mesh_data[zone_name][:, :3] = vertices[zone_ids]
+            self._mesh_data[zone_name][:,  3] = weights[zone_ids]
 
-    def _load_single_snapshot(self, field_name: str, time: str) -> pt.Tensor:
+    def _load_single_snapshot(self, field_name: str, time: str, return_all_zones=False) -> pt.Tensor:
         with Dataset(self._file_name(time)) as data:
             global_ids = pt.from_numpy(data.variables["global_id"][:])
             ids = pt.where(pt.isin(global_ids, self.zone_ids[self.zone]))[0].numpy()
             field = pt.tensor(
                 data.variables[field_name][:], dtype=self._dtype)
-        return field[ids]
+        if return_all_zones:
+            return field
+        else:
+            return field[ids]
 
     @property
     def field_names(self) -> Dict[str, List[str]]:
@@ -583,7 +588,7 @@ class TAUSurfaceDataloader(TAUBase):
 
     @property
     def weights(self) -> pt.Tensor:
-        return self.mesh_data[self.zone][:, 3]
+        return self.mesh_data[self.zone][:, 3] / self.mesh_data[self.zone][:, 3].max()
 
     @property
     def zone_ids(self) -> Dict[str, pt.Tensor]:
