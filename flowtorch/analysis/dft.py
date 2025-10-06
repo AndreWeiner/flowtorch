@@ -83,7 +83,13 @@ class DFT(object):
         :rtype: pt.Tensor
         """
         w = self._window.square().mean()
-        return self._amplitude[1:] ** 2 / self._dm.shape[0] / w
+        a = self._amplitude[1:] ** 2
+        if not pt.is_complex(self._dm):
+            if self._nfft % 2 == 0:
+                a[:-1] *= 2.0
+            else:
+                a *= 2.0
+        return a / self._dm.shape[0] / w
 
     @property
     def frequency(self) -> pt.Tensor:
@@ -111,7 +117,8 @@ class DFT(object):
 
     @property
     def spectral_density(self) -> pt.Tensor:
-        return self.amplitude / self.frequency
+        df = self.frequency[1] - self.frequency[0]
+        return self.amplitude / df
 
     @property
     def reconstruction(self) -> pt.Tensor:
@@ -139,8 +146,8 @@ class DFT(object):
         """
         if self._wname in ("hann", "blackman"):
             logger.warning(
-                "The first and last snapshots of the reconstruction are unphysical when using the " +
-                f"'{self._wname}' window. Consider using the 'hamming' window."
+                "The first and last snapshots of the reconstruction are unphysical when using the "
+                + f"'{self._wname}' window. Consider using the 'hamming' window."
             )
         if isinstance(mode_indices, int):
             mode_indices = {mode_indices}
