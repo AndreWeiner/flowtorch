@@ -537,12 +537,16 @@ class TAUSurfaceDataloader(TAUBase):
             self._mesh_data[zone_name] = pt.ones(
                 (zone_ids.size(0), 4), dtype=self._dtype)
             self._mesh_data[zone_name][:, :3] = vertices[zone_ids]
+            self._zone = zone_name
             try:
-                self._zone = zone_name
-                weights = self._load_single_snapshot(WEIGHT_KEY, self.write_times[-1])
+                weights = self._load_single_snapshot(WEIGHT_KEY, self.write_times[0])
                 self._mesh_data[zone_name][:,  3] = weights
+                weights_found=True
             except KeyError:
-                logger.warning(f"Could not find cell volumes in last snapshot.")
+                self._mesh_data[zone_name][:,  3] = pt.ones(zone_ids.size(0), dtype=self._dtype)
+                weights_found=False
+        if not weights_found:
+            logger.warning(f"Could not find cell volumes in last snapshot.")
         self._zone = original_zone
 
     def _load_single_snapshot(self, field_name: str, time: str) -> pt.Tensor:
