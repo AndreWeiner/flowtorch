@@ -539,7 +539,7 @@ class TAUSurfaceDataloader(TAUBase):
             self._mesh_data[zone_name][:, :3] = vertices[zone_ids]
             self._zone = zone_name
             try:
-                weights = self._load_single_snapshot(WEIGHT_KEY, self.write_times[0])
+                weights = self._load_single_snapshot(WEIGHT_KEY, self.write_times[-1])
                 self._mesh_data[zone_name][:,  3] = weights
                 weights_found=True
             except KeyError:
