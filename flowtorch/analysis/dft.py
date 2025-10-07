@@ -167,7 +167,6 @@ class DFT(object):
     def top_modes(
         self,
         n: int = 1,
-        density: bool = True,
         f_min: float = -float("inf"),
         f_max: float = float("inf"),
     ) -> pt.Tensor:
@@ -175,9 +174,6 @@ class DFT(object):
 
         :param n: number of indices to return; defaults to 1
         :type n: int
-        :param density: sorting based on density rather than amplitudes;
-            defaults to True
-        :type density: bool, optional
         :param f_min: consider only modes with a frequency larger or equal
             to f_min; defaults to -inf
         :type f_min: float, optional
@@ -193,8 +189,7 @@ class DFT(object):
             modes_in_range
         ]
         n = min(n, mode_indices.shape[0])
-        imp = self.spectral_density if density else self.amplitude
-        top_n = imp[mode_indices].abs().topk(n).indices
+        top_n = self.amplitude[mode_indices].abs().topk(n).indices
         return mode_indices[top_n]
 
 
