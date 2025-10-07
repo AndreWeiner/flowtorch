@@ -530,28 +530,28 @@ class TAUSurfaceDataloader(TAUBase):
                  for key in VERTEX_KEYS],
                 dim=-1
             )
-        try:
-            weights = self._load_single_snapshot(WEIGHT_KEY, self.write_times[-1], return_all_zones=True)
-        except KeyError:
-            logger.warning(f"Could not find cell volumes in last snapshot.")
-            weights = pt.ones(vertices.shape[0], dtype=self._dtype)
+
         self._mesh_data = {}
+        original_zone = self._zone
         for zone_name, zone_ids in self.zone_ids.items():
             self._mesh_data[zone_name] = pt.ones(
                 (zone_ids.size(0), 4), dtype=self._dtype)
             self._mesh_data[zone_name][:, :3] = vertices[zone_ids]
-            self._mesh_data[zone_name][:,  3] = weights[zone_ids]
+            try:
+                self._zone = zone_name
+                weights = self._load_single_snapshot(WEIGHT_KEY, self.write_times[-1])
+                self._mesh_data[zone_name][:,  3] = weights
+            except KeyError:
+                logger.warning(f"Could not find cell volumes in last snapshot.")
+        self._zone = original_zone
 
-    def _load_single_snapshot(self, field_name: str, time: str, return_all_zones=False) -> pt.Tensor:
+    def _load_single_snapshot(self, field_name: str, time: str) -> pt.Tensor:
         with Dataset(self._file_name(time)) as data:
             global_ids = pt.from_numpy(data.variables["global_id"][:])
             ids = pt.where(pt.isin(global_ids, self.zone_ids[self.zone]))[0].numpy()
             field = pt.tensor(
                 data.variables[field_name][:], dtype=self._dtype)
-        if return_all_zones:
-            return field
-        else:
-            return field[ids]
+        return field[ids]
 
     @property
     def field_names(self) -> Dict[str, List[str]]:
