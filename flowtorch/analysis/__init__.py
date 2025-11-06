@@ -8,6 +8,7 @@ from .hooptdmd import HOOptDMD
 from .mssa import MSSA, PMSSA
 from .svd import SVD
 from .svd import inexact_alm_matrix_completion
-from .linear_control import LinearControl
+# from .linear_control import LinearControlModel
 from .linear_model import LinearModel
 from .dft import DFT, PDFT
+from .spod import AMSPOD, PAMSPOD
