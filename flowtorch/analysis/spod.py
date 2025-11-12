@@ -455,7 +455,13 @@ class AMSPOD(object):
         top_n = self.eigvals[mode_indices][:, 0].topk(n).indices
         return mode_indices[top_n]
 
-    def mode_reconstruction(self, f_idx: int, eig_idx: int = 0) -> pt.Tensor:
+    def mode_reconstruction(
+        self,
+        f_idx: int,
+        eig_idx: int = 0,
+        dt: Union[float, None] = None,
+        N: Union[int, None] = None,
+    ) -> pt.Tensor:
         """Compute time-domain reconstruction based on a single mode.
 
         The mode is selected based on the frequency bin and the eigenbasis index.
@@ -467,6 +473,10 @@ class AMSPOD(object):
         :param eig_idx: index of eigenvector-eigenvalue pair; defaults to 0, i.e.,
             the most dominant mode at the selected frequency
         :type eig_idx: int, optional
+        :param dt: optional reconstruction time step; defaults to None (use original time step)
+        :type dt: Union[float, None], optional
+        :param N: optional number of steps to reconstruct; defaults to None (use original number of snapshots)
+        :type N: Union[int, None], optional
         :raises ValueError: for invalid frequency bins
         :raises ValueError: for invalid eigenbasis index
         :raises ValueError: if the corresponding mode was not saved due to `keep_n_modes`
@@ -489,7 +499,9 @@ class AMSPOD(object):
             )
         s = (self.eigvals[f_idx, eig_idx] * K).sqrt()
         m = self._modes[f_idx, :, eig_idx]
-        t = pt.arange(self._nt) * self._dt
+        t_res = self._dt if dt is None else dt
+        steps = self._nt if N is None else N
+        t = pt.arange(steps) * t_res
         osc = pt.exp(2j * pi * self._frequency[f_idx] * t) * s
         if self._complex:
             return pt.outer(m, osc)
@@ -605,7 +617,13 @@ class PAMSPOD(AMSPOD):
         """
         return self._svd
 
-    def mode_reconstruction(self, f_idx: int, eig_idx: int = 0) -> pt.Tensor:
+    def mode_reconstruction(
+        self,
+        f_idx: int,
+        eig_idx: int = 0,
+        dt: Union[float, None] = None,
+        N: Union[int, None] = None,
+    ) -> pt.Tensor:
         """Compute time-domain reconstruction based on a single mode.
 
         This method wraps around the corresponding method of the base class
@@ -616,8 +634,12 @@ class PAMSPOD(AMSPOD):
         :param eig_idx: index of eigenvector-eigenvalue pair; defaults to 0, i.e.,
             the most dominant mode at the selected frequency
         :type eig_idx: int, optional
+        :param dt: optional reconstruction time step; defaults to None (use original time step)
+        :type dt: Union[float, None], optional
+        :param N: optional number of steps to reconstruct; defaults to None (use original number of snapshots)
+        :type N: Union[int, None], optional
         :return: reconstruction based on a single mode
         :rtype: pt.Tensor
         """
-        rec = super().mode_reconstruction(f_idx, eig_idx)
+        rec = super().mode_reconstruction(f_idx, eig_idx, dt, N)
         return self.svd.U.type(rec.dtype) @ rec

@@ -102,6 +102,9 @@ def test_AMSPOD_cpu():
     rec = spod.mode_reconstruction(N // 2, 0)
     assert rec.shape == dm_even_complex.shape
     assert rec.dtype == dm_even_complex.dtype
+    rec = spod.mode_reconstruction(N // 2, 0, 1.0, 10)
+    assert rec.shape == (M, 10)
+    assert rec.dtype == dm_even_complex.dtype
     with raises(ValueError):
         _ = spod.mode_reconstruction(N, 0)
     with raises(ValueError):
@@ -166,4 +169,7 @@ def test_PAMSPOD():
     assert spod.modes.shape == (n_freq, M, 3)
     r = spod.mode_reconstruction(0, 0)
     assert r.shape == dm.shape
+    assert r.dtype == dm.dtype
+    r = spod.mode_reconstruction(0, 0, 1.0, 35)
+    assert r.shape == (M, 35)
     assert r.dtype == dm.dtype
