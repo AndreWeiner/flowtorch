@@ -155,9 +155,6 @@ class DMD(object):
     tensor([-2.3842e-06, -4.2345e+01, -1.8552e+01])
     >>> dmd.amplitude
     tensor([10.5635+0.j, -0.0616+0.j, -0.0537+0.j])
-    >>> dmd = DMD(data_matrix, dt=0.1, rank=3, robust=True)
-    >>> dmd = DMD(data_matrix, dt=0.1, rank=3, robust={"tol": 1.0e-5, "verbose" : True})
-
     """
 
     def __init__(
@@ -165,7 +162,6 @@ class DMD(object):
         data_matrix: Union[pt.Tensor, List[pt.Tensor]],
         dt: float,
         rank: Union[int, None] = None,
-        robust: Union[bool, dict] = False,
         unitary: bool = False,
         optimal: bool = False,
         tlsq: bool = False,
@@ -180,10 +176,6 @@ class DMD(object):
         :type dt: float
         :param rank: rank for SVD truncation, defaults to None
         :type rank: int, optional
-        :param robust: data_matrix is split into low rank and sparse contributions
-            if True or if dictionary with options for Inexact ALM algorithm; the SVD
-            is computed only on the low rank matrix
-        :type robust: Union[bool,dict]
         :param unitary: enforce the linear operator to be unitary; refer to piDMD_
             by Peter Baddoo for more information
         :type unitary: bool, optional
@@ -220,14 +212,14 @@ class DMD(object):
         X = pt.cat([dm[:, :-1] for dm in self._dm], dim=-1)
         Y = pt.cat([dm[:, 1:] for dm in self._dm], dim=-1)
         if self._tlsq:
-            svd = SVD(pt.vstack((X, Y)), rank, robust)
+            svd = SVD(pt.vstack((X, Y)), rank)
             P = svd.V @ svd.V.conj().T
             self._X = X @ P
             self._Y = Y @ P
             self._svd = SVD(self._X, svd.rank)
             del svd, X, Y
         else:
-            self._svd = SVD(X, rank, robust)
+            self._svd = SVD(X, rank)
             self._X = X
             self._Y = Y
         self._eigvals, self._eigvecs, self._modes = self._compute_mode_decomposition()
@@ -310,8 +302,8 @@ class DMD(object):
         """
         _, cols = self._modes.shape
         mode_mask = pt.zeros(cols, dtype=pt.complex64)
-        mode_indices = pt.tensor(list(mode_indices), dtype=pt.int64)
-        mode_mask[mode_indices] = 1.0
+        indices = pt.tensor(list(mode_indices), dtype=pt.int64)
+        mode_mask[indices] = 1.0
         dyn = self.dynamics
         if isinstance(dyn, list):
             rec = []

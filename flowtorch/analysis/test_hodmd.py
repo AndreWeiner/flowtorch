@@ -1,49 +1,30 @@
-"""Unit tests for the HODMD class.
-"""
+"""Unit tests for the HODMD class."""
 
 # third party packages
 import pytest
 import torch as pt
+
 # flowtorch packages
 from .hodmd import HODMD, _create_time_delays
 
 
 def test_create_time_delays():
-    dm = pt.tensor(
-        [
-            [1, 2, 3, 4],
-            [5, 6, 7, 8]
-        ], dtype=pt.float32
-    )
+    dm = pt.tensor([[1, 2, 3, 4], [5, 6, 7, 8]], dtype=pt.float32)
     assert pt.allclose(_create_time_delays(dm, 1), dm)
-    expected = pt.tensor(
-        [
-            [1, 2, 3],
-            [5, 6, 7],
-            [2, 3, 4],
-            [6, 7, 8]
-        ], dtype=pt.float32
-    )
+    expected = pt.tensor([[1, 2, 3], [5, 6, 7], [2, 3, 4], [6, 7, 8]], dtype=pt.float32)
     assert pt.allclose(_create_time_delays(dm, 2), expected)
     expected = pt.tensor(
-        [
-            [1, 2],
-            [5, 6],
-            [2, 3],
-            [6, 7],
-            [3, 4],
-            [7, 8]
-        ], dtype=pt.float32
+        [[1, 2], [5, 6], [2, 3], [6, 7], [3, 4], [7, 8]], dtype=pt.float32
     )
     assert pt.allclose(_create_time_delays(dm, 3), expected)
 
 
-class TestHODMD():
+class TestHODMD:
     def test_init(self):
         dm = pt.rand((50, 20))
         # minimal construction
         dmd = HODMD(dm, 1.0)
-        dmd.delay == int(20/3)
+        dmd.delay == int(20 // 3)
         # explicit rank for reduction
         dmd = HODMD(dm, 1.0, rank_dr=10)
         assert dmd.svd_dr.rank == 10
@@ -99,4 +80,3 @@ class TestHODMD():
         prediction = dmd.predict(pt.rand((1, 5)), 12)
         assert prediction.shape == (1, 13)
         assert prediction.dtype == dm.dtype
-

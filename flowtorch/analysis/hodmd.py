@@ -1,5 +1,4 @@
-"""Implementation of the higher-order DMD (HODMD).
-"""
+"""Implementation of the higher-order DMD (HODMD)."""
 
 from typing import Tuple, Union
 import torch as pt
@@ -105,9 +104,10 @@ class HODMD(DMD):
         """
         self._dm_org = data_matrix
         self._rows_org, self._cols_org = data_matrix.shape
-        self._delay = delay
         if delay is None:
             self._delay = int(self._cols_org / 3)
+        else:
+            self._delay = delay
         self._svd_dr = SVD(data_matrix, rank_dr)
         super(HODMD, self).__init__(
             _create_time_delays(self._svd_dr.U.T @ self._dm_org, self._delay),

@@ -37,33 +37,41 @@ def test_DMD_single_matrix():
     assert dmd.modes.shape == (rows, rank)
     assert dmd.frequency.shape == (rank,)
     assert dmd.growth_rate.shape == (rank,)
-    assert dmd.amplitude.shape == (rank,)
-    assert dmd.amplitude.dtype == pt.complex64
-    assert dmd.dynamics.shape == (rank, cols)
-    assert dmd.dynamics.dtype == pt.complex64
-    assert dmd.integral_contribution.shape == (rank,)
-    assert dmd.integral_contribution.dtype == pt.float32
-    assert dmd.reconstruction.shape == (rows, cols)
-    assert dmd.reconstruction.dtype == data.dtype
+    a = dmd.amplitude
+    assert isinstance(a, pt.Tensor)
+    assert a.shape == (rank,)
+    assert a.dtype == pt.complex64
+    dyn = dmd.dynamics
+    assert isinstance(dyn, pt.Tensor)
+    assert dyn.shape == (rank, cols)
+    assert dyn.dtype == pt.complex64
+    a = dmd.integral_contribution
+    assert isinstance(a, pt.Tensor)
+    assert a.shape == (rank,)
+    assert a.dtype == pt.float32
+    rec = dmd.reconstruction
+    assert isinstance(rec, pt.Tensor)
+    assert rec.shape == (rows, cols)
+    assert rec.dtype == data.dtype
     partial = dmd.partial_reconstruction({0})
+    assert isinstance(partial, pt.Tensor)
     assert partial.dtype == data.dtype
     assert partial.shape == (rows, cols)
     partial = dmd.partial_reconstruction({0, 2})
+    assert isinstance(partial, pt.Tensor)
     assert partial.dtype == data.dtype
     assert partial.shape == (rows, cols)
     top = dmd.top_modes(10)
     top = dmd.top_modes(10, True)
     assert top.shape == (min(rank, 10),)
     assert top.dtype == pt.int64
-    assert dmd.reconstruction_error.shape == (rows, cols)
+    err = dmd.reconstruction_error
+    assert isinstance(err, pt.Tensor)
+    assert err.shape == (rows, cols)
     assert dmd.projection_error.shape == (rows, cols - 1)
     dft = dmd.dft_properties
     assert len(dft) == 3
     assert dft == (10.0, 5.0, 10.0 / (cols - 1))
-    # robust DMD
-    dmd = DMD(data, dt=0.1, rank=rank, robust=True)
-    assert dmd.svd.L.shape == (data.shape[0], 7)
-    assert dmd.svd.S.shape == (data.shape[0], 7)
     # unitary operator
     dmd = DMD(data, dt=0.1, rank=rank, unitary=True)
     assert dmd.operator.shape == (rank, rank)
@@ -79,13 +87,19 @@ def test_DMD_single_matrix():
     # optimal mode amplitudes
     dmd = DMD(data, dt=0.1, rank=rank, optimal=True)
     dmd = DMD(data, dt=0.1, rank=rank, unitary=True, optimal=True)
-    assert dmd.amplitude.shape == (rank,)
-    assert dmd.amplitude.dtype == pt.complex64
+    a = dmd.amplitude
+    assert isinstance(a, pt.Tensor)
+    assert a.shape == (rank,)
+    assert a.dtype == pt.complex64
     # total least-squares
     dmd = DMD(data, dt=0.1, tlsq=True)
-    assert dmd.amplitude.dtype == pt.complex64
+    a = dmd.amplitude
+    assert isinstance(a, pt.Tensor)
+    assert a.dtype == pt.complex64
     dmd = DMD(data, dt=0.1, rank=rank, optimal=True, tlsq=True)
-    assert dmd.amplitude.shape == (rank,)
+    a = dmd.amplitude
+    assert isinstance(a, pt.Tensor)
+    assert a.shape == (rank,)
     DX, DY = dmd.tlsq_error
     assert DX.shape == (data.shape[0], data.shape[1] - 1)
     assert DY.shape == (data.shape[0], data.shape[1] - 1)
@@ -134,10 +148,6 @@ def test_DMD_matrix_ensemble():
     assert top.dtype == pt.int64
     assert len(dmd.reconstruction_error) == 2
     assert dmd.projection_error.shape == (rows, 14 - 2)
-    # robust DMD
-    dmd = DMD(data, dt=0.1, rank=rank, robust=True)
-    assert dmd.svd.L.shape == (10, 14 - 2)
-    assert dmd.svd.S.shape == (10, 14 - 2)
     # unitary operator
     dmd = DMD(data, dt=0.1, rank=rank, unitary=True)
     assert dmd.operator.shape == (rank, rank)
