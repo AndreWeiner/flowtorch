@@ -187,7 +187,7 @@ class AMSPOD(object):
         )
         logger.info(f"computing untapered FFT on device '{self._device}'")
         Q_hat = pt.fft.fft(
-            Q_var.to(self._device), n=2 * self._nfft, dim=1, norm="backward"
+            Q_var.to(self._device), n=2 * self._nfft, dim=1, norm="ortho"
         ) * sqrt(self._dt)
         del Q_var
         _free_memory(self._device)
@@ -205,7 +205,7 @@ class AMSPOD(object):
             m, ev = self._spod_at_freq(Q_hat, i, int(n_win[i]))
             m = m / self._weight.type(m.dtype).to(self._device)
             modes[i] = m[:, : min(n_keep, int(n_win[i]))].cpu()
-            evals[i, : int(n_win[i])] = ev.cpu()
+            evals[i, : int(n_win[i])] = ev.cpu() * 2 * self._nfft / (self._dt * self._nt)
         return modes, evals, f
 
     def _parabolic_weights(self, n_tapers: int) -> pt.Tensor:
