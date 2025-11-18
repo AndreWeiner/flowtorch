@@ -187,7 +187,7 @@ class AMSPOD(object):
         )
         logger.info(f"computing untapered FFT on device '{self._device}'")
         Q_hat = pt.fft.fft(
-            Q_var.to(self._device), n=2 * self._nfft, dim=1, norm="ortho"
+            Q_var.to(self._device), n=2 * self._nfft, dim=1, norm="backward"
         ) * sqrt(self._dt)
         del Q_var
         _free_memory(self._device)
@@ -382,7 +382,7 @@ class AMSPOD(object):
                 ev[1:-1] *= 2
             else:
                 ev[1:] *= 2
-        return self._eigvals.abs()
+        return ev
 
     @property
     def modes(self) -> pt.Tensor:
