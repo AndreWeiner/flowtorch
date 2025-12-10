@@ -110,7 +110,7 @@ def test_AMSPOD_cpu():
     with raises(ValueError):
         _ = spod.mode_reconstruction(N // 2, 1)
     # complex input data, odd number of snapshots
-    M, N, K = 20, 30, 5
+    M, N, K = 20, 31, 5
     dm_odd_complex = pt.rand((M, N), dtype=pt.complex64)
     ## no adaptive selection, fewer tapers than rows
     spod = AMSPOD(dm_odd_complex, 1.0, adaptive=False, max_tapers=K, keep_n_modes=K)
