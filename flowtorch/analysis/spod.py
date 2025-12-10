@@ -1,6 +1,6 @@
-"""PyTorch implementation of adaptive multitaper SPOD.
+"""PyTorch implementation of adaptive multi-taper SPOD.
 
-The adaptive multitaper spectral proper orthogonal decomposition (AMSPOD)
+The adaptive multi-taper spectral proper orthogonal decomposition (AMSPOD)
 uses a frequency-variable number of sine-tapers per bin. The main references are:
 
 - Yeung, B. C. Y., Schmidt, O. T.: Adaptive spectral proper orthogonal decomposition
@@ -12,7 +12,7 @@ uses a frequency-variable number of sine-tapers per bin. The main references are
 Compared to the original implementation, multiple realizations of the DFT
 are generated only by multiple tapers. There is no additional subdivision into
 overlapping blocks. Moreover, the compressed version is implemented as a
-lightweight derived class wrapping around the AMSPOD
+lightweight derived class wrapping around the `AMSPOD`, termed `PAMSPOD`.
 """
 
 # standard library packages
@@ -108,7 +108,7 @@ class AMSPOD(object):
         :type data_matrix: pt.Tensor
         :param dt: time increment between snapshots; assumed to be constant
         :type dt: float
-        :param nfft: number of frequency bins when computing the DFT; zero-padding is applied
+        :param nfft: number of frequency bins used when computing the DFT; zero-padding is applied
             if nfft > N; if nfft is None or nfft <= N, then nfft=N is set; defaults to None
         :type nfft: Union[int, None], optional
         :param adaptive: choose the number of tapers adaptively for each frequency bin;
@@ -118,8 +118,8 @@ class AMSPOD(object):
         :param max_tapers: max. number of tapers to use when `adaptive=True` or constant number
             of tapers for all frequencies if `adaptive=False`; the minimum number of tapers is 2; defaults to 50
         :type max_tapers: int, optional
-        :param tolerance: tolerance at which the leading mode of each frequencies is considered
-            to be converged; the difference is measured by computing and comparing the leading mode
+        :param tolerance: tolerance at which the leading mode of each frequency is considered
+            to be converged; the difference is measured by comparing the leading mode
             with i and i+1 tapers for increasing values of i, defaults to 1.0e-5
         :type tolerance: float, optional
         :param weight: weight vector for reducing the mesh-induced bias when computing inner products;
@@ -131,7 +131,7 @@ class AMSPOD(object):
         :type keep_n_modes: int, optional
         :param device: device used for computing; defaults to "cpu"
         :type device: str, optional
-        :param verbose: output log messages; defaults to False
+        :param verbose: extended output of log messages; defaults to False
         :type verbose: str, optional
         """
         self._dm = data_matrix
@@ -214,7 +214,7 @@ class AMSPOD(object):
         The method implements formula (11) of the reference article. The same factorized
         formula as in the Matlab implementation is used.
 
-        :param n_tapers: number of sin tapers/windows
+        :param n_tapers: number of sin-tapers/windows
         :type n_tapers: int
         :return: parabolic window weights decreasing with window order
         :rtype: pt.Tensor
@@ -236,9 +236,9 @@ class AMSPOD(object):
 
         :param Q_hat: DFT of the untapered data of size M x 2*nfft
         :type Q_hat: pt.Tensor
-        :param f_idx: index of the frequency bin of which to compute taped versions
+        :param f_idx: index of the frequency bin of which to compute tapered versions
         :type f_idx: int
-        :param n_tapers: number of sin tapers
+        :param n_tapers: number of sin-tapers
         :type n_tapers: int
         :return: tapered DFT modes of ith frequency bin for specified number of
             tapers (K) arranged as tensor of shape M x K
@@ -259,7 +259,7 @@ class AMSPOD(object):
         :type Q_hat: pt.Tensor
         :param f_idx: index of the frequency bin for which to compute the SPOD
         :type f_idx: int
-        :param n_tapers: number of sin tapers
+        :param n_tapers: number of sin-tapers
         :type n_tapers: int
         :return: eigenvectors (M x K) and eigenvalues (K) of cross spectral density matrix; both tensors are sorted
             according to the (real-valued) eigenvalues in descending order
@@ -354,7 +354,7 @@ class AMSPOD(object):
         The half-bandwidth quantifies the effective frequency resolution.
         A larger bandwidth leads to a greater smoothing of the spectrum.
         The effect of smoothing is lower variance (of the eigenvalues) but
-        also poorer frequency resolution.
+        also poorer effective frequency resolution.
 
         :return: constant half-bandwidth if the number of windows is constant;
             otherwise, one half-bandwidth per frequency bin
@@ -373,7 +373,7 @@ class AMSPOD(object):
           zero and Nyquist frequencies to account for the energy content
           of the negative part of the spectrum
 
-        :return: _description_
+        :return: absolute value of eigenvalues accounting for one-sided spectra
         :rtype: pt.Tensor
         """
         ev = self._eigvals.abs()
@@ -388,7 +388,7 @@ class AMSPOD(object):
     def modes(self) -> pt.Tensor:
         """Leading eigenvectors (modes) of the cross spectral density realizations.
 
-        :return: used-defined number of eigenvectors; see `keep_n_modes`
+        :return: user-defined number of eigenvectors; see `keep_n_modes`
         :rtype: pt.Tensor
         """
         return self._modes
@@ -406,7 +406,7 @@ class AMSPOD(object):
     def residual(self) -> Union[pt.Tensor, None]:
         """Residual of the leading mode during adaptive refinement.
 
-        :return: residual computed as |(1 - mode similarity)|; since the number
+        :return: residual computed as |(1 - mode_similarity)|; since the number
             of tapers varies per bin, a tensor of size n_freq x (n_tapers - 2) is filled
             with NANs, and then the residuals are overwritten if available; (n_tapers - 2)
             is a consequence of the minimum number of tapers (2) and the residual being
@@ -433,7 +433,7 @@ class AMSPOD(object):
         f_min: float = -float("inf"),
         f_max: float = float("inf"),
     ) -> pt.Tensor:
-        """Get the indices of the first n most important modes.
+        """Get the indices of the first n energetically most important modes.
 
         :param n: number of indices to return; defaults to 1
         :type n: int
@@ -443,8 +443,8 @@ class AMSPOD(object):
         :param f_max: consider only modes with a frequency smaller than f_max;
             defaults to -inf
         :type f_max: float, optional
-        :return: indices of top n modes sorted by amplitude or integral
-            contribution
+        :return: indices of top n modes sorted by absolute value of the leading
+            eigenvalue
         :rtype: pt.Tensor
         """
         modes_in_range = pt.logical_and(self.frequency >= f_min, self.frequency < f_max)
@@ -535,7 +535,7 @@ class PAMSPOD(AMSPOD):
         :type data_matrix: pt.Tensor
         :param dt: time increment between snapshots; assumed to be constant
         :type dt: float
-        :param nfft: number of frequency bins when computing the DFT; zero-padding is applied
+        :param nfft: number of frequency bins for computing the DFT; zero-padding is applied
             if nfft > N; if nfft is None or nfft <= N, then nfft=N is set; defaults to None
         :type nfft: Union[int, None], optional
         :param adaptive: choose the number of tapers adaptively for each frequency bin;
@@ -545,8 +545,8 @@ class PAMSPOD(AMSPOD):
         :param max_tapers: max. number of tapers to use when `adaptive=True` or constant number
             of tapers for all frequencies if `adaptive=False`; the minimum number of tapers is 2; defaults to 50
         :type max_tapers: int, optional
-        :param tolerance: tolerance at which the leading mode of each frequencies is considered
-            to be converged; the difference is measured by computing and comparing the leading mode
+        :param tolerance: tolerance at which the leading mode at each frequencies is considered
+            to be converged; the difference is measured by comparing the leading mode
             with i and i+1 tapers for increasing values of i, defaults to 1.0e-5
         :type tolerance: float, optional
         :param weight: weight vector for reducing the mesh-induced bias when computing inner products;
@@ -558,7 +558,7 @@ class PAMSPOD(AMSPOD):
         :type keep_n_modes: int, optional
         :param device: device used for computing; defaults to "cpu"
         :type device: str, optional
-        :param verbose: output log messages; defaults to False
+        :param verbose: extended output of log messages; defaults to False
         :type verbose: str, optional
         :param rank: size of POD basis; if None, the full basis is used; defaults to None
         :type rank: int, optional
@@ -609,7 +609,7 @@ class PAMSPOD(AMSPOD):
             return pt.einsum("mr,nrk->nmk", self._svd.U.type(m.dtype), m)
 
     @property
-    def svd(self):
+    def svd(self) -> SVD:
         """SVD object used for subspace projection.
 
         :return: economy SVD
