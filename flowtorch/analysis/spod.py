@@ -360,9 +360,8 @@ class AMSPOD(object):
             otherwise, one half-bandwidth per frequency bin
         :rtype: Union[float, pt.Tensor]
         """
-        n_freq = len(self.frequency)
         n_tapers = self.log["n_tapers"] if self._adaptive else self._max_tapers
-        return 0.5 * (n_tapers + 1) / (n_freq + 1) / self._dt
+        return 0.5 * (n_tapers + 1) / (self._nfft + 1) / self._dt
 
     @property
     def eigvals(self) -> pt.Tensor:
