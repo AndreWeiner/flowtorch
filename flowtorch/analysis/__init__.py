@@ -11,3 +11,4 @@ from .svd import SVD
 from .linear_model import LinearModel
 from .dft import DFT, PDFT
 from .spod import AMSPOD, PAMSPOD
+from .periodogram import AMPS
