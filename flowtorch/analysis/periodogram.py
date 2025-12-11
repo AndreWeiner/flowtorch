@@ -4,7 +4,7 @@
 import logging
 from typing import Union, Tuple
 from collections import defaultdict
-from math import sqrt
+from math import sqrt, log10
 
 # third-party packages
 import torch as pt
@@ -188,8 +188,9 @@ class AMPS(object):
         if self._adaptive:
             logger.info("performing adaptive taper selection")
             converged = pt.zeros(n_freq, dtype=pt.bool)
-            prev_power = pt.ones(n_freq, dtype=Q_hat.dtype)
+            prev_power = pt.ones(n_freq, dtype=self._signal.dtype)
             self._log["convergence"] = defaultdict(list)
+            eps = pt.finfo(self._signal.dtype).tiny
             itr = 0
             while not bool(converged.all()):
                 if self._verbose:
@@ -201,7 +202,9 @@ class AMPS(object):
                         continue
                     K = int(n_tapers[f_idx])
                     power = self._sin_taper_dft(Q_hat, f_idx, K)
-                    change = (power - prev_power[f_idx]).abs() / power
+                    log_power = log10(power + eps)
+                    log_prev = log10(prev_power[f_idx] + eps)
+                    change = abs(log_power - log_prev)
                     if itr > 0:
                         self._log["convergence"][f_idx].append(change)
                     prev_power[f_idx] = power
