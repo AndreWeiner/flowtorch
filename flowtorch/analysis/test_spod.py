@@ -170,6 +170,6 @@ def test_PAMSPOD():
     r = spod.mode_reconstruction(0, 0)
     assert r.shape == dm.shape
     assert r.dtype == dm.dtype
-    r = spod.mode_reconstruction(0, 0, 1.0, 35)
+    r = spod.mode_reconstruction(0, 0, 1.0, 35, scale=True)
     assert r.shape == (M, 35)
     assert r.dtype == dm.dtype

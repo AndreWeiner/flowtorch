@@ -460,6 +460,7 @@ class AMSPOD(object):
         eig_idx: int = 0,
         dt: Union[float, None] = None,
         N: Union[int, None] = None,
+        scale: bool = False,
     ) -> pt.Tensor:
         """Compute time-domain reconstruction based on a single mode.
 
@@ -476,6 +477,8 @@ class AMSPOD(object):
         :type dt: Union[float, None], optional
         :param N: optional number of steps to reconstruct; defaults to None (use original number of snapshots)
         :type N: Union[int, None], optional
+        :param scale: energy-consistent model scaling; defaults to False
+        :type scale: bool, optional
         :raises ValueError: for invalid frequency bins
         :raises ValueError: for invalid eigenbasis index
         :raises ValueError: if the corresponding mode was not saved due to `keep_n_modes`
@@ -496,7 +499,7 @@ class AMSPOD(object):
             raise ValueError(
                 f"mode {eig_idx} was not saved (keep_n_modes={self._n_keep})"
             )
-        s = (self.eigvals[f_idx, eig_idx] * K).sqrt()
+        s = (self.eigvals[f_idx, eig_idx] * K).sqrt() if scale else 1.0
         m = self._modes[f_idx, :, eig_idx]
         t_res = self._dt if dt is None else dt
         steps = self._nt if N is None else N
@@ -622,6 +625,7 @@ class PAMSPOD(AMSPOD):
         eig_idx: int = 0,
         dt: Union[float, None] = None,
         N: Union[int, None] = None,
+        scale: bool = False,
     ) -> pt.Tensor:
         """Compute time-domain reconstruction based on a single mode.
 
@@ -637,8 +641,10 @@ class PAMSPOD(AMSPOD):
         :type dt: Union[float, None], optional
         :param N: optional number of steps to reconstruct; defaults to None (use original number of snapshots)
         :type N: Union[int, None], optional
+        :param scale: energy-consistent model scaling; defaults to False
+        :type scale: bool, optional
         :return: reconstruction based on a single mode
         :rtype: pt.Tensor
         """
-        rec = super().mode_reconstruction(f_idx, eig_idx, dt, N)
+        rec = super().mode_reconstruction(f_idx, eig_idx, dt, N, scale)
         return self.svd.U.type(rec.dtype) @ rec
