@@ -116,7 +116,7 @@ class CellWeightEstimator:
     :type normalize: bool
     """
 
-    def __init__(self, coordinates: Tensor, n_workers: int = 4, normalize: bool = True, k: int = 8):
+    def __init__(self, coordinates: Tensor, n_workers: int = 4, normalize: bool = True, k: int = None):
         self._normalize = normalize
         self._vertices = coordinates
         self._n_workers = n_workers
@@ -130,7 +130,10 @@ class CellWeightEstimator:
         self._volume_original = self._hull.volume
 
         # distances
-        self._k = k if len(self._dims) == 3 else 4
+        if k is not None:
+            self._k = k
+        else:
+            self._k = 8 if len(self._dims) == 3 else 4
 
         # initialization
         self._n_dims = self._vertices.size(1)
