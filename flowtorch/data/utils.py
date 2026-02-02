@@ -109,14 +109,14 @@ class CellWeightEstimator:
     :type coordinates: torch.Tensor
     :param k: Number of nearest neighbors to use for distance estimation
         (default: 8 for 3D, 4 for 2D).
-    :type k: int
+    :type k: Union[int, None]
     :param n_workers: Number of parallel workers for KD-tree queries.
     :type n_workers: int
     :param normalize: Normalize the computed volumes to [0, 1].
     :type normalize: bool
     """
 
-    def __init__(self, coordinates: Tensor, n_workers: int = 4, normalize: bool = True, k: int = None):
+    def __init__(self, coordinates: Tensor, n_workers: int = 4, normalize: bool = True, k: Union[int, None] = None):
         self._normalize = normalize
         self._vertices = coordinates
         self._n_workers = n_workers
