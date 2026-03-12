@@ -205,7 +205,9 @@ class AMSPOD(object):
             m, ev = self._spod_at_freq(Q_hat, i, int(n_win[i]))
             m = m / self._weight.type(m.dtype).to(self._device)
             modes[i] = m[:, : min(n_keep, int(n_win[i]))].cpu()
-            evals[i, : int(n_win[i])] = ev.cpu() * 2 * self._nfft / (self._dt * self._nt)
+            evals[i, : int(n_win[i])] = (
+                ev.cpu() * 2 * self._nfft / (self._dt * self._nt)
+            )
         return modes, evals, f
 
     def _parabolic_weights(self, n_tapers: int) -> pt.Tensor:
@@ -618,6 +620,19 @@ class PAMSPOD(AMSPOD):
         :rtype: SVD
         """
         return self._svd
+
+    def get_mode(self, f_idx: int, mode_idx: int = 0) -> pt.Tensor:
+        """Get mode/eigenvector of prescript frequency bin and mode index.
+
+        :param f_idx: index of the frequency bin
+        :type f_idx: int
+        :param mode_idx: index of the sorted modes per frequency bin, defaults to 0
+        :type mode_idx: int, optional
+        :return: mode in full state space
+        :rtype: pt.Tensor
+        """
+        mode = super().modes[f_idx, :, mode_idx]
+        return (self.svd.U.type(mode.dtype) * mode).sum(dim=1)
 
     def mode_reconstruction(
         self,
