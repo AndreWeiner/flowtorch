@@ -632,7 +632,10 @@ class PAMSPOD(AMSPOD):
         :rtype: pt.Tensor
         """
         mode = super().modes[f_idx, :, mode_idx]
-        return (self.svd.U.type(mode.dtype) * mode).sum(dim=1)
+        if hasattr(self, "_weight_org"):
+            return ((self.svd.U / self._weight_org).type(mode.dtype) * mode).sum(dim=1)
+        else:
+            return (self.svd.U.type(mode.dtype) * mode).sum(dim=1)
 
     def mode_reconstruction(
         self,
@@ -662,4 +665,7 @@ class PAMSPOD(AMSPOD):
         :rtype: pt.Tensor
         """
         rec = super().mode_reconstruction(f_idx, eig_idx, dt, N, scale)
-        return self.svd.U.type(rec.dtype) @ rec
+        if hasattr(self, "_weight_org"):
+            return (self.svd.U  / self._weight_org).type(rec.dtype) @ rec
+        else:
+            return self.svd.U.type(rec.dtype) @ rec
