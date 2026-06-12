@@ -159,22 +159,25 @@ make html
 ```
 
 ### Unit testing
-All sub-packages contain unit tests, which require the installation of PyTest:
+The test suite is located in the top-level `tests` directory and requires the installation of PyTest:
 ```
 pip3 install pytest
 ```
-Moreover, the flowTorch datasets must be downloaded and referenced as described in the previous section.
-To run all unit tests of all sub-packages, execute:
+To run the default test suite, execute:
 ```
-pytest flowtorch
+pytest
 ```
-You can also execute all tests in a sub-package, e.g., data
+Tests that require the flowTorch datasets are marked as integration tests and are skipped unless the datasets are downloaded and referenced as described in the previous section. To run only tests that do not require external datasets, execute:
 ```
-pytest flowtorch/data
+pytest -m "not integration"
+```
+You can also execute all tests for one test group, e.g., data:
+```
+pytest tests/data
 ```
 or run individual test modules, e.g.,
 ```
-pytest flowtorch/data/test_FOAMDataloader.py
+pytest tests/data/test_foam_dataloader.py
 ```
 
 ## Getting help
@@ -210,4 +213,3 @@ For a list of scientific works relying on flowTorch, refer to [this list](refere
 ## License
 
 *flowTorch* is [GPLv3](https://en.wikipedia.org/wiki/GNU_General_Public_License)-licensed; refer to the [LICENSE](https://github.com/FlowModelingControl/flowtorch/blob/main/LICENSE) file for more information.
-
