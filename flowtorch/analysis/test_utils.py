@@ -6,7 +6,7 @@ from os import remove
 from pytest import raises
 import torch as pt
 from .optdmd import OptDMD
-from .utils import trajectory_train_test_split, EarlyStopping
+from .utils import unsqueeze_if_1d, trajectory_train_test_split, EarlyStopping
 
 
 def test_trajectory_train_test_split():
@@ -86,3 +86,12 @@ class TestEarlyStopping:
         assert all(pt.isclose(eigs_after, eigs_before))
         if isfile(chp):
             remove(chp)
+
+
+def test_unsqueeze_if_1d():
+    tmp = unsqueeze_if_1d(pt.empty(10))
+    assert tmp.shape == (1, 10)
+    tmp = unsqueeze_if_1d(pt.empty(10), True)
+    assert tmp.shape == (10, 1)
+    tmp = unsqueeze_if_1d(pt.empty(10, 10))
+    assert tmp.shape == (10, 10)

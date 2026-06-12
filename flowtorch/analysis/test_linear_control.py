@@ -3,17 +3,7 @@
 
 from pytest import raises
 import torch as pt
-from .linear_control import _unsqueeze_if_1d, LinearControl
-
-
-def test_unsqueeze_if_1d():
-    tmp = _unsqueeze_if_1d(pt.empty(10))
-    assert tmp.shape == (1, 10)
-    tmp = _unsqueeze_if_1d(pt.empty(10), True)
-    assert tmp.shape == (10, 1)
-    tmp = _unsqueeze_if_1d(pt.empty(10, 10))
-    assert tmp.shape == (10, 10)
-
+from .linear_control import LinearControlModel
 
 
 class TestLinearControl:
@@ -21,8 +11,8 @@ class TestLinearControl:
         dm = pt.rand((10, 20))
         cm = pt.rand(19)
         with raises(ValueError) as e:
-            lc = LinearControl(dm, cm[:-1], 1.0)
-        lc = LinearControl(dm, cm, 1.0)
+            lc = LinearControlModel(dm, cm[:-1], 1.0)
+        lc = LinearControlModel(dm, cm, 1.0)
         assert lc.A.shape == (10, 10)
         assert lc.A.dtype == dm.dtype
         assert lc.B.shape == (10, 1)
@@ -39,7 +29,7 @@ class TestLinearControl:
     def test_dynamics(self):
         dm = pt.rand((10, 20))
         cm = pt.rand(19)
-        lc = LinearControl(dm, cm, 1.0)
+        lc = LinearControlModel(dm, cm, 1.0)
         assert lc.unforced_dynamics.shape == (10, 20)
         assert lc.forced_dynamics.shape == (10, 20)
         assert lc.dynamics.shape == (10, 20)
@@ -47,7 +37,7 @@ class TestLinearControl:
     def test_reconstruction(self):
         dm = pt.rand((10, 20))
         cm = pt.rand(19)
-        lc = LinearControl(dm, cm, 1.0)
+        lc = LinearControlModel(dm, cm, 1.0)
         assert lc.reconstruction.shape == (10, 20)
         assert lc.reconstruction.dtype == dm.dtype
         assert lc.reconstruction_error.shape == (10, 20)
@@ -56,7 +46,7 @@ class TestLinearControl:
     def test_predict(self):
         dm = pt.rand((10, 20))
         cm = pt.rand(19)
-        lc = LinearControl(dm, cm, 1.0)
+        lc = LinearControlModel(dm, cm, 1.0)
         with raises(ValueError) as e:
             lc.predict(dm[:, 0], dm[:2, :])
         pred = lc.predict(dm[:, 0], cm)

@@ -145,3 +145,8 @@ class EarlyStopping:
             if self._counter >= self._patience:
                 self._stop = True
         return self._stop
+
+
+def unsqueeze_if_1d(tensor: pt.Tensor, last: bool = False):
+    dim = 1 if last else 0
+    return tensor.unsqueeze(dim=dim) if len(tensor.shape) < 2 else tensor
