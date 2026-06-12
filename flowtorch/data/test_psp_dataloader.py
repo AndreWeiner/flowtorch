@@ -3,6 +3,12 @@ import pytest
 # third party packages
 import torch as pt
 # flowtorch packages
+from flowtorch.conftest import requires_datasets
+
+
+requires_dataset = requires_datasets("ipsp_fake.hdf5")
+pytestmark = [requires_dataset, pytest.mark.integration]
+
 from flowtorch import DATASETS
 from flowtorch.data import PSPDataloader
 

@@ -3,8 +3,15 @@ from collections import deque
 # third party packages
 import torch as pt
 import numpy as np
+import pytest
 from pytest import raises
 # flowtorch packages
+from flowtorch.conftest import requires_datasets
+
+
+requires_dataset = requires_datasets("of_cylinder2D_binary")
+pytestmark = [requires_dataset, pytest.mark.integration]
+
 from flowtorch import DATASETS
 from flowtorch.data import FOAMDataloader
 from flowtorch.rom import SVDEncoder, CNM

@@ -6,6 +6,11 @@ import pytest
 import torch as pt
 # flowtorch packages
 from .constants import find_datasets
+from flowtorch.conftest import requires_datasets
+
+
+requires_dataset = requires_datasets()
+pytestmark = [requires_dataset, pytest.mark.integration]
 
 def test_find_datasets():
     # assuming that the datasets are available and FLOWTORCH_DATASETS

@@ -3,6 +3,17 @@ import pytest
 # third party packages
 import torch as pt
 # flowtorch packages
+from flowtorch.conftest import requires_datasets
+
+
+requires_dataset = requires_datasets(
+    "csv_naca0012_alpha4_surface",
+    "csv_surface_mounted_cube_xy",
+    "csv_aoa8_beta0_xc100_stereopiv",
+    "csv_davis_multiple_fields",
+)
+pytestmark = [requires_dataset, pytest.mark.integration]
+
 from flowtorch.constants import FLOAT_TOLERANCE
 from flowtorch import DATASETS
 from flowtorch.data import CSVDataloader

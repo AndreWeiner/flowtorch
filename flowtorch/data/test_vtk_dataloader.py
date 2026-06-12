@@ -3,6 +3,15 @@ import pytest
 # third party packages
 import torch as pt
 # flowtorch packages
+from flowtorch.conftest import requires_datasets
+
+
+requires_dataset = requires_datasets(
+    "vtk_cylinder_re200_flexi",
+    "vtk_su2_airfoil_2D",
+)
+pytestmark = [requires_dataset, pytest.mark.integration]
+
 from flowtorch import DATASETS, FLOAT_TOLERANCE
 from flowtorch.data import VTKDataloader
 

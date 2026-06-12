@@ -4,6 +4,12 @@ from os.path import join
 import pytest
 import torch as pt
 # flowtorch packages
+from flowtorch.conftest import requires_datasets
+
+
+requires_dataset = requires_datasets("plt_naca2409_surface")
+pytestmark = [requires_dataset, pytest.mark.integration]
+
 from flowtorch import DATASETS
 from flowtorch.data import TecplotDataloader
 

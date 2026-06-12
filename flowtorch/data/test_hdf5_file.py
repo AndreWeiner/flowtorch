@@ -5,6 +5,17 @@ import pytest
 import torch as pt
 from h5py import File
 # flowtorch packages
+from flowtorch.conftest import requires_datasets
+
+
+requires_dataset = requires_datasets(
+    "of_cavity_ascii",
+    "of_cavity_binary",
+    "of_cavity_ascii_parallel",
+    "of_cavity_binary_parallel",
+)
+pytestmark = [requires_dataset, pytest.mark.integration]
+
 from flowtorch import DATASET_PATH, DATASETS
 from flowtorch.data import (HDF5Dataloader, HDF5Writer, FOAM2HDF5,
                             XDMFWriter, copy_hdf5_mesh)

@@ -2,10 +2,17 @@
 import torch as pt
 import pytest
 # flowtorch packages
+from flowtorch.conftest import requires_datasets
+
+
+requires_dataset = requires_datasets("of_cylinder2D_binary")
+pytestmark = [requires_dataset, pytest.mark.integration]
+
 from flowtorch import DATASETS
 from flowtorch.data import FOAMDataloader
 from flowtorch.analysis import SVD
 from flowtorch.rom import SVDEncoder
+
 
 class TestSVDEncoder():
     def setup_method(self):

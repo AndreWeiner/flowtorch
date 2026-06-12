@@ -3,6 +3,12 @@
 """
 import pytest
 
+from flowtorch.conftest import requires_datasets
+
+
+requires_dataset = requires_datasets("s_cube")
+pytestmark = [requires_dataset, pytest.mark.integration]
+
 from flowtorch.constants import DATASETS
 from flowtorch.data import SCUBEDataloader
 

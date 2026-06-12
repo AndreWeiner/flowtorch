@@ -5,6 +5,17 @@ import sys
 # third party packages
 import torch as pt
 # flowtorch packages
+from flowtorch.conftest import requires_datasets
+
+
+requires_dataset = requires_datasets(
+    "of_cavity_ascii",
+    "of_cavity_binary",
+    "of_cavity_ascii_parallel",
+    "of_cavity_binary_parallel",
+)
+pytestmark = [requires_dataset, pytest.mark.integration]
+
 from flowtorch import FLOAT_TOLERANCE, DATASETS
 from flowtorch.data import FOAMDataloader, FOAMCase, FOAMMesh
 

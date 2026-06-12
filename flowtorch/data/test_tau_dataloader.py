@@ -5,6 +5,16 @@ from os.path import join
 import pytest
 import torch as pt
 # flowtorch packages
+from flowtorch.conftest import requires_datasets
+
+
+requires_dataset = requires_datasets(
+    "tau_backward_facing_step",
+    "tau_cylinder_2D",
+    "tau_surface_wing",
+)
+pytestmark = [requires_dataset, pytest.mark.integration]
+
 from flowtorch import DATASETS
 from flowtorch.data import TAUDataloader, TAUSurfaceDataloader, TAUConfig
 from flowtorch.data.tau_dataloader import (
