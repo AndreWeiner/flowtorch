@@ -77,9 +77,9 @@ Currently, the following sub-packages are under active development. Note that so
 The easiest way to install *flowTorch* is as follows (use the development branch *aweiner* for access to the latest developments):
 ```
 # install via pip
-pip3 install git+https://github.com/FlowModelingControl/flowtorch
+pip3 install git+https://github.com/AndreWeiner/flowtorch
 # or install a specific branch, e.g., aweiner
-pip3 install git+https://github.com/FlowModelingControl/flowtorch.git@aweiner
+pip3 install git+https://github.com/AndreWeiner/flowtorch.git@aweiner
 
 # to uninstall flowTorch, run
 pip3 uninstall flowtorch
