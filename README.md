@@ -1,4 +1,6 @@
-![FOR2895Logo](media/flowTorch_Logo_Wide.png)
+<p align="center">
+  <img src="media/flowtorch_logo.svg" alt="flowTorch logo" height="240">
+</p>
 
 # flowTorch
 
