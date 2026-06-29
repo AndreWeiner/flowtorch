@@ -573,15 +573,30 @@ class AMSPOD(object):
         n_modes = self._valid_n_coeff_modes(n_modes)
         modes = self._modes[:, :, :n_modes].permute(1, 0, 2)
         basis = modes.reshape(self._nx, -1)
-        weight = self._weight.type(basis.dtype)
-        basis_weighted = basis * weight
         snapshots = self._dm.clone()
         if self._subtract_mean:
             snapshots -= snapshots.mean(dim=1).unsqueeze(-1)
-        snapshots_weighted = snapshots.type(basis.dtype) * weight
-        gram = basis_weighted.conj().T @ basis_weighted
-        rhs = basis_weighted.conj().T @ snapshots_weighted
-        coefficients = pt.linalg.pinv(gram) @ rhs
+
+        if self._complex:
+            weight = self._weight.type(basis.dtype)
+            basis_weighted = basis * weight
+            snapshots_weighted = snapshots.type(basis.dtype) * weight
+            gram = basis_weighted.conj().T @ basis_weighted
+            rhs = basis_weighted.conj().T @ snapshots_weighted
+            coefficients = pt.linalg.pinv(gram) @ rhs
+        else:
+            basis_real = pt.cat((basis.real, -basis.imag), dim=1)
+            weight = self._weight.type(basis_real.dtype)
+            basis_weighted = basis_real * weight
+            snapshots_weighted = snapshots.type(basis_real.dtype) * weight
+            gram = basis_weighted.T @ basis_weighted
+            rhs = basis_weighted.T @ snapshots_weighted
+            coefficients_real = pt.linalg.pinv(gram) @ rhs
+            n_basis = basis.shape[1]
+            coefficients = (
+                coefficients_real[:n_basis].type(basis.dtype)
+                + 1j * coefficients_real[n_basis:].type(basis.dtype)
+            )
         return coefficients.reshape(self._frequency.shape[0], n_modes, self._nt)
 
     def mode_reconstruction(

@@ -216,19 +216,48 @@ def test_AMSPOD_temporal_coefficients():
     assert coeffs.shape == (N // 2 + 1, 1, N)
     assert coeffs.dtype == pt.complex64
     modes = spod.modes[:, :, :1].permute(1, 0, 2).reshape(M, -1)
-    weight = spod._weight.type(modes.dtype)
-    modes_weighted = modes * weight
+    modes_real = pt.cat((modes.real, -modes.imag), dim=1)
+    weight = spod._weight.type(modes_real.dtype)
+    modes_weighted = modes_real * weight
     snapshots = dm - dm.mean(dim=1).unsqueeze(-1)
-    snapshots_weighted = snapshots.type(modes.dtype) * weight
-    gram = modes_weighted.conj().T @ modes_weighted
-    rhs = modes_weighted.conj().T @ snapshots_weighted
-    expected = (pt.linalg.pinv(gram) @ rhs).reshape(N // 2 + 1, 1, N)
+    snapshots_weighted = snapshots.type(modes_real.dtype) * weight
+    gram = modes_weighted.T @ modes_weighted
+    rhs = modes_weighted.T @ snapshots_weighted
+    expected_real = pt.linalg.pinv(gram) @ rhs
+    expected = (
+        expected_real[: modes.shape[1]].type(modes.dtype)
+        + 1j * expected_real[modes.shape[1] :].type(modes.dtype)
+    ).reshape(N // 2 + 1, 1, N)
     pt.testing.assert_close(coeffs, expected)
     with pytest.warns(UserWarning, match="exceeds keep_n_modes"):
         coeffs = spod.temporal_coefficients(n_modes=3)
     assert coeffs.shape == (N // 2 + 1, 2, N)
     with raises(ValueError):
         _ = spod.temporal_coefficients(n_modes=0)
+
+
+def test_AMSPOD_temporal_coefficients_complex_data():
+    M, N, K = 12, 14, 4
+    dm = pt.rand((M, N), dtype=pt.complex64)
+    spod = AMSPOD(
+        dm,
+        1.0,
+        adaptive=False,
+        max_tapers=K,
+        keep_n_modes=1,
+    )
+    coeffs = spod.temporal_coefficients()
+    assert coeffs.shape == (N, 1, N)
+    assert coeffs.dtype == pt.complex64
+    modes = spod.modes[:, :, :1].permute(1, 0, 2).reshape(M, -1)
+    weight = spod._weight.type(modes.dtype)
+    modes_weighted = modes * weight
+    snapshots = dm - dm.mean(dim=1).unsqueeze(-1)
+    snapshots_weighted = snapshots.type(modes.dtype) * weight
+    gram = modes_weighted.conj().T @ modes_weighted
+    rhs = modes_weighted.conj().T @ snapshots_weighted
+    expected = (pt.linalg.pinv(gram) @ rhs).reshape(N, 1, N)
+    pt.testing.assert_close(coeffs, expected)
 
 
 def test_AMSPOD_temporal_coefficients_adaptive_mode_limit():
