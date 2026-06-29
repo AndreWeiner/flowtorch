@@ -18,6 +18,7 @@ lightweight derived class wrapping around the `AMSPOD`, termed `PAMSPOD`.
 # standard library packages
 import logging
 import gc
+import warnings
 from typing import Union, Tuple
 from math import sqrt
 from collections import defaultdict
@@ -455,6 +456,67 @@ class AMSPOD(object):
         n = min(n, mode_indices.shape[0])
         top_n = self.eigvals[mode_indices][:, 0].topk(n).indices
         return mode_indices[top_n]
+
+    def _valid_n_coeff_modes(self, n_modes: int) -> int:
+        """Limit coefficient mode count to modes available at every frequency."""
+        if n_modes < 1:
+            raise ValueError("n_modes must be at least 1")
+        if n_modes > self._n_keep:
+            warnings.warn(
+                f"n_modes={n_modes:d} exceeds keep_n_modes={self._n_keep:d}; "
+                f"using n_modes={self._n_keep:d}",
+                UserWarning,
+            )
+            n_modes = self._n_keep
+        n_available = self._modes.shape[-1]
+        if self._adaptive:
+            n_available = min(
+                n_available, int(self._log["n_tapers"].min().item())
+            )
+        if n_modes > n_available:
+            warnings.warn(
+                f"n_modes={n_modes:d} exceeds the minimum number of available "
+                f"modes per frequency bin ({n_available:d}); using n_modes={n_available:d}",
+                UserWarning,
+            )
+            n_modes = n_available
+        return n_modes
+
+    def temporal_coefficients(self, n_modes: int = 1) -> pt.Tensor:
+        """Compute SPOD time coefficients by oblique projection.
+
+        The leading ``n_modes`` from all frequency bins are collected in a
+        single non-orthogonal basis. The coefficients are obtained with the
+        weighted oblique projection described in frequency-time SPOD analysis,
+        i.e. by solving the normal equations for the weighted spatial modes.
+        See Nekkanti, A. and Schmidt, O. T., "Frequency-time analysis,
+        low-rank reconstruction and denoising of turbulent flows using SPOD",
+        Journal of Fluid Mechanics, 926, A26, 2021,
+        https://doi.org/10.1017/jfm.2021.681.
+
+        :param n_modes: number of leading modes per frequency bin used in the
+            projection; if larger than ``keep_n_modes`` or, for adaptive SPOD,
+            larger than the minimum number of available modes per bin, the
+            value is reduced with a warning; defaults to 1
+        :type n_modes: int, optional
+        :raises ValueError: if ``n_modes`` is smaller than one
+        :return: temporal coefficients arranged as
+            ``(n_frequency, n_modes, n_snapshots)``
+        :rtype: pt.Tensor
+        """
+        n_modes = self._valid_n_coeff_modes(n_modes)
+        modes = self._modes[:, :, :n_modes].permute(1, 0, 2)
+        basis = modes.reshape(self._nx, -1)
+        weight = self._weight.type(basis.dtype)
+        basis_weighted = basis * weight
+        snapshots = self._dm.clone()
+        if self._subtract_mean:
+            snapshots -= snapshots.mean(dim=1).unsqueeze(-1)
+        snapshots_weighted = snapshots.type(basis.dtype) * weight
+        gram = basis_weighted.conj().T @ basis_weighted
+        rhs = basis_weighted.conj().T @ snapshots_weighted
+        coefficients = pt.linalg.pinv(gram) @ rhs
+        return coefficients.reshape(self._frequency.shape[0], n_modes, self._nt)
 
     def mode_reconstruction(
         self,

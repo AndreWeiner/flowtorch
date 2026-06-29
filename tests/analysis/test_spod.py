@@ -3,7 +3,13 @@
 import pytest
 from pytest import raises
 import torch as pt
-from flowtorch.analysis.spod import AMSPOD, PAMSPOD, _prepare_weights, _calc_mode_similarity, _free_memory
+from flowtorch.analysis.spod import (
+    AMSPOD,
+    PAMSPOD,
+    _prepare_weights,
+    _calc_mode_similarity,
+    _free_memory,
+)
 
 
 def test_prepare_weights():
@@ -128,6 +134,46 @@ def test_AMSPOD_cpu():
     assert m.shape == (n_freq, M, 1)
     assert "convergence" in spod._log.keys()
     assert len(spod._log["convergence"]) == n_freq
+
+
+def test_AMSPOD_temporal_coefficients():
+    M, N, K = 12, 14, 4
+    dm = pt.rand((M, N), dtype=pt.float32)
+    w = pt.rand(M, dtype=pt.float32)
+    spod = AMSPOD(
+        dm,
+        1.0,
+        adaptive=False,
+        weight=w,
+        max_tapers=K,
+        keep_n_modes=2,
+    )
+    coeffs = spod.temporal_coefficients()
+    assert coeffs.shape == (N // 2 + 1, 1, N)
+    assert coeffs.dtype == pt.complex64
+    modes = spod.modes[:, :, :1].permute(1, 0, 2).reshape(M, -1)
+    weight = spod._weight.type(modes.dtype)
+    modes_weighted = modes * weight
+    snapshots = dm - dm.mean(dim=1).unsqueeze(-1)
+    snapshots_weighted = snapshots.type(modes.dtype) * weight
+    gram = modes_weighted.conj().T @ modes_weighted
+    rhs = modes_weighted.conj().T @ snapshots_weighted
+    expected = (pt.linalg.pinv(gram) @ rhs).reshape(N // 2 + 1, 1, N)
+    pt.testing.assert_close(coeffs, expected)
+    with pytest.warns(UserWarning, match="exceeds keep_n_modes"):
+        coeffs = spod.temporal_coefficients(n_modes=3)
+    assert coeffs.shape == (N // 2 + 1, 2, N)
+    with raises(ValueError):
+        _ = spod.temporal_coefficients(n_modes=0)
+
+
+def test_AMSPOD_temporal_coefficients_adaptive_mode_limit():
+    M, N = 12, 14
+    dm = pt.rand((M, N), dtype=pt.float32)
+    spod = AMSPOD(dm, 1.0, adaptive=True, max_tapers=2, keep_n_modes=5)
+    with pytest.warns(UserWarning, match="minimum number of available modes"):
+        coeffs = spod.temporal_coefficients(n_modes=3)
+    assert coeffs.shape == (N // 2 + 1, 2, N)
 
 
 @pytest.mark.skipif(not pt.cuda.is_available(), reason="CUDA not available")
