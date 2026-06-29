@@ -61,6 +61,18 @@ def test_AMSPOD_cpu():
     assert e.shape == (n_freq, K)
     top = spod.top_modes(5)
     assert len(top) == 5
+    top = spod.top_modes(5, eig_idx="sum")
+    assert len(top) == 5
+    top = spod.top_modes(5, f_min=0.1, f_max=0.4)
+    assert 0 < len(top) <= 5
+    assert bool((spod.frequency[top] >= 0.1).all())
+    assert bool((spod.frequency[top] < 0.4).all())
+    with raises(ValueError):
+        _ = spod.top_modes(0)
+    with raises(ValueError):
+        _ = spod.top_modes(5, eig_idx=K)
+    with raises(ValueError):
+        _ = spod.top_modes(5, eig_idx="invalid")
     ## adaptive selection, keep only first mode
     spod = AMSPOD(dm_even_real, 1.0, max_tapers=K, keep_n_modes=1)
     m = spod.modes
@@ -134,6 +146,58 @@ def test_AMSPOD_cpu():
     assert m.shape == (n_freq, M, 1)
     assert "convergence" in spod._log.keys()
     assert len(spod._log["convergence"]) == n_freq
+
+
+def test_AMSPOD_top_modes_log_segments():
+    spod = AMSPOD.__new__(AMSPOD)
+    spod._frequency = pt.tensor([0.0, 1.0, 2.0, 5.0, 10.0, 20.0])
+    spod._eigvals = pt.tensor(
+        [[0.0, 0.0], [1.0, 3.0], [5.0, 1.0], [2.0, 8.0], [7.0, 2.0], [4.0, 10.0]]
+    )
+    spod._complex = True
+    spod._adaptive = False
+
+    pt.testing.assert_close(spod.top_modes(2), pt.tensor([2, 4]))
+    pt.testing.assert_close(spod.top_modes(2, eig_idx=1), pt.tensor([1, 5]))
+    pt.testing.assert_close(spod.top_modes(2, eig_idx="sum"), pt.tensor([2, 5]))
+    pt.testing.assert_close(spod.top_modes(2, f_min=2.1, f_max=15.0), pt.tensor([3, 4]))
+
+
+def test_AMSPOD_top_modes_negative_frequencies():
+    spod = AMSPOD.__new__(AMSPOD)
+    spod._frequency = pt.tensor([0.0, 1.0, 2.0, -20.0, -10.0, -5.0, -2.0, -1.0])
+    spod._eigvals = pt.tensor(
+        [[0.0], [1.0], [2.0], [4.0], [10.0], [3.0], [8.0], [5.0]]
+    )
+    spod._complex = True
+    spod._adaptive = False
+
+    pt.testing.assert_close(
+        spod.top_modes(2, f_min=-float("inf"), f_max=0.0), pt.tensor([4, 6])
+    )
+    pt.testing.assert_close(spod.top_modes(3), pt.tensor([4, 6, 2]))
+
+
+def test_AMSPOD_top_modes_adaptive_eig_idx_limit():
+    spod = AMSPOD.__new__(AMSPOD)
+    spod._frequency = pt.tensor([0.0, 1.0, 2.0, 5.0, 10.0, 20.0])
+    spod._eigvals = pt.tensor(
+        [
+            [0.0, 0.0, 0.0, 0.0],
+            [1.0, 3.0, 9.0, 0.0],
+            [5.0, 1.0, 8.0, 0.0],
+            [2.0, 8.0, 7.0, 0.0],
+            [7.0, 2.0, 6.0, 0.0],
+            [4.0, 10.0, 5.0, 0.0],
+        ]
+    )
+    spod._complex = True
+    spod._adaptive = True
+    spod._log = {"n_tapers": pt.tensor([2, 2, 3, 4, 3, 4])}
+
+    with pytest.warns(UserWarning, match="using eig_idx=1"):
+        top_modes = spod.top_modes(2, eig_idx=3)
+    pt.testing.assert_close(top_modes, pt.tensor([1, 5]))
 
 
 def test_AMSPOD_temporal_coefficients():

@@ -431,31 +431,97 @@ class AMSPOD(object):
 
     def top_modes(
         self,
-        n: int = 1,
+        n: int = 10,
+        eig_idx: Union[int, str] = 0,
         f_min: float = -float("inf"),
         f_max: float = float("inf"),
     ) -> pt.Tensor:
-        """Get the indices of the first n energetically most important modes.
+        """Get the indices of the dominant modes in log-spaced frequency segments.
 
-        :param n: number of indices to return; defaults to 1
+        Negative frequencies are supported by using a signed logarithmic
+        coordinate; the zero-frequency bin is omitted because it cannot be
+        represented on a logarithmic scale.
+
+        :param n: number of segments into which to divide the frequency range;
+            defaults to 10
         :type n: int
+        :param eig_idx: eigenvalue index according to which to rank the modes;
+            if ``eig_idx="sum"``, the sum of all eigenvalues in a bin is used;
+            for adaptive SPOD, the index is limited to the minimum number of
+            tapers across all bins;
+            defaults to 0
+        :type eig_idx: Union[int, str], optional
         :param f_min: consider only modes with a frequency larger or equal
             to f_min; defaults to -inf
         :type f_min: float, optional
         :param f_max: consider only modes with a frequency smaller than f_max;
-            defaults to -inf
+            defaults to inf
         :type f_max: float, optional
-        :return: indices of top n modes sorted by absolute value of the leading
-            eigenvalue
+        :return: frequency-bin index corresponding to the largest eigenvalue in
+            each non-empty log-spaced segment
         :rtype: pt.Tensor
         """
+        if n < 1:
+            raise ValueError("n must be at least 1")
+        if eig_idx != "sum":
+            if not isinstance(eig_idx, int):
+                raise ValueError("eig_idx must be an integer or 'sum'")
+            if eig_idx < 0:
+                raise ValueError("eig_idx must be non-negative")
+            if self._adaptive:
+                n_available = int(self._log["n_tapers"].min().item())
+                if eig_idx >= n_available:
+                    warnings.warn(
+                        f"eig_idx={eig_idx:d} exceeds the minimum number of "
+                        f"available modes per frequency bin ({n_available:d}); "
+                        f"using eig_idx={n_available - 1:d}",
+                        UserWarning,
+                    )
+                    eig_idx = n_available - 1
+            elif eig_idx >= self.eigvals.shape[-1]:
+                raise ValueError(
+                    f"eig_idx must be in the range [0, {self.eigvals.shape[-1] - 1:d}]"
+                )
+
         modes_in_range = pt.logical_and(self.frequency >= f_min, self.frequency < f_max)
-        mode_indices = pt.tensor(range(modes_in_range.shape[0]), dtype=pt.int64)[
+        modes_in_range = pt.logical_and(modes_in_range, self.frequency != 0.0)
+        mode_indices = pt.arange(modes_in_range.shape[0], dtype=pt.int64)[
             modes_in_range
         ]
-        n = min(n, mode_indices.shape[0])
-        top_n = self.eigvals[mode_indices][:, 0].topk(n).indices
-        return mode_indices[top_n]
+        if mode_indices.numel() == 0:
+            return mode_indices
+
+        freq = self.frequency[mode_indices]
+        if bool((freq > 0.0).all()):
+            log_freq = pt.log10(freq)
+        elif bool((freq < 0.0).all()):
+            log_freq = -pt.log10(freq.abs())
+        else:
+            f_ref = freq.abs().min()
+            log_freq = freq.sign() * pt.log10(freq.abs() / f_ref + 1.0)
+        edges = pt.linspace(
+            log_freq.min().item(),
+            log_freq.max().item(),
+            n + 1,
+            dtype=freq.dtype,
+            device=freq.device,
+        )
+        top_modes = []
+        eigvals = self.eigvals
+        score = eigvals[:, eig_idx] if eig_idx != "sum" else eigvals.sum(dim=1)
+        for i in range(n):
+            if i == n - 1:
+                in_segment = pt.logical_and(
+                    log_freq >= edges[i], log_freq <= edges[i + 1]
+                )
+            else:
+                in_segment = pt.logical_and(
+                    log_freq >= edges[i], log_freq < edges[i + 1]
+                )
+            segment_indices = mode_indices[in_segment]
+            if segment_indices.numel() > 0:
+                top_modes.append(segment_indices[score[segment_indices].argmax()])
+        return pt.stack(top_modes) if top_modes else mode_indices[:0]
 
     def _valid_n_coeff_modes(self, n_modes: int) -> int:
         """Limit coefficient mode count to modes available at every frequency."""
