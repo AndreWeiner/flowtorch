@@ -14,7 +14,7 @@ The animation shows the shock buffet on a NACA-0012 airfoil at $Re=10^7$, $Ma=0.
 
 ## Why *flowTorch*?
 
-The *flowTorch* project was started to make the analysis and modeling of fluid data **easy** and **accessible** to everyone. The library design intends to strike a balance between **usability** and **flexibility**. Instead of a monolithic, black-box analysis tool, the library offers modular components that allow assembling custom analysis and modeling workflows with ease. *flowTorch* helps to fuse data from a wide range of file formats typical for fluid flow data, for example, to compare experiments simulations. The available analysis and modeling tools are rigorously tested and demonstrated on a variety of different fluid flow datasets. Moreover, one can significantly accelerate the entire process of accessing, cleaning, analyzing, and modeling fluid flow data by starting with one of the pipelines available in the *flowTorch* [documentation](https://flowmodelingcontrol.github.io/flowtorch-docs/1.2/index.html).
+The *flowTorch* project was started to make the analysis and modeling of fluid data **easy** and **accessible** to everyone. The library design intends to strike a balance between **usability** and **flexibility**. Instead of a monolithic, black-box analysis tool, the library offers modular components that allow assembling custom analysis and modeling workflows with ease. *flowTorch* helps to fuse data from a wide range of file formats typical for fluid flow data, for example, to compare experimental and simulation data. The available analysis and modeling tools are rigorously tested and demonstrated on a variety of different fluid flow datasets. Moreover, one can significantly accelerate the entire process of accessing, cleaning, analyzing, and modeling fluid flow data by starting with one of the pipelines available in the *flowTorch* [documentation](https://flowmodelingcontrol.github.io/flowtorch-docs/1.2/index.html).
 
 To get a first impression of what working with *flowTorch* looks like, the code snippet below shows part of a pipeline for performing a dynamic mode decomposition (DMD) of a transient *OpenFOAM* simulation.
 
@@ -57,14 +57,14 @@ Currently, the following sub-packages are under active development. Note that so
 
 *flowTorch* uses the [PyTorch](https://github.com/pytorch/pytorch) library as a backend for data structures, data types, and linear algebra operations on CPU and GPU. Some cool features of *flowTorch* include:
 
-- data accessors return PyTorch tensors, which can be used directly within your favorite machine learning library, e.g., *PyTorch*, *SkLearn* or *Tensorflow*
+- data accessors return PyTorch tensors, which can be used directly within your favorite machine learning library, e.g., *PyTorch*, *scikit-learn*, or *TensorFlow*
 - most algorithms run on CPU as well as on GPU
 - mixed-precision operations (single/double); switching to single precision makes your life significantly easier when dealing with large datasets
 - user-friendly Python library that integrates easily with popular tools and libraries like *Jupyterlab*, *Matplotlib*, *Pandas*, or *Numpy*
 - a rich tutorial collection to help you get started
 - interfaces to common data formats like [OpenFOAM](https://www.openfoam.com/), [VTK](https://vtk.org/) (for Flexi and SU2), [TAU](https://www.dlr.de/en/as/research-and-transfer/software-solutions/aerodynamics/software-tau), [iPSP](https://www.dlr.de/en/as/about-us/departments/experimental-methods/pressure-sensitive-paint-psp), CSV (for DaVis PIV data and raw OpenFOAM output)
 
-*flowTorch* can be also used easily in combination with existing Python packages for analysis and reduced-order modeling thanks to the interoperability between PyTorch and NumPy. Great examples are (by no means a comprehensive list):
+*flowTorch* can also be used easily in combination with existing Python packages for analysis and reduced-order modeling thanks to the interoperability between PyTorch and NumPy. Great examples are (by no means a comprehensive list):
 
 - [PyDMD](https://github.com/mathLab/PyDMD) - Python dynamic mode decomposition
 - [PySINDy](https://github.com/dynamicslab/pysindy) - sparse identification of nonlinear dynamical systems from data
@@ -96,7 +96,7 @@ import sys
 sys.path.insert(0, "/path/to/repository")
 ```
 
-To get an overview of what *flowTorch* can do for you, have a look at the [online documentation](https://flowmodelingcontrol.github.io/flowtorch-docs/1.2/index.html). The examples presented in the online documentation are also contained in this repository. In fact, the documentation is a static version of several [Jupyter labs](https://jupyter.org/) with start-to-end analyses. If you are interested in an interactive version of one particular example, navigate to `./docs/source/notebooks` and run `jupyter lab`. Note that to execute some of the notebooks, the **corresponding datasets are required**. The datasets can be downloaded [here](https://datashare.tu-dresden.de/s/rekLnoqzRCp9zk9) (~2.6GB). If the data are only required for unit testing, a reduced dataset may be downloaded [here](https://datashare.tu-dresden.de/s/dr7gBPSdeyXQrgd) (~411MB). Download the data into a directory of your choice and navigate into that directory. To extract the archive, run:
+To get an overview of what *flowTorch* can do for you, have a look at the [online documentation](https://flowmodelingcontrol.github.io/flowtorch-docs/1.2/index.html). The examples presented in the online documentation are also contained in this repository. In fact, the documentation is a static version of several [Jupyter notebooks](https://jupyter.org/) with end-to-end analyses. If you are interested in an interactive version of one particular example, navigate to `./docs/source/notebooks` and run `jupyter lab`. Note that to execute some of the notebooks, the **corresponding datasets are required**. The datasets can be downloaded [here](https://datashare.tu-dresden.de/s/rekLnoqzRCp9zk9) (~2.6GB). If the data are only required for unit testing, a reduced dataset may be downloaded [here](https://datashare.tu-dresden.de/s/dr7gBPSdeyXQrgd) (~411MB). Download the data into a directory of your choice and navigate into that directory. To extract the archive, run:
 ```
 # full dataset
 tar xzf datasets_29_10_2021.tar.gz
@@ -127,7 +127,7 @@ python3 --version
 # example output
 Python 3.8.10
 ```
-2. Download the ParaView binaries according to your Python version from [here](https://www.paraview.org/download/). Note that you may have to use an older version ParaView to match your Python version.
+2. Download the ParaView binaries according to your Python version from [here](https://www.paraview.org/download/). Note that you may have to use an older version of ParaView to match your Python version.
 3. Install the ParaView binaries, e.g., as follows:
 ```
 # optional: remove old package installation if available
@@ -159,11 +159,11 @@ make html
 ```
 
 ### Unit testing
-The test suite is located in the top-level `tests` directory and requires the installation of PyTest:
+The test suite is located in the top-level `tests` directory. To install the development testing tools, run:
 ```
-pip3 install pytest
+pip3 install -r requirements-dev.txt
 ```
-To run the default test suite, execute:
+To run the default test suite with the active Python interpreter, execute:
 ```
 pytest
 ```
@@ -180,12 +180,29 @@ or run individual test modules, e.g.,
 pytest tests/data/test_foam_dataloader.py
 ```
 
+To run the dataset-free tests with multiple Python versions, use tox:
+```
+tox
+```
+The default tox configuration runs `py310`, `py311`, and `py312` environments and skips Python versions that are not installed locally. You can run a single environment with:
+```
+tox -e py312
+```
+Additional pytest arguments can be passed after `--`, for example:
+```
+tox -e py312 -- tests/data/test_utils.py
+```
+To run dataset-dependent integration tests through tox, make sure `FLOWTORCH_DATASETS` is set and pass the marker explicitly:
+```
+tox -e py312 -- -m integration
+```
+
 ## Getting help
 
 If you encounter any issues using *flowTorch* or if you have any questions regarding current and future development plans, please use the repository's [issue tracker](https://github.com/FlowModelingControl/flowtorch/issues). Consider the following steps before and when opening a new issue:
 
 0. Have you searched for similar issues that may have been already reported? The issue tracker has a *filter* function to search for keywords in open issues.
-1. Click on the green *New issue* button in the upper right corner and describe your problem as detailed as possible. The issue should state what **the problem** is, what the **expected behavior** should be, and, maybe, suggest a **solution**. Note that you can also attach files or images to the issue.
+1. Click on the green *New issue* button in the upper right corner and describe your problem in as much detail as possible. The issue should state what **the problem** is, what the **expected behavior** should be, and, maybe, suggest a **solution**. Note that you can also attach files or images to the issue.
 2. Select a suitable label from the drop-down menu called *Labels*.
 3. Click on the green *Submit new issue* button and wait for a reply.
 
