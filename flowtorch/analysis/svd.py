@@ -84,9 +84,9 @@ class SVD(object):
         self.rank = self.opt_rank if rank is None else rank
         self._s_full = s
         logger.info(f"Truncating SVD at index {self.rank}/{min(self._cols, self._rows)}")
-        self._U = U[:, : self.rank]
-        self._s = s[: self.rank]
-        self._V = V[:, : self.rank]
+        self._U = U[:, : self.rank].contiguous()
+        self._s = s[: self.rank].clone()
+        self._V = V[:, : self.rank].contiguous()
 
     def _svd(self, X: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor, pt.Tensor]:
         """Compute the economy via the native SVD implementation.

@@ -10,6 +10,10 @@ from flowtorch.analysis.svd import SVD
 
 
 class TestSVD:
+    def _assert_compact_storage(self, tensor):
+        expected = tensor.element_size() * tensor.nelement()
+        assert tensor.untyped_storage().nbytes() == expected
+
     def test_init_cpu(self):
         M, N = 100, 15
         dm = pt.rand((M, N), dtype=pt.float32)
@@ -34,6 +38,17 @@ class TestSVD:
             _ = SVD(dm.unsqueeze(-1))
         with pytest.raises(ValueError):
             _ = SVD(dm, mode="abc")
+
+    def test_truncated_factors_use_compact_storage(self):
+        M, N, rank = 100, 15, 3
+        for mode in ("svd", "evd"):
+            svd = SVD(pt.rand((M, N), dtype=pt.float32), rank=rank, mode=mode)
+            self._assert_compact_storage(svd.U)
+            self._assert_compact_storage(svd.s)
+            self._assert_compact_storage(svd.V)
+            assert svd.U.is_contiguous()
+            assert svd.s.is_contiguous()
+            assert svd.V.is_contiguous()
 
     @pytest.mark.skipif(not pt.cuda.is_available(), reason="CUDA not available")
     def test_init_gpu(self):
