@@ -13,7 +13,7 @@ def _check_time_delays(delay: int, columns: int, min_cols: int):
     :type delay: int
     :param columns: number of columns in the data matrix
     :type columns: int
-    :param min_cols: minimum number of column the resulting data matrix
+    :param min_cols: minimum number of columns the resulting data matrix
         must have, e.g., DMD is only possible if there are at least two
         columns; defaults to 2
     :type delay: int
@@ -40,7 +40,7 @@ def _create_time_delays(
     :type data_matrix: pt.Tensor
     :param delay: number of time levels (delay coordinates) to use
     :type delay: int
-    :param min_cols: minimum number of column the resulting data matrix
+    :param min_cols: minimum number of columns the resulting data matrix
         must have, e.g., DMD is only possible if there are at least two
         columns; defaults to 2
     :type delay: int
@@ -57,7 +57,7 @@ class HODMD(DMD):
 
     For the theoretical background, refer to Clainche and Vega (link_).
     The HODMD wraps around the standard DMD by adding an initial dimensionality
-    reduction step and an enrichment of data matrix with delays. To reconstruct
+    reduction step and an enrichment of the data matrix with delays. To reconstruct
     snapshots and modes in the original space, a few properties of the base class
     are overwritten.
     .. _link: https://doi.org/10.1137/15M1054924
@@ -92,12 +92,12 @@ class HODMD(DMD):
         :type dt: float
         :param delay: number of time levels (delay coordinates) to use;
             a value of 1 corresponds to using only one time level; if the
-            default value is not overwritten, delay is set to one third of
+            default value is not specified, delay is set to one third of
             the data matrix's columns (the number of snapshots) as suggested
             by Clainche and Vega (link_); defaults to None
         :type delay: int, optional
         :param rank_dr: SVD rank of the initial dimensionality reduction step; if
-            the default value is not overwritten, the rank is automatically determined as
+            the default value is not specified, the rank is automatically determined as
             described in :class:`flowtorch.analysis.svd.SVD`; defaults to None
         :type rank_dr: int, optional
 
@@ -116,7 +116,7 @@ class HODMD(DMD):
         )
 
     def predict(self, initial_condition: pt.Tensor, n_steps: int) -> pt.Tensor:
-        """Predict evolution over N steps starting from used-defined initial conditions.
+        """Predict evolution over N steps starting from user-defined initial conditions.
 
         The prediction is performed as follows:
         1) the initial conditions are projected on the first r POD modes

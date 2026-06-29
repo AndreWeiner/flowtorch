@@ -87,7 +87,7 @@ class ImageDataloader(Dataloader):
         :param time: time value or list of time values to identify the images
         :type time: List[str] | str
         :return: image or image sequence as 2D/3D tensor, where the last dimension
-            represent time (in case an image sequence is loaded)
+            represents time (in case an image sequence is loaded)
         :rtype: pt.Tensor
         """
         check_list_or_str(time, "time")

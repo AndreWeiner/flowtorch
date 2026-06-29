@@ -43,7 +43,7 @@ class DFT(object):
         :type data_matrix: pt.Tensor
         :param dt: timestep between snapshots; must be constant
         :type dt: float
-        :param nfft: number of FFT frequency bin; zero-padding is used if nfft > N;
+        :param nfft: number of FFT frequency bins; zero-padding is used if nfft > N;
             truncation is not allowed, defaults to N
         :type nfft: int | None, optional
         :param window: weighting used for tapering the signal, defaults to "boxcar"
@@ -60,7 +60,7 @@ class DFT(object):
         self._wfunc = WINDOWS.get(window)
         if self._wfunc is None:
             raise ValueError(
-                f"Unkown window option {window}. Available windows are:"
+                f"Unknown window option {window}. Available windows are:"
                 + ", ".join(WINDOWS.keys())
             )
         self._window = self._wfunc(self._dm.shape[-1])
@@ -107,7 +107,7 @@ class DFT(object):
     def modes(self) -> pt.Tensor:
         """Spatial DFT modes normalized to unit length.
 
-        The zero-frequency mode is exluded since the data
+        The zero-frequency mode is excluded since the data
         is mean-subtracted.
 
         :return: complex, spatial DFT modes
@@ -222,7 +222,7 @@ class PDFT(DFT):
         :param rank: truncation parameter for the POD basis, defaults to None
             (automatic selection in the SVD class)
         :type rank: int | None, optional
-        :param nfft: number of FFT frequency bin; zero-padding is used if nfft > N;
+        :param nfft: number of FFT frequency bins; zero-padding is used if nfft > N;
             truncation is not allowed, defaults to N
         :type nfft: int | None, optional
         :param window: weighting used for tapering the signal, defaults to "boxcar"

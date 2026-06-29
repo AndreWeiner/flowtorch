@@ -56,7 +56,7 @@ def check_list_or_str(arg_value: Union[List[str], str], arg_name: str):
     """Check if argument is of type list or string.
 
     If the input is a list, an additional check is performed to ensure that
-    the list has at list one entry and that all entries are strings.
+    the list has at least one entry and that all entries are strings.
 
     :param arg_value: object to perform the check on
     :type arg_value: Union[List[str], str]
@@ -86,7 +86,7 @@ class CellWeightEstimator:
            power of the dimension (:math:`d`).
         3. Calculate a scaling factor :math:`\\alpha` such that the sum of all
            estimated volumes matches the true bounding-box volume.
-        4. Normalization of weights to [0, 1] using min-max- scaling and :math:\\sqrt(weights) (optional)
+        4. Normalization of weights to [0, 1] using min-max scaling and :math:\\sqrt(weights) (optional)
 
     Example
     -------
@@ -171,7 +171,7 @@ class CellWeightEstimator:
 
     def _normalize_weights(self) -> Tensor:
         """
-        Normalizes the weights with the sqrt(max).
+        Normalize weights by the maximum square root value.
 
         :return: None
         :rtype; None
@@ -192,8 +192,9 @@ class CellWeightEstimator:
     @property
     def weights(self) -> Tensor:
         """
-        Returns the estimated cell volumes. If ``normalize = True`` the normalized square-root of the volumes with its
-        maximum cell volume.
+        Returns the estimated cell volumes. If ``normalize = True``, the
+        square roots of the volumes are normalized by the maximum square root
+        value.
 
         :return: Estimated cell volume, either the absolute value or scaled with the maximum value.
         :rtype: Tensor

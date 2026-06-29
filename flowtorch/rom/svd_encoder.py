@@ -21,15 +21,15 @@ class SVDEncoder(Encoder):
     >>> loader = FOAMDataloader(DATASETS["of_cylinder2D_binary"])
     >>> data = loader.load_snapshot("p", loader.write_times[1:11])
     >>> data.shape
-    torch.Size([13678, 10]
+    torch.Size([13678, 10])
     >>> encoder = SVDEncoder(rank=10)
     >>> info = encoder.train(data)
     >>> reduced_state = encoder.encode(data)
     >>> reduced_state.shape
-    torch.Size([10, 10]
+    torch.Size([10, 10])
     >>> full_state = encoder.decode(reduced_state)
     >>> full_state.shape
-    torch.Size([13678, 10]
+    torch.Size([13678, 10])
 
     """
 
@@ -73,10 +73,10 @@ class SVDEncoder(Encoder):
         corresponds to the associated snapshot in the sequence.
 
 
-        :param full_state: [description]
+        :param full_state: full state vector or sequence of state vectors
         :type full_state: pt.Tensor
-        :raises ValueError: [description]
-        :return: [description]
+        :raises ValueError: if the full state shape does not match the trained encoder
+        :return: reduced state vector or sequence of reduced state vectors
         :rtype: pt.Tensor
         """
         self._check_state_shape(full_state.shape)

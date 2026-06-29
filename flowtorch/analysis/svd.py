@@ -48,7 +48,7 @@ class SVD(object):
         :param data_matrix: data matrix of shape M x N, typically with M being the
             number of spatial points and N being the number of time steps
         :type data_matrix: pt.Tensor
-        :param rank: rank at which to truncated the SVD; if no rank is given, the 'optimal'
+        :param rank: rank at which to truncate the SVD; if no rank is given, the 'optimal'
             rank is determined via singular value hard thresholding; defaults to None
         :type rank: Union[int, None], optional
         :param mode: compute path; can be one of:
@@ -89,7 +89,7 @@ class SVD(object):
         self._V = V[:, : self.rank].contiguous()
 
     def _svd(self, X: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor, pt.Tensor]:
-        """Compute the economy via the native SVD implementation.
+        """Compute the economy SVD via the native SVD implementation.
 
         :param X: data matrix of shape M x N
         :type X: pt.Tensor
@@ -268,7 +268,7 @@ class SVD(object):
     def required_memory(self) -> int:
         """Compute the memory size in bytes of the truncated SVD.
 
-        :return: cumulative size of truncated U, s, and V tensors in byte
+        :return: cumulative size of truncated U, s, and V tensors in bytes
         :rtype: int
         """
         return (

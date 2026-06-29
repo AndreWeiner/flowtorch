@@ -239,11 +239,11 @@ class AMSPOD(object):
 
         :param Q_hat: DFT of the untapered data of size M x 2*nfft
         :type Q_hat: pt.Tensor
-        :param f_idx: index of the frequency bin of which to compute tapered versions
+        :param f_idx: index of the frequency bin for which to compute tapered versions
         :type f_idx: int
         :param n_tapers: number of sin-tapers
         :type n_tapers: int
-        :return: tapered DFT modes of ith frequency bin for specified number of
+        :return: tapered DFT modes of the selected frequency bin for specified number of
             tapers (K) arranged as tensor of shape M x K
         :rtype: pt.Tensor
         """
@@ -286,8 +286,8 @@ class AMSPOD(object):
         A frequency-mode-pair is considered converged if:
             1) the change in the mode is below a user-defined tolerance
             2) the difference in the taper number between two bins exceeds 1
-        If the selection is non-adaptive, the used-defined maximum number of tapers
-        if used for each bin
+        If the selection is non-adaptive, the user-defined maximum number of tapers
+        is used for each bin
 
 
         :param Q_hat: un-tapered DFT of weighted data matrix
@@ -611,7 +611,7 @@ class PAMSPOD(AMSPOD):
         :param max_tapers: max. number of tapers to use when `adaptive=True` or constant number
             of tapers for all frequencies if `adaptive=False`; the minimum number of tapers is 2; defaults to 50
         :type max_tapers: int, optional
-        :param tolerance: tolerance at which the leading mode at each frequencies is considered
+        :param tolerance: tolerance at which the leading mode at each frequency is considered
             to be converged; the difference is measured by comparing the leading mode
             with i and i+1 tapers for increasing values of i, defaults to 1.0e-5
         :type tolerance: float, optional
@@ -684,7 +684,7 @@ class PAMSPOD(AMSPOD):
         return self._svd
 
     def get_mode(self, f_idx: int, mode_idx: int = 0) -> pt.Tensor:
-        """Get mode/eigenvector of prescript frequency bin and mode index.
+        """Get mode/eigenvector of prescribed frequency bin and mode index.
 
         :param f_idx: index of the frequency bin
         :type f_idx: int

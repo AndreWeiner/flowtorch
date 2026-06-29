@@ -153,12 +153,12 @@ class CNM(ROM):
         from and to that cluster must be higher. For example, if the labels are
         [0, 0, 1, 3, 0, ...], then the sequence of unique clusters is [0, 1, 3, 0, ...]
         and the number of sequential occurrences is [2, 1, 1, ...]. For a model order of
-        two (considering two clusters to compute the next one), the transion time for the
+        two (considering two clusters to compute the next one), the transition time for the
         sequence '0,1,3' (having been in 0 then 1, and now going to 3) is half of the
-        time spent in cluster one plus half of the time spent in cluster, which is
+        time spent in cluster one plus half of the time spent in cluster three, which is
         0.5 * (1 + 1) * dt. It might happen that certain transitions occur multiple times
         with different transition times. Therefore, the final transition time is computed
-        as the average of all observered transition times for a given sequence.
+        as the average of all observed transition times for a given sequence.
 
         .. _post: https://stackoverflow.com/questions/39340345/how-to-count-consecutive-duplicates-in-a-python-list
 
@@ -318,7 +318,7 @@ class CNM(ROM):
 
         :param initial_state: initial reduced state vector or sequence of
             reduced state vectors; the state vectors must form the columns
-            of the input tensor is a sequence is given
+            of the input tensor if a sequence is given
         :type initial_state: pt.Tensor
         :param end_time: time at which to step the simulation; the simulation
             time always starts at zero

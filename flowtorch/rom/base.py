@@ -223,7 +223,7 @@ class ROM(ABC):
     def encoder(self, encoder: Encoder):
         """Set the encoder.
 
-        :param encoder: new encoder; can be also None
+        :param encoder: new encoder; can also be None
         :type encoder: Encoder
         :raises ValueError: if instance is not a subclass of `Encoder`
         :raises ValueError: if the encoder has not been trained

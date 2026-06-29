@@ -97,7 +97,7 @@ class PSPExplorer(object):
         :type zone: str
         :param field_name: name of the field to display
         :type field_name: str
-        :param times: list of times instances to show
+        :param times: list of time instances to show
         :type times: list
         :param mask: if True, the data is masked using the mask provided
             in the iPSP dataset, defaults to True
@@ -213,7 +213,7 @@ class PSPExplorer(object):
     def loader(self) -> PSPDataloader:
         """Get the `PSPdataloader` instance used to access data.
 
-        This propertie allows accessing the loader's metadata via
+        This property allows accessing the loader's metadata via
         the explorer without having to create a new loader instance.
 
         :return: PSP dataloader instance

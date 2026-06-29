@@ -51,7 +51,7 @@ class HOOptDMD(OptDMD):
         return rec
     
     def predict(self, initial_condition: pt.Tensor, n_steps: int) -> pt.Tensor:
-        """Predict evolution over N steps starting from used-defined initial conditions.
+        """Predict evolution over N steps starting from user-defined initial conditions.
 
         The prediction is performed as follows:
         1) the initial conditions are projected on the first r POD modes

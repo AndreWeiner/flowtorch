@@ -56,7 +56,7 @@ class LinearControlModel(pt.nn.Module):
     def forward(
             self, x0: pt.Tensor, noise_idx: pt.Tensor, c: pt.Tensor, backward: bool
     ) -> pt.Tensor:
-        """_summary_
+        """Predict a batch of controlled trajectories.
 
         abbreviations
         B - batch size
@@ -135,7 +135,7 @@ class LinearControlModel(pt.nn.Module):
     def predict(
         self, initial_condition: pt.Tensor, control_inputs: pt.Tensor
     ) -> pt.Tensor:
-        """Predict trajactory for given initial condition and control inputs.
+        """Predict trajectory for given initial condition and control inputs.
 
         M - size of state vector
         S - number of control inputs

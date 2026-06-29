@@ -18,7 +18,7 @@ class AMPS(object):
     """Adaptive multi-taper power spectrum estimation.
 
     This class is a version of `AMSPOD` (adaptive multi-taper spectral POD)
-    adjusted for scaler signals. The result is an estimate of the signal's
+    adjusted for scalar signals. The result is an estimate of the signal's
     power spectrum, similar to Welch's method. However, multiple realizations
     are estimated using sin-tapers rather than signal blocks (Welch). The main
     references for this implementation are:
@@ -151,11 +151,11 @@ class AMPS(object):
 
         :param Q_hat: DFT of the untapered data of size 1 x 2*nfft
         :type Q_hat: pt.Tensor
-        :param f_idx: index of the frequency bin of which to compute tapered versions
+        :param f_idx: index of the frequency bin for which to compute tapered versions
         :type f_idx: int
         :param n_tapers: number of sin-tapers
         :type n_tapers: int
-        :return: spectral power estimate of ith frequency bin based on the specified
+        :return: spectral power estimate of the selected frequency bin based on the specified
             number of tapers (K)
         :rtype: float
         """
@@ -174,8 +174,8 @@ class AMPS(object):
         A frequency-bin is considered converged if:
             1) the change in the power is below a user-defined tolerance
             2) the difference in the taper number between two bins exceeds 1
-        If the selection is non-adaptive, the used-defined maximum number of tapers
-        if used for each bin
+        If the selection is non-adaptive, the user-defined maximum number of tapers
+        is used for each bin
 
         :param Q_hat: un-tapered DFT of input signal
         :type Q_hat: pt.Tensor

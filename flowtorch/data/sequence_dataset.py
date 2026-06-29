@@ -9,12 +9,12 @@ class SequenceTensorDataset(Dataset):
     def __init__(self, sequence: pt.Tensor, delays: int = 1, horizon: int = 1) -> None:
         """Create a time series dataset from a tensor.
 
-        Note: this class takes times series data and creates feature-labels-pairs
+        Note: this class takes time series data and creates feature-label pairs
         by rolling a window across the sequence. The window length is the sum of
         time delays (look back) and time horizon (look ahead). The overall number
         of feature-label-pairs is determined by the sequence and window lengths.
         The implementation assumes that the fully inflated time series dataset,
-        i.e., all data pairs, fits intro memory. Doing so allows very efficient
+        i.e., all data pairs, fits into memory. Doing so allows very efficient
         batch creation when using the dataset in a dataloader.
 
         :param sequence: general N-d tensor; by convention, the first dimension must

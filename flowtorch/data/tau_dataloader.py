@@ -74,7 +74,7 @@ class TAUConfig(object):
         Note: if the parameter is found multiple times, the value of the
         last occurrence is returned.
 
-        :param parameter: the parameter of which to extract the value
+        :param parameter: the parameter from which to extract the value
         :type parameter: str
         :return: extracted value or empty string
         :rtype: str
@@ -98,8 +98,8 @@ class TAUConfig(object):
         Note: this function was first implemented by Sebastian Spinner (DLR)
         and then refactored and merged into flowTorch.
 
-        :return: dictionary with the keys being the zone (patch) names and the key
-            being a list of markers
+        :return: dictionary with the keys being the zone (patch) names and the values
+            being lists of markers
         :rtype: dict
         """
         filename = self._parse_config("Boundary mapping filename")

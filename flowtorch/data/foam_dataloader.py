@@ -146,7 +146,7 @@ class FOAMDataloader(Dataloader):
         entries.
         This number is needed.
 
-        :param data: [description]
+        :param data: content of an OpenFOAM field file
         :type data: List[str]
         :return: line index containing the keyword *nonuniform* and the size of the nonuniform list;
                  if the keyword is not found, two zeros are returned
@@ -301,7 +301,7 @@ class FOAMDataloader(Dataloader):
     @property
     def vertices(self) -> pt.Tensor:
         """
-        In OpenFOAM, field for post-processing are defined at the control volume's
+        In OpenFOAM, fields for post-processing are defined at the control volume's
         center (*vol<Type>Fields*). Therefore, the `vertices` property enables access
         to cell center locations via :class:`FOAMMesh`.
 
@@ -663,7 +663,7 @@ class FOAMMesh(object):
         :param mesh_path: mesh location
         :type mesh_path: str
         :return: tuple of tensors with the first tensor holding the
-            number if points per face and the second one holding the
+            number of points per face and the second one holding the
             point labels forming the face; the second dimension of the
             point label tensor is determined by the face with the highest
             number of points; faces with fewer points are padded with zeros
@@ -689,7 +689,7 @@ class FOAMMesh(object):
                     buffer[SIZE_OF_CHAR:SIZE_OF_CHAR + SIZE_OF_INT*length]
                 )
 
-                # search or the next opening bracket to see where the second list starts
+                # search for the next opening bracket to see where the second list starts
                 # the length of the second list is interpreted as a sequence of characters,
                 # so looking 50 characters ahead allows for a very large number of faces
                 list_0_end = SIZE_OF_INT*length
@@ -901,7 +901,7 @@ class FOAMMesh(object):
 
         1. compute an estimate of the cell center as the average over all face centers
         2. compute centroids and volumes of all pyramids formed by the cell faces and
-           and the center estimate
+           the center estimate
         3. the cell volume equals the sum over all pyramid volumes
         4. the cell center is the volume-weighted average of all pyramid centroids
 

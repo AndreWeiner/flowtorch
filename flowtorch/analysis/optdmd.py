@@ -18,8 +18,8 @@ from .utils import EarlyStopping, DEFAULT_SCHEDULER_OPT
 def _create_conj_complex_pairs(ev: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor]:
     """Create indices to preserve conjugate complex eigenvalues.
 
-    For real input data, eivenvalues and eigenvectors must come as
-    conjugate complex pairs. If there is on odd number of eigenvalues,
+    For real input data, eigenvalues and eigenvectors must come as
+    conjugate complex pairs. If there is an odd number of eigenvalues,
     one eigenvalue is reserved to be on the real axis. If there are
     multiple eigenvalues without imaginary part and the number of eigenvalues
     is odd, only the one with real part closest to unity is preserved.
@@ -74,7 +74,7 @@ def fro_loss(
 class OptDMD(pt.nn.Module):
     """Optimized DMD based on backpropagation and gradient descent.
 
-    For a detailed description this DMD variant refer to
+    For a detailed description of this DMD variant, refer to
     `Weiner and Semaan (2023) <https://arxiv.org/abs/2312.12928>`_.
 
     Examples
@@ -99,8 +99,7 @@ class OptDMD(pt.nn.Module):
 
         Warning: the implementation was only tested rigorously for real input
         data; eigenvectors and eigenvalues are enforced to have complex conjugate
-        pairs in case of real input data. If there is an odd number of modes,
-        the mode-eigenvalue-pair whose imaginary part
+        pairs in case of real input data.
         """
         super(OptDMD, self).__init__()
         self._dmd = DMD(*dmd_args, **dmd_kwargs)
@@ -274,7 +273,7 @@ class OptDMD(pt.nn.Module):
         return mode_indices[top_n]
     
     def predict(self, initial_condition: pt.Tensor, n_steps: int) -> pt.Tensor:
-        """Predict evolution over N steps starting from used-defined initial conditions.
+        """Predict evolution over N steps starting from user-defined initial conditions.
 
         :param initial_condition: initial state vector
         :type initial_condition: pt.Tensor

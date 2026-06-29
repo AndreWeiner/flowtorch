@@ -355,7 +355,7 @@ class DMD(object):
         return mode_indices[top_n]
 
     def predict(self, initial_condition: pt.Tensor, n_steps: int) -> pt.Tensor:
-        """Predict evolution over N steps starting from used-defined initial conditions.
+        """Predict evolution over N steps starting from user-defined initial conditions.
 
         :param initial_condition: initial state vector
         :type initial_condition: pt.Tensor
