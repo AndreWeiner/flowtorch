@@ -30,13 +30,15 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 
-# volSymmTensorField as 6 entries since it symmetric, compare
-# https://www.openfoam.com/documentation/guides/latest/api/classFoam_1_1SymmTensor.html
+# volSymmTensorField as 6 entries since it is symmetric:
 # the order is: XX, XY, XZ, YY, YZ, ZZ
+# volTensorField as 9 entries since:
+# the order is: XX, XY, XZ, YX, YY, YZ, ZX, ZY, ZZ
 FIELD_TYPE_DIMENSION = {
     b"volScalarField": 1,
     b"volVectorField": 3,
-    b"volSymmTensorField": 6
+    b"volSymmTensorField": 6,
+    b"volTensorField": 9
 }
 CONSTANT_PATH = "constant"
 POLYMESH_PATH = join("constant", "polyMesh")
