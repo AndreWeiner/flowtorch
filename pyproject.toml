@@ -56,7 +56,7 @@ all = [
 
 [project.urls]
 Homepage = "https://github.com/AndreWeiner/flowtorch"
-Documentation = "https://flowmodelingcontrol.github.io/flowtorch-docs/1.2/"
+Documentation = "https://flowtorch.readthedocs.io/en/latest/"
 Issues = "https://github.com/AndreWeiner/flowtorch/issues"
 Source = "https://github.com/AndreWeiner/flowtorch"
 
