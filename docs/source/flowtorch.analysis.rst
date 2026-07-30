@@ -9,6 +9,14 @@ flowtorch.analysis.svd
    :undoc-members:
    :show-inheritance:
 
+flowtorch.analysis.dft
+----------------------
+
+.. automodule:: flowtorch.analysis.dft
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 flowtorch.analysis.mssa
 -----------------------
 
@@ -49,6 +57,30 @@ flowtorch.analysis.hooptdmd
    :undoc-members:
    :show-inheritance:
 
+flowtorch.analysis.linear\_control
+----------------------------------
+
+.. automodule:: flowtorch.analysis.linear_control
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+flowtorch.analysis.linear\_model
+--------------------------------
+
+.. automodule:: flowtorch.analysis.linear_model
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+flowtorch.analysis.periodogram
+------------------------------
+
+.. automodule:: flowtorch.analysis.periodogram
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 flowtorch.analysis.psp\_explorer
 ---------------------------------
 
@@ -57,3 +89,18 @@ flowtorch.analysis.psp\_explorer
    :undoc-members:
    :show-inheritance:
 
+flowtorch.analysis.spod
+-----------------------
+
+.. automodule:: flowtorch.analysis.spod
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+flowtorch.analysis.utils
+------------------------
+
+.. automodule:: flowtorch.analysis.utils
+   :members:
+   :undoc-members:
+   :show-inheritance:

@@ -23,11 +23,12 @@ class AMPS(object):
     references for this implementation are:
 
     - Yeung, B. C. Y., Schmidt, O. T.: Adaptive spectral proper orthogonal decomposition
-    of broadband-tonal flows, Theor. Comput. Fluid Dyn. 38, 355-374, 2024,
-    DOI 10.1007/s00162-024-00695-0
+      of broadband-tonal flows, Theor. Comput. Fluid Dyn. 38, 355-374, 2024,
+      DOI 10.1007/s00162-024-00695-0
+
     - Riedel, K. S., Sidorenko, A.: Minimum bias multiple taper spectral estimation,
-    IEEE transactions of Signal Processing 43, 188-195, 1995,
-    DOI 10.1109/78.365298
+      IEEE transactions of Signal Processing 43, 188-195, 1995,
+      DOI 10.1109/78.365298
 
     """
 
@@ -294,12 +295,14 @@ class AMPS(object):
     def residual(self) -> Union[pt.Tensor, None]:
         """Residual of the leading mode during adaptive refinement.
 
-        :return: residual computed as |power_k+1 - power_k| / power_k+1; since the number
-            of tapers varies per bin, a tensor of size n_freq x (n_tapers - 2) is filled
-            with NANs, and then the residuals are overwritten if available; (n_tapers - 2)
-            is a consequence of the minimum number of tapers (2) and the residual being
-            computed from the power change between two consecutive taper values, so in the
-            first iteration, there is no sensible value to compare to
+        :return: residual computed as
+            ``abs(power[k+1] - power[k]) / power[k+1]``; since the number of
+            tapers varies per bin, a tensor of size n_freq x (n_tapers - 2) is
+            filled with NANs, and then the residuals are overwritten if
+            available; (n_tapers - 2) is a consequence of the minimum number
+            of tapers (2) and the residual being computed from the power
+            change between two consecutive taper values, so in the first
+            iteration, there is no sensible value to compare to
         :rtype: pt.Tensor
         """
         if self._adaptive:

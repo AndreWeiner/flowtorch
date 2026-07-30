@@ -151,14 +151,14 @@ In case of version conflicts between Python packages coming with ParaView and lo
 ## Development
 ### Documentation
 
-To build the flowTorch documentation, the following additional packages are required:
+Build the flowTorch documentation in an isolated tox environment:
 ```
-pip3 install sphinx sphinx_rtd_theme nbsphinx recommonmark
+tox -e docs
 ```
-To build the HTML version of the API documentation, navigate to `./docs` and run:
-```
-make html
-```
+Tox installs Sphinx and the documentation dependencies automatically. The
+generated HTML documentation is written to `docs/build/html`; open
+`docs/build/html/index.html` in a browser to view it. The build treats Sphinx
+warnings as errors so that documentation problems are caught locally.
 
 ### Unit testing
 The test suite is located in the top-level `tests` directory. To install the development testing tools, run:

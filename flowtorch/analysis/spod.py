@@ -407,12 +407,13 @@ class AMSPOD(object):
     def residual(self) -> Union[pt.Tensor, None]:
         """Residual of the leading mode during adaptive refinement.
 
-        :return: residual computed as |(1 - mode_similarity)|; since the number
-            of tapers varies per bin, a tensor of size n_freq x (n_tapers - 2) is filled
-            with NANs, and then the residuals are overwritten if available; (n_tapers - 2)
-            is a consequence of the minimum number of tapers (2) and the residual being
-            computed from the mode similarity between two consecutive taper values, so in the
-            first iteration, there is no sensible similarity
+        :return: residual computed as ``abs(1 - mode_similarity)``; since the
+            number of tapers varies per bin, a tensor of size n_freq x
+            (n_tapers - 2) is filled with NANs, and then the residuals are
+            overwritten if available; (n_tapers - 2) is a consequence of the
+            minimum number of tapers (2) and the residual being computed from
+            the mode similarity between two consecutive taper values, so in
+            the first iteration, there is no sensible similarity
         :rtype: pt.Tensor
         """
         if self._adaptive:

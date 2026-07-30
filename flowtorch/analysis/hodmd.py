@@ -55,13 +55,12 @@ def _create_time_delays(
 class HODMD(DMD):
     """Higher-order dynamic mode decomposition (HODMD).
 
-    For the theoretical background, refer to Clainche and Vega (link_).
+    For the theoretical background, refer to `Clainche and Vega
+    <https://doi.org/10.1137/15M1054924>`_.
     The HODMD wraps around the standard DMD by adding an initial dimensionality
     reduction step and an enrichment of the data matrix with delays. To reconstruct
     snapshots and modes in the original space, a few properties of the base class
     are overwritten.
-    .. _link: https://doi.org/10.1137/15M1054924
-
     Examples
 
     >>> from flowtorch.analysis import HODMD
@@ -94,7 +93,8 @@ class HODMD(DMD):
             a value of 1 corresponds to using only one time level; if the
             default value is not specified, delay is set to one third of
             the data matrix's columns (the number of snapshots) as suggested
-            by Clainche and Vega (link_); defaults to None
+            by `Clainche and Vega <https://doi.org/10.1137/15M1054924>`_;
+            defaults to None
         :type delay: int, optional
         :param rank_dr: SVD rank of the initial dimensionality reduction step; if
             the default value is not specified, the rank is automatically determined as
