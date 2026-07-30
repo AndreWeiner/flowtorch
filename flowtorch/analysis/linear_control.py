@@ -1,6 +1,6 @@
 """Implementation of a linear dynamics model with control inputs."""
 
-from typing import Tuple, Union, Callable, Type
+from typing import Any, Tuple, Union, Callable, Type
 from collections import defaultdict
 from math import sqrt
 from numpy import pi
@@ -46,7 +46,7 @@ class LinearControlModel(pt.nn.Module):
         self._A = pt.nn.Parameter(A)
         self._B = pt.nn.Parameter(B)
         self._noise = pt.nn.Parameter(pt.zeros_like(self._dm))
-        self._log = defaultdict(list)
+        self._log: dict[str, list[Any]] = defaultdict(list)
 
     def _check_input_consistency(self):
         control_steps = self._cm.shape[1]

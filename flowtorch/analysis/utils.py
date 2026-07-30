@@ -29,7 +29,7 @@ def trajectory_train_test_split(
             f"At least one trajectory is not long enough for the specified horizon ({horizon}).\n"
             + f"The minimum trajectory length is {horizon + 1}."
         )
-    pairs = []
+    pairs: list[tuple[pt.Tensor, ...]] = []
     index_offset = 0
     for tr_i in tr:
         start_at = list(range(0, tr_i.shape[-1] - horizon, n_shift))

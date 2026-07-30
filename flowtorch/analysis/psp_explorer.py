@@ -41,15 +41,16 @@ class PSPExplorer(object):
         """
         steps = []
         for i in range(len(times)):
+            visible = [False] * len(times)
+            visible[i] = True
             step = dict(
                 method="update",
                 args=[
-                    {"visible": [False] * len(times)},
+                    {"visible": visible},
                     {"title": "Selected time: {:s}".format(times[i])},
                 ],
                 label=str(i),
             )
-            step["args"][0]["visible"][i] = True
             steps.append(step)
         slider = dict(active=0, pad={"t": 50}, steps=steps)
         return slider

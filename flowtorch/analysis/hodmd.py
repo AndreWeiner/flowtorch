@@ -1,6 +1,6 @@
 """Implementation of the higher-order DMD (HODMD)."""
 
-from typing import Tuple, Union
+from typing import Any, Tuple, Union
 import torch as pt
 from .svd import SVD
 from .dmd import DMD
@@ -81,7 +81,7 @@ class HODMD(DMD):
         dt: float,
         delay: Union[int, None] = None,
         rank_dr: Union[int, None] = None,
-        **dmd_options: dict,
+        **dmd_options: Any,
     ):
         """Create a HODMD instance from data matrix and time step.
 

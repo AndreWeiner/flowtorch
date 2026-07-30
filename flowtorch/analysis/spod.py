@@ -19,7 +19,7 @@ lightweight derived class wrapping around the `AMSPOD`, termed `PAMSPOD`.
 import logging
 import gc
 import warnings
-from typing import Union, Tuple
+from typing import Any, Union, Tuple
 from math import sqrt
 from collections import defaultdict
 
@@ -159,7 +159,7 @@ class AMSPOD(object):
             )
             self._device = "cpu"
         self._verbose = verbose
-        self._log = {}
+        self._log: dict[str, Any] = {}
         self._taper_norm = sqrt(2.0 / (self._nfft + 1.0))
         self._modes, self._eigvals, self._frequency = self._spod()
 

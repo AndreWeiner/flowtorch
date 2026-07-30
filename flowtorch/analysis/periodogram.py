@@ -2,7 +2,7 @@
 
 # standard library packages
 import logging
-from typing import Union, Tuple
+from typing import Any, Union, Tuple
 from collections import defaultdict
 from math import sqrt, log10
 
@@ -90,7 +90,7 @@ class AMPS(object):
         self._tol = tolerance
         self._subtract_mean = subtract_mean
         self._verbose = verbose
-        self._log = {}
+        self._log: dict[str, Any] = {}
         self._taper_norm = sqrt(2.0 / (self._nfft + 1.0))
         self._power, self._frequency = self._multi_taper_estimate()
 

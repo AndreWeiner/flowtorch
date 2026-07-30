@@ -1,6 +1,6 @@
 """Implements a linear model of the form y = Ax."""
 
-from typing import Union, List, Callable, Type, Tuple
+from typing import Any, Union, List, Callable, Type, Tuple
 from math import sqrt
 from collections import defaultdict
 import torch as pt
@@ -42,7 +42,7 @@ def _initialize_noise(data: List[pt.Tensor], sigma: Union[None, float]) -> pt.Te
 
 
 def _fro_loss_operator(
-    label: pt.Tensor, prediction: pt.Tensor, *parameters: tuple
+    label: pt.Tensor, prediction: pt.Tensor, *parameters: object
 ) -> pt.Tensor:
     return (label - prediction).norm() / sqrt(prediction.numel())
 
@@ -70,6 +70,7 @@ class LinearModel(pt.nn.Module):
             )
         self._n_states, self._n_times = self._dm[0].shape
         self._noise = pt.nn.Parameter(_initialize_noise(self._dm, sigma_filter))
+        self._A: pt.Tensor | None
         if self._decompose:
             dm = pt.cat(self._dm, dim=-1)
             svd = SVD(dm, rank=rank)
@@ -86,7 +87,13 @@ class LinearModel(pt.nn.Module):
                 _least_squares_operator(self._dm, init_forward_backward)
             )
             self._eigvals, self._eigvecs = pt.linalg.eig(self._A.detach())
-        self._log = defaultdict(list)
+        self._log: dict[str, list[Any]] = defaultdict(list)
+
+    def _operator(self) -> pt.Tensor:
+        """Return the full-state operator when it is available."""
+        if self._A is None:
+            raise RuntimeError("The full-state operator is not explicitly available")
+        return self._A
 
     def forward(
         self, x: pt.Tensor, noise_idx: pt.Tensor, n_steps: int, backward: bool
@@ -98,7 +105,8 @@ class LinearModel(pt.nn.Module):
             B = (x - self._noise[:, noise_idx].T).type(evals.dtype) @ evecs_inv.T
             return self._eigvecs.unsqueeze(0) @ (B.unsqueeze(-1) * vander.unsqueeze(0))
         else:
-            A = pt.linalg.inv(self._A) if backward else self._A
+            operator = self._operator()
+            A = pt.linalg.inv(operator) if backward else operator
             rollout = [A @ (x - self._noise[:, noise_idx].T).T]
             for _ in range(n_steps - 1):
                 rollout.append(A @ rollout[-1])
@@ -250,7 +258,7 @@ class LinearModel(pt.nn.Module):
         self.to("cpu")
         print("Optimization completed")
         if not self._decompose:
-            self._eigvals, self._eigvecs = pt.linalg.eig(self._A.detach())
+            self._eigvals, self._eigvecs = pt.linalg.eig(self._operator().detach())
 
     def top_modes(
         self,
@@ -287,7 +295,7 @@ class LinearModel(pt.nn.Module):
     def load_state_dict(self, *args, **kwargs):
         keys = super().load_state_dict(*args, **kwargs)
         if not self._decompose:
-            self._eigvals, self._eigvecs = pt.linalg.eig(self._A.detach())
+            self._eigvals, self._eigvecs = pt.linalg.eig(self._operator().detach())
         return keys
 
     @property
@@ -297,7 +305,7 @@ class LinearModel(pt.nn.Module):
                 self.eigvecs @ pt.diag(self.eigvals) @ pt.linalg.pinv(self.eigvecs)
             ).detach()
         else:
-            return self._A.detach()
+            return self._operator().detach()
 
     @property
     def noise(self) -> Tuple[pt.Tensor]:
