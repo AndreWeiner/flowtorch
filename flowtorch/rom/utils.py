@@ -3,13 +3,17 @@
 # standars library packages
 from time import time
 import functools
-from typing import Callable, Union, List
+from typing import Any, Callable, ParamSpec
 
 # third party libraries
 import numpy as np
 
+P = ParamSpec("P")
 
-def log_time(func) -> dict:
+
+def log_time(
+    func: Callable[P, dict[str, Any]],
+) -> Callable[P, dict[str, Any]]:
     """Measure and log a function's execution time.
 
     :param func: function to be executed; the function is expected
@@ -21,7 +25,7 @@ def log_time(func) -> dict:
     """
 
     @functools.wraps(func)
-    def measure_time(*args, **kwargs) -> dict:
+    def measure_time(*args: P.args, **kwargs: P.kwargs) -> dict[str, Any]:
         start_time = time()
         log = func(*args, **kwargs)
         return {**log, "execution_time": time() - start_time}
@@ -29,7 +33,7 @@ def log_time(func) -> dict:
     return measure_time
 
 
-def check_larger_than(value: Union[int, float], limit: Union[int, float], name: str):
+def check_larger_than(value: int | float, limit: int | float, name: str):
     """Check if a scalar value is larger than a given lower limit.
 
     :param value: scalar value to check

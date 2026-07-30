@@ -86,7 +86,7 @@ class CNM(ROM):
     def __init__(
         self,
         reduced_state: pt.Tensor,
-        encoder: Encoder,
+        encoder: Encoder | None,
         dt: float,
         n_clusters: int = 10,
         model_order: int = 1,
@@ -120,9 +120,9 @@ class CNM(ROM):
         self._sequence = remove_sequential_duplicates(self._cluster.labels_)
         self._transition_prob = self._compute_transition_prob()
         self._transition_time = self._compute_transition_time()
-        self._times = None
-        self._visited_clusters = None
-        self._tree = None
+        self._times: list[float] = []
+        self._visited_clusters: list[int] = []
+        self._tree: KDTree | None = None
 
     def _compute_transition_prob(self) -> Dict[str, np.ndarray]:
         """Compute the transition probabilities between clusters.
@@ -188,7 +188,7 @@ class CNM(ROM):
             transition[key].append(
                 0.5 * self.dt * np.sum(seq_duplicates[ip_order - 1 : ip_order + 1])
             )
-        return {key: np.mean(value) for key, value in transition.items()}
+        return {key: float(np.mean(value)) for key, value in transition.items()}
 
     def _find_closest_cluster(self, label: int) -> int:
         """Find the label of the nearest cluster.
@@ -206,7 +206,7 @@ class CNM(ROM):
         _, ind = self._tree.query(
             np.expand_dims(self.cluster_centers[label, :], axis=0), 2
         )
-        return ind[0, -1]
+        return int(ind[0, -1])
 
     def _find_history(self, history: deque) -> deque:
         """Find an alternative history based on a suggested history.
@@ -247,6 +247,7 @@ class CNM(ROM):
                 select_key = np.random.choice(possible_histories)
                 return deque(map(int, select_key.split(",")), self.model_order)
             count += 1
+        raise RuntimeError("Could not find a matching cluster history")
 
     def _find_initial_history(self, initial_reduced_state: np.ndarray) -> deque:
         """Find a sensible initial history for a given reduced state.
@@ -388,11 +389,11 @@ class CNM(ROM):
         return self._cluster.cluster_centers_
 
     @property
-    def visited_clusters(self) -> list:
+    def visited_clusters(self) -> list[int]:
         return self._visited_clusters
 
     @property
-    def times(self) -> list:
+    def times(self) -> list[float]:
         return self._times
 
     @property

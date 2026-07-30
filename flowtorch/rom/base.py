@@ -2,7 +2,6 @@
 
 # standard library packages
 from abc import ABC, abstractmethod, abstractproperty
-from typing import Union
 
 # third party packages
 from torch import Tensor, Size
@@ -137,7 +136,7 @@ class ROM(ABC):
     This base class should be used when defining new ROMs.
     """
 
-    def __init__(self, reduced_state: Tensor, encoder: Encoder):
+    def __init__(self, reduced_state: Tensor, encoder: Encoder | None):
         """Create a new ROM instance.
 
         This constructor will be typically called by the base class.
@@ -147,6 +146,7 @@ class ROM(ABC):
         :param encoder: encoder used to create the time series data
         :type encoder: Encoder
         """
+        self._encoder: Encoder | None = None
         self.encoder = encoder
         self._check_reduced_state(reduced_state)
 
@@ -216,12 +216,12 @@ class ROM(ABC):
         pass
 
     @property
-    def encoder(self) -> Encoder:
+    def encoder(self) -> Encoder | None:
         """Return encoder instance."""
         return self._encoder
 
     @encoder.setter
-    def encoder(self, encoder: Encoder):
+    def encoder(self, encoder: Encoder | None):
         """Set the encoder.
 
         :param encoder: new encoder; can also be None

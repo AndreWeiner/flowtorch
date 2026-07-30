@@ -33,16 +33,16 @@ class SVDEncoder(Encoder):
 
     """
 
-    def __init__(self, rank: int = None):
+    def __init__(self, rank: int | None = None):
         """Derived class constructor.
 
         :param rank: rank to truncate the SVD
         :type rank: int, optional
         """
         super(SVDEncoder, self).__init__()
-        self._rank = rank
-        self._modes = None
-        self._state_size = None
+        self._rank: int | None = rank
+        self._modes: pt.Tensor | None = None
+        self._state_size: int | None = None
 
     @log_time
     def train(self, data: pt.Tensor) -> dict:
@@ -56,8 +56,9 @@ class SVDEncoder(Encoder):
         :rtype: dict
         """
         svd = SVD(data, self._rank)
-        self._modes = svd.U.clone()
-        self._state_size = self._modes.shape[0]
+        modes = svd.U.clone()
+        self._modes = modes
+        self._state_size = modes.shape[0]
         self._rank = svd.rank
         del svd
         self.trained = True
@@ -79,9 +80,9 @@ class SVDEncoder(Encoder):
         :return: reduced state vector or sequence of reduced state vectors
         :rtype: pt.Tensor
         """
-        self._check_state_shape(full_state.shape)
-        if not self.trained:
+        if self._modes is None:
             raise Exception("Encoding not possible: the encoder has not been trained")
+        self._check_state_shape(full_state.shape)
         return self._modes.conj().T @ full_state
 
     def decode(self, reduced_state: pt.Tensor) -> pt.Tensor:
@@ -95,9 +96,9 @@ class SVDEncoder(Encoder):
         :return: full state vector in the subspace spanned by the POD modes
         :rtype: pt.Tensor
         """
-        self._check_reduced_state_size(reduced_state.shape)
-        if not self.trained:
+        if self._modes is None:
             raise Exception("Decoding not possible: the encoder has not been trained")
+        self._check_reduced_state_size(reduced_state.shape)
         return self._modes @ reduced_state
 
     @property
@@ -107,6 +108,8 @@ class SVDEncoder(Encoder):
         :return: size of the full state
         :rtype: pt.Size
         """
+        if self._state_size is None:
+            raise RuntimeError("The encoder has not been trained")
         return pt.Size((self._state_size,))
 
     @property
@@ -116,4 +119,6 @@ class SVDEncoder(Encoder):
         :return: size of the reduced state.
         :rtype: int
         """
+        if self._rank is None:
+            raise RuntimeError("The encoder has not been trained")
         return self._rank
