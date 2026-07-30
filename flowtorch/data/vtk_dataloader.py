@@ -78,8 +78,8 @@ class VTKDataloader(Dataloader):
         self._prefix = prefix
         self._suffix = suffix
         self._dtype = dtype
-        self._write_times = None
-        self._field_names = None
+        self._write_times: List[str] | None = None
+        self._field_names: Dict[str, List[str]] | None = None
 
     @classmethod
     def from_flexi(
@@ -228,7 +228,7 @@ class VTKDataloader(Dataloader):
             snapshot = self._create_vtk_reader(
                 self._build_file_path(self.write_times[0])
             )
-            self._field_names = dict({self.write_times[0]: snapshot.PointData.keys()})
+            self._field_names = {self.write_times[0]: list(snapshot.PointData.keys())}
         return self._field_names
 
     @property

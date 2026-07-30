@@ -69,7 +69,7 @@ class TecplotDataloader(Dataloader):
         self._file_names = file_names
         self._reader = reader
         self._dtype = dtype
-        self._zone_names = None
+        self._zone_names: List[str] | None = None
         self._zone = self.zone_names[0]
 
     @classmethod
@@ -96,10 +96,12 @@ class TecplotDataloader(Dataloader):
         """
         path = check_and_standardize_path(path)
         file_paths = glob(join(path, f"{base_name}i=*t=*"))
-        file_names = [f.split(sep)[-1] for f in file_paths]
-        write_times = [name.split("t=")[-1].split(suffix)[0] for name in file_names]
+        discovered_names = [f.split(sep)[-1] for f in file_paths]
+        write_times = [
+            name.split("t=")[-1].split(suffix)[0] for name in discovered_names
+        ]
         sorted_names = sorted(
-            zip(write_times, file_names), key=lambda tup: float(tup[0])
+            zip(write_times, discovered_names), key=lambda tup: float(tup[0])
         )
         file_names = {time: name for time, name in sorted_names}
         if len(file_names.keys()) < 1:
@@ -126,11 +128,10 @@ class TecplotDataloader(Dataloader):
         :rtype: str
         """
         lines = meta_data.split("\n")
-        name = None
         for line in lines:
             if "NAME" in line:
-                name = line.split(":")[-1].strip()
-        return name
+                return line.split(":")[-1].strip()
+        raise ValueError("Could not find a block name in the Tecplot metadata")
 
     def _create_tecplot_reader(self, time: str) -> VisItTecplotBinaryReader:
         """Create instance of `VisItTecplotBinaryReader`.

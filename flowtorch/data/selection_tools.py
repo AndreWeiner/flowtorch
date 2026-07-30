@@ -59,16 +59,16 @@ def mask_sphere(vertices: pt.Tensor, center: List[float], radius: float) -> pt.T
     :return: boolean mask that's *True* for every vertex inside the sphere
     :rtype: pt.Tensor
     """
-    center = pt.tensor(center).type(vertices.dtype)
+    center_tensor = pt.tensor(center).type(vertices.dtype)
     assert (
         len(vertices.shape) < 3
     ), "The vertices tensor cannot have more than two axes."
     if len(vertices.shape) == 1:
-        assert len(center) == 1
-        radii = pt.abs(vertices - center)
+        assert len(center_tensor) == 1
+        radii = pt.abs(vertices - center_tensor)
     else:
         assert (
-            vertices.shape[1] == center.shape[0]
+            vertices.shape[1] == center_tensor.shape[0]
         ), "Missmatch between number of vertices and center coordinates."
-        radii = pt.linalg.norm(vertices - center, dim=1)
+        radii = pt.linalg.norm(vertices - center_tensor, dim=1)
     return pt.where(radii <= radius, True, False)

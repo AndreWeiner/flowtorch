@@ -81,7 +81,11 @@ class ImageDataloader(Dataloader):
             norm = 1
         return (pt.from_numpy(img) / norm).type(self._dtype)
 
-    def load_snapshot(self, time: List[str] | str) -> pt.Tensor:
+    def load_snapshot(
+        self,
+        field_name: List[str] | str,
+        time: List[str] | str | None = None,
+    ) -> pt.Tensor:
         """Load a single image or a sequence of images.
 
         :param time: time value or list of time values to identify the images
@@ -90,16 +94,17 @@ class ImageDataloader(Dataloader):
             represents time (in case an image sequence is loaded)
         :rtype: pt.Tensor
         """
-        check_list_or_str(time, "time")
-        if isinstance(time, list):
-            first = self._load_single_snapshot(time[0])
-            seq = pt.empty((*first.shape, len(time)), dtype=self._dtype)
+        requested_times = field_name if time is None else time
+        check_list_or_str(requested_times, "time")
+        if isinstance(requested_times, list):
+            first = self._load_single_snapshot(requested_times[0])
+            seq = pt.empty((*first.shape, len(requested_times)), dtype=self._dtype)
             seq[:, :, 0] = first
-            for i, t_i in enumerate(time[1:]):
+            for i, t_i in enumerate(requested_times[1:]):
                 seq[:, :, i + 1] = self._load_single_snapshot(t_i)
             return seq
         else:
-            return self._load_single_snapshot(time)
+            return self._load_single_snapshot(requested_times)
 
     @property
     def write_times(self) -> List[str]:

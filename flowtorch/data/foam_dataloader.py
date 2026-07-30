@@ -16,7 +16,7 @@ from sys import exit
 from glob import glob
 from os import listdir
 from os.path import isdir, isfile, join
-from typing import List, Dict, Tuple, Union
+from typing import List, Dict, Sequence, Tuple, Union
 
 # third party packages
 import torch as pt
@@ -113,7 +113,7 @@ class FOAMDataloader(Dataloader):
         self._dtype = dtype
         self._verbose = verbose
 
-    def _parse_data(self, data: List[Union[str, bytes]]) -> pt.Tensor:
+    def _parse_data(self, data: List[bytes]) -> pt.Tensor:
         """Parse field data from an OpenFOAM snapshot.
 
         :param data: full content of the snapshot file (including header
@@ -125,7 +125,10 @@ class FOAMDataloader(Dataloader):
         """
         field_type = self._field_type(data[:MAX_LINE_HEADER])
         if not field_type in FIELD_TYPE_DIMENSION.keys():
-            raise ValueError(f"Field type {field_type.decode('utf-8')} not supported.")
+            type_name = (
+                field_type.decode("utf-8") if field_type is not None else "unknown"
+            )
+            raise ValueError(f"Field type {type_name} not supported.")
         try:
             if self._case.is_binary(data[:MAX_LINE_HEADER]):
                 field_data = self._unpack_internal_field_binary(
@@ -141,7 +144,7 @@ class FOAMDataloader(Dataloader):
             return field_data
 
     @staticmethod
-    def _find_nonuniform(data: List[Union[str, bytes]]) -> Tuple[int, int]:
+    def _find_nonuniform(data: Sequence[bytes]) -> Tuple[int, int]:
         """Determine the start index and size of a nonuniform field.
 
         OpenFOAM output files with nonuniform fields contain the line
@@ -165,7 +168,7 @@ class FOAMDataloader(Dataloader):
         return 0, 0
 
     @staticmethod
-    def _field_type(data: List[Union[str, bytes]]) -> Union[str, bytes, None]:
+    def _field_type(data: Sequence[bytes]) -> bytes | None:
         """Determine the tensor type of a field.
 
         :param data: content of an OpenFoam output file
@@ -179,7 +182,7 @@ class FOAMDataloader(Dataloader):
                 return line.split()[-1].strip(b";")
         return None
 
-    def _unpack_internal_field_ascii(self, data: List[str], dim: int) -> pt.Tensor:
+    def _unpack_internal_field_ascii(self, data: List[bytes], dim: int) -> pt.Tensor:
         """Parse internal field given as ASCII-encoded text.
 
         :param data: content of output file
@@ -207,7 +210,7 @@ class FOAMDataloader(Dataloader):
                 dtype=self._dtype,
             )
 
-    def _unpack_internal_field_binary(self, data: List[str], dim: int) -> pt.Tensor:
+    def _unpack_internal_field_binary(self, data: List[bytes], dim: int) -> pt.Tensor:
         """Parse internal field given in binary encoding.
 
         :param data: content of output file
@@ -615,7 +618,7 @@ class FOAMMesh(object):
         return cls(FOAMCase(path), dtype)
 
     @staticmethod
-    def _get_list_length(data: List[str]) -> Tuple[int, int]:
+    def _get_list_length(data: Sequence[bytes]) -> Tuple[int, int]:
         """Find list length of points, faces, and cells.
 
         :param data: content of points, faces, or owner/neighbor file
@@ -773,6 +776,7 @@ class FOAMMesh(object):
         with open(join(mesh_path, "owner"), "rb") as file:
             data = file.readlines()
             start, length = self._get_list_length(data[:MAX_LINE_HEADER])
+            owner_values: Sequence[int]
             if self._case.is_binary(data[:MAX_LINE_HEADER]):
                 start += 1
                 buffer = b"".join(data[start:])
@@ -787,6 +791,7 @@ class FOAMMesh(object):
         with open(join(mesh_path, "neighbour"), "rb") as file:
             data = file.readlines()
             start, length = self._get_list_length(data[:MAX_LINE_HEADER])
+            neighbor_values: Sequence[int]
             if self._case.is_binary(data[:MAX_LINE_HEADER]):
                 start += 1
                 buffer = b"".join(data[start:])

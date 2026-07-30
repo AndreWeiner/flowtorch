@@ -157,7 +157,7 @@ class HDF5Dataloader(Dataloader):
     @property
     def field_names(self) -> Dict[str, List[str]]:
         times = self.write_times
-        field_names = dict.fromkeys(times, [])
+        field_names: Dict[str, List[str]] = {}
         for time in times:
             field_names[time] = list(self._file[f"{VAR_GROUP}/{time}"].keys())
         return field_names
@@ -293,10 +293,15 @@ class FOAM2HDF5(object):
         """
         self._loader = FOAMDataloader(path, dtype, False)
         self._dtype = dtype
-        self._topology = None
-        self._mesh_points = None
+        self._topology: pt.Tensor | None = None
+        self._mesh_points: pt.Tensor | None = None
 
-    def convert(self, filename: str, fields: List[str] = None, times: List[str] = None):
+    def convert(
+        self,
+        filename: str,
+        fields: List[str] | None = None,
+        times: List[str] | None = None,
+    ):
         """Convert OpenFOAM case to flowTorch HDF5 file.
 
         :param filename: name of the HDF5 file
@@ -371,7 +376,7 @@ class FOAM2HDF5(object):
         owners, neighbors = self._loader._mesh._parse_owners_and_neighbors(mesh_path)
         self._mesh_points = self._loader._mesh._parse_points(mesh_path)
 
-        cell_faces = [[] for _ in range(n_cells)]
+        cell_faces: List[List[pt.Tensor]] = [[] for _ in range(n_cells)]
         n_faces_cell = pt.zeros(n_cells, dtype=pt.int32)
         n_face_labels = 0
 
@@ -385,18 +390,19 @@ class FOAM2HDF5(object):
             n_faces_cell[neigh] += 1
 
         topology_length = n_cells * 2 + pt.sum(n_faces_cell).item() + n_face_labels
-        self._topology = pt.zeros(topology_length, dtype=pt.int32)
+        topology = pt.zeros(topology_length, dtype=pt.int32)
         marker = 0
         for i, faces in enumerate(cell_faces):
-            self._topology[marker] = 16
-            self._topology[marker + 1] = len(faces)
+            topology[marker] = 16
+            topology[marker + 1] = len(faces)
             marker += 2
             for j in range(len(faces)):
                 n_labels = faces[j].size()[0]
-                self._topology[marker] = n_labels
-                self._topology[marker + 1 : marker + 1 + n_labels] = faces[j]
+                topology[marker] = n_labels
+                topology[marker + 1 : marker + 1 + n_labels] = faces[j]
                 marker += n_labels + 1
-        return n_cells, self._mesh_points.size()[0], self._topology.size()[0]
+        self._topology = topology
+        return n_cells, self._mesh_points.size()[0], topology.size()[0]
 
     def _get_topology(self, job: int = 0):
         return self._topology
@@ -410,7 +416,12 @@ class FOAM2HDF5(object):
     def _get_cell_volumes(self, job: int = 0):
         return self._loader._mesh.get_cell_volumes()
 
-    def _convert_fields(self, writer: HDF5Writer, fields: List[str], times: List[str]):
+    def _convert_fields(
+        self,
+        writer: HDF5Writer,
+        fields: List[str] | None,
+        times: List[str] | None,
+    ):
         """Convert OpenFOAM fields to HDF5.
 
         :param writer: HDF5 writer
@@ -427,11 +438,11 @@ class FOAM2HDF5(object):
             logger.info(
                 f"Converting field {info[0]} at time {info[1]}, dimension {info[2]}"
             )
-            data = self._load_field(*info[:2], job=job)
+            data = self._load_field(info[0], info[1], job=job)
             writer.write(info[0], info[2], data, info[1])
 
     def _gather_field_information(
-        self, fields: List[str], times: List[str]
+        self, fields: List[str] | None, times: List[str] | None
     ) -> List[tuple]:
         """Gather field information for parallel writing.
 

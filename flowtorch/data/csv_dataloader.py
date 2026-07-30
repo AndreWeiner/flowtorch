@@ -193,7 +193,7 @@ class CSVDataloader(Dataloader):
             FIELD_KEY: [
                 col
                 for col in column_names
-                if col not in DAVIS_KEYS[VERTEX_KEY] + [DAVIS_KEYS[WEIGHT_KEY]]
+                if col not in list(DAVIS_KEYS[VERTEX_KEY]) + [DAVIS_KEYS[WEIGHT_KEY]]
             ],
         }
         return cls(path, prefix, suffix, read_options, False, dtype)

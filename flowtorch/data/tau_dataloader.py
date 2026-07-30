@@ -15,7 +15,7 @@ from abc import abstractmethod
 from os.path import join, split
 from glob import glob
 from collections import defaultdict
-from typing import List, Dict, Union
+from typing import Any, List, Dict, Union
 
 # third party packages
 from netCDF4 import Dataset
@@ -64,7 +64,7 @@ class TAUConfig(object):
         self._path, self._file_name = split(file_path)
         with open(join(self._path, self._file_name), "r") as config:
             self._file_content = config.readlines()
-        self._config = None
+        self._config: Dict[str, Any] | None = None
 
     def _parse_config(self, parameter: str) -> str:
         """Extract a value based on a given pattern.
@@ -89,7 +89,7 @@ class TAUConfig(object):
                     value = line.split(CONFIG_SEP)[-1].split(COMMENT_CHAR)[0].strip()
         return value
 
-    def _parse_bmap(self) -> dict:
+    def _parse_bmap(self) -> Dict[str, List[int]]:
         """Load and/or parse boundary mapping.
 
         The boundary mapping is required to load TAU surface data; the parameter
@@ -111,11 +111,13 @@ class TAUConfig(object):
         else:
             with open(join(self._path, filename), "r") as bfile:
                 content = bfile.readlines()
-        bmap = {}
+        bmap: Dict[str, List[int]] = {}
         for i, line in enumerate(content):
             if "Markers" in line:
-                markers = line.split(CONFIG_SEP)[-1].split(COMMENT_CHAR)[0].split(",")
-                markers = [int(m) for m in markers]
+                marker_strings = (
+                    line.split(CONFIG_SEP)[-1].split(COMMENT_CHAR)[0].split(",")
+                )
+                markers = [int(marker) for marker in marker_strings]
                 block_end_found = False
                 write_surface_data = False
                 j = i
@@ -147,7 +149,7 @@ class TAUConfig(object):
 
     def _gather_config(self):
         """Gather all required configuration values."""
-        config = {}
+        config: Dict[str, Any] = {}
         config[SOLUTION_PREFIX_KEY] = self._parse_config("Output files prefix")
         config[GRID_FILE_KEY] = self._parse_config("Primary grid filename")
         config[GRID_PREFIX_KEY] = self._parse_config("Grid prefix")
@@ -163,6 +165,7 @@ class TAUConfig(object):
     def config(self) -> dict:
         if self._config is None:
             self._gather_config()
+        assert self._config is not None
         return self._config
 
 
@@ -178,8 +181,9 @@ class TAUBase(Dataloader):
         self._para = TAUConfig(parameter_file)
         self._distributed = distributed
         self._dtype = dtype
-        self._mesh_data = None
-        self._solution_name = None
+        self._mesh_data: Any = None
+        self._solution_name = ""
+        self._time_iter: Dict[str, str] = {}
 
     def _decompose_file_name(self) -> Dict[str, str]:
         """Extract write time and iteration from file name.
@@ -417,7 +421,7 @@ class TAUDataloader(TAUBase):
             available solution fields as value
         :rtype: Dict[str, List[str]]
         """
-        self._field_names = {}
+        self._field_names: Dict[str, List[str]] = {}
         if self._distributed:
             n_points = self._load_domain_mesh_data("0").shape[0]
             suffix = ".domain_0"
@@ -436,12 +440,14 @@ class TAUDataloader(TAUBase):
     def vertices(self) -> pt.Tensor:
         if self._mesh_data is None:
             self._load_mesh_data()
+        assert isinstance(self._mesh_data, pt.Tensor)
         return self._mesh_data[:, :3]
 
     @property
     def weights(self) -> pt.Tensor:
         if self._mesh_data is None:
             self._load_mesh_data()
+        assert isinstance(self._mesh_data, pt.Tensor)
         return self._mesh_data[:, 3] / self._mesh_data[:, 3].max()
 
 
@@ -477,7 +483,7 @@ class TAUSurfaceDataloader(TAUBase):
         self._solution_name = SURF_SOLUTION_NAME
         self._time_iter = self._decompose_file_name()
         self._zone = self.zone_names[0]
-        self._zone_ids = None
+        self._zone_ids: Dict[str, pt.Tensor] | None = None
 
     def _load_zone_ids(self):
         """Load global vertex/field indices of zones.
@@ -529,10 +535,12 @@ class TAUSurfaceDataloader(TAUBase):
                     self._zone_ids[zone_name] = pt.unique(
                         surface_tri[boundary_markers].flatten()
                     ).type(pt.int64)
-                else:
+                elif surface_quad is not None:
                     self._zone_ids[zone_name] = pt.unique(
                         surface_quad[boundary_markers].flatten()
                     ).type(pt.int64)
+                else:
+                    raise ValueError("No surface elements found in the TAU grid")
 
     def _load_mesh_data(self):
         """Load mesh vertices for all zones.
@@ -604,6 +612,7 @@ class TAUSurfaceDataloader(TAUBase):
     def mesh_data(self) -> Dict[str, pt.Tensor]:
         if self._mesh_data is None:
             self._load_mesh_data()
+        assert isinstance(self._mesh_data, dict)
         return self._mesh_data
 
     @property
@@ -618,6 +627,7 @@ class TAUSurfaceDataloader(TAUBase):
     def zone_ids(self) -> Dict[str, pt.Tensor]:
         if self._zone_ids is None:
             self._load_zone_ids()
+        assert self._zone_ids is not None
         return self._zone_ids
 
     @property

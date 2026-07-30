@@ -31,10 +31,11 @@ def format_byte_size(size: int) -> Tuple[float, str]:
     """
     exponent_labels = {0: "b", 1: "Kb", 2: "Mb", 3: "Gb", 4: "Tb", 5: "Pt"}
     exponent = 0
-    while size > 1024:
-        size /= 1024
+    converted_size = float(size)
+    while converted_size > 1024:
+        converted_size /= 1024
         exponent += 1
-    return size, exponent_labels[exponent]
+    return converted_size, exponent_labels[exponent]
 
 
 def check_and_standardize_path(path: str, folder: bool = True):

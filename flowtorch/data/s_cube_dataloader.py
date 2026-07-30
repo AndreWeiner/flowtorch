@@ -51,10 +51,10 @@ class SCUBEDataloader(Dataloader):
             self._size_initial_cell = f.get(f"{CONST}/size_initial_cell")[()]
 
         # placeholders for properties which are only loaded if requested
-        self._write_times = None
+        self._write_times: List[str] | None = None
         self._weights = None  # cell areas (2D) / volumes (3D)
         self._levels = None
-        self._field_names = None
+        self._field_names: Dict[str, List[str]] | None = None
 
         # properties of the grid
         self._vertices = None
@@ -74,7 +74,8 @@ class SCUBEDataloader(Dataloader):
             with File(join(self._load_path, self._file_name), "r") as f:
                 if DATA in f.keys():
                     self._write_times = list(f.get(f"{DATA}").keys())
-
+                else:
+                    self._write_times = []
         return self._write_times
 
     @property
@@ -133,7 +134,7 @@ class SCUBEDataloader(Dataloader):
         return self._faces
 
     @property
-    def field_names(self) -> dict:
+    def field_names(self) -> Dict[str, List[str]]:
         """
         create a dictionary containing the available fields as a list for each available time step, the time steps are
         the keys while the available fields are the values for each key

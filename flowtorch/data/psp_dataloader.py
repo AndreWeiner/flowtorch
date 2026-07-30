@@ -10,7 +10,7 @@ research group.
 
 # standard library packages
 from os.path import exists
-from typing import List, Dict, Union
+from typing import Any, List, Dict, Union
 import logging
 
 # third party packages
@@ -83,11 +83,11 @@ class PSPDataloader(Dataloader):
             self._file = File(self._path, mode="r")
         else:
             raise FileNotFoundError(f"Could not find file {path}")
-        self._zone_names = None
+        self._zone_names: List[str] | None = None
         self._zone = self.zone_names[0]
-        self._mask_names = None
+        self._mask_names: List[str] | None = None
         self._mask = self.mask_names[0]
-        self._info = None
+        self._info: Dict[str, tuple[Any, ...]] | None = None
 
     def _time_to_index(self, time: Union[List[str], str]) -> Union[List[int], int]:
         """Find the list index of a physical write time.
@@ -179,7 +179,7 @@ class PSPDataloader(Dataloader):
         :param zone_name: name of the zone
         :type zone_name: str
         """
-        if zone_name in self._zone_names:
+        if zone_name in self.zone_names:
             self._zone = zone_name
             self._mask_names = None
             self._mask = self.mask_names[0]
@@ -216,7 +216,7 @@ class PSPDataloader(Dataloader):
         :param mask_name: name of the mask to activate
         :type mask_name: str
         """
-        if mask_name in self._mask_names:
+        if mask_name in self.mask_names:
             self._mask = mask_name
         else:
             logger.warning(
