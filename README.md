@@ -217,6 +217,20 @@ Check formatting without changing any files with:
 tox -e format-check
 ```
 
+### Type checking
+
+Python type annotations are checked with [mypy](https://mypy.readthedocs.io/).
+Tox installs the pinned mypy version in an isolated environment, so no separate
+installation is required. Check the `flowtorch` package with:
+```
+tox -e type-check
+```
+To check only specific files or directories, pass them after `--`, for example:
+```
+tox -e type-check -- flowtorch/analysis/svd.py
+```
+The shared type-checking options are defined in `mypy.ini`.
+
 ## Getting help
 
 If you encounter any issues using *flowTorch* or if you have any questions regarding current and future development plans, please use the repository's [issue tracker](https://github.com/FlowModelingControl/flowtorch/issues). Consider the following steps before and when opening a new issue:
