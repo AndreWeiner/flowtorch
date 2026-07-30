@@ -186,7 +186,7 @@ To run the dataset-free tests with multiple Python versions, use tox:
 ```
 tox
 ```
-The default tox configuration runs `py310`, `py311`, and `py312` environments and skips Python versions that are not installed locally. You can run a single environment with:
+The default tox configuration runs `py310`, `py312`, and `py314` environments and skips Python versions that are not installed locally. You can run a single environment with:
 ```
 tox -e py312
 ```
@@ -197,6 +197,24 @@ tox -e py312 -- tests/data/test_utils.py
 To run dataset-dependent integration tests through tox, make sure `FLOWTORCH_DATASETS` is set and pass the marker explicitly:
 ```
 tox -e py312 -- -m integration
+```
+
+### Code formatting
+
+Python code is formatted with [Black](https://black.readthedocs.io/) using its
+default line length of 88 characters. Tox installs the pinned Black version in
+an isolated environment, so no separate Black installation is required. Format
+the package, tests, and setup script with:
+```
+tox -e format
+```
+To format only specific files or directories, pass them after `--`, for example:
+```
+tox -e format -- flowtorch/analysis tests/analysis
+```
+Check formatting without changing any files with:
+```
+tox -e format-check
 ```
 
 ## Getting help
