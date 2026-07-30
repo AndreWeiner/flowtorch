@@ -1,10 +1,11 @@
 # standard library packages
 import pytest
+
 # third party packages
 import torch as pt
+
 # flowtorch packages
 from tests.helpers import requires_datasets
-
 
 requires_dataset = requires_datasets("ipsp_fake.hdf5")
 pytestmark = [requires_dataset, pytest.mark.integration]
@@ -85,8 +86,8 @@ class TestPSPDataloader:
         assert cp_s.shape == (50, 20, 10)
         assert pt.allclose(cp, cp_s[:, :, -1])
         # load multiple fields, single snapshot
-        cp, = loader.load_snapshot(["Cp"], times[0])
+        (cp,) = loader.load_snapshot(["Cp"], times[0])
         assert cp.shape == (50, 20)
         # load multiple fields, multiple snapshots
-        cp_s, = loader.load_snapshot(["Cp"], times[:10])
+        (cp_s,) = loader.load_snapshot(["Cp"], times[:10])
         assert pt.allclose(cp, cp_s[:, :, 0])

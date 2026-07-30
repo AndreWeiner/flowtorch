@@ -1,11 +1,14 @@
-"""Unit tests for the LinearModel class.
-"""
+"""Unit tests for the LinearModel class."""
 
 import pytest
 from pytest import raises
 import torch as pt
 from flowtorch.analysis.utils import trajectory_train_test_split
-from flowtorch.analysis.linear_model import _data_consistent, _least_squares_operator, LinearModel
+from flowtorch.analysis.linear_model import (
+    _data_consistent,
+    _least_squares_operator,
+    LinearModel,
+)
 
 
 def test_data_consistent():

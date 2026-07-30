@@ -11,12 +11,12 @@ from torch import Tensor
 
 
 class Dataloader(ABC):
-    """Abstract base class to define a common interface for dataloaders.
-    """
+    """Abstract base class to define a common interface for dataloaders."""
 
     @abstractmethod
-    def load_snapshot(self, field_name: Union[List[str], str],
-                      time: Union[List[str], str]) -> Union[List[Tensor], Tensor]:
+    def load_snapshot(
+        self, field_name: Union[List[str], str], time: Union[List[str], str]
+    ) -> Union[List[Tensor], Tensor]:
         """Load one or more snapshots of one or more fields.
 
         :param field_name: name of the field to load

@@ -1,5 +1,4 @@
-"""Implements a linear model of the form y = Ax.
-"""
+"""Implements a linear model of the form y = Ax."""
 
 from typing import Union, List, Callable, Type, Tuple
 from math import sqrt

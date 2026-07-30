@@ -38,7 +38,7 @@ FIELD_TYPE_DIMENSION = {
     b"volScalarField": 1,
     b"volVectorField": 3,
     b"volSymmTensorField": 6,
-    b"volTensorField": 9
+    b"volTensorField": 9,
 }
 CONSTANT_PATH = "constant"
 POLYMESH_PATH = join("constant", "polyMesh")
@@ -87,8 +87,13 @@ class FOAMDataloader(Dataloader):
 
     """
 
-    def __init__(self, path: str, dtype: pt.dtype = DEFAULT_DTYPE,
-                 distributed: Union[bool, None] = None, verbose: bool = False):
+    def __init__(
+        self,
+        path: str,
+        dtype: pt.dtype = DEFAULT_DTYPE,
+        distributed: Union[bool, None] = None,
+        verbose: bool = False,
+    ):
         """Create a FOAMDataloader instance from a path.
 
         :param path: path to an OpenFOAM simulation folder.
@@ -156,7 +161,7 @@ class FOAMDataloader(Dataloader):
         """
         for i, line in enumerate(data):
             if b"nonuniform" in line:
-                return i, int(data[i+1])
+                return i, int(data[i + 1])
         return 0, 0
 
     @staticmethod
@@ -189,12 +194,17 @@ class FOAMDataloader(Dataloader):
         start, n_values = self._find_nonuniform(data[:MAX_LINE_INTERNAL_FIELD])
         start += 3
         if dim == 1:
-            return pt.tensor([float(line) for line in data[start:start + n_values]], dtype=self._dtype)
+            return pt.tensor(
+                [float(line) for line in data[start : start + n_values]],
+                dtype=self._dtype,
+            )
         else:
             return pt.tensor(
-                [list(map(float, line[1:-2].split()))
-                 for line in data[start:start + n_values]],
-                dtype=self._dtype
+                [
+                    list(map(float, line[1:-2].split()))
+                    for line in data[start : start + n_values]
+                ],
+                dtype=self._dtype,
             )
 
     def _unpack_internal_field_binary(self, data: List[str], dim: int) -> pt.Tensor:
@@ -211,8 +221,8 @@ class FOAMDataloader(Dataloader):
         start += 2
         buffer = b"".join(data[start:])
         values = struct.unpack(
-            "{}d".format(dim*n_values),
-            buffer[SIZE_OF_CHAR:SIZE_OF_CHAR+SIZE_OF_DOUBLE*n_values*dim]
+            "{}d".format(dim * n_values),
+            buffer[SIZE_OF_CHAR : SIZE_OF_CHAR + SIZE_OF_DOUBLE * n_values * dim],
         )
         if dim > 1:
             return pt.tensor(values, dtype=self._dtype).reshape(n_values, dim)
@@ -235,8 +245,7 @@ class FOAMDataloader(Dataloader):
         file_paths = []
         if self._case.distributed:
             for proc in range(self._case.processors):
-                file_paths.append(
-                    self._case.build_file_path(field_name, time, proc))
+                file_paths.append(self._case.build_file_path(field_name, time, proc))
         else:
             file_paths.append(self._case.build_file_path(field_name, time, 0))
         field_data = []
@@ -257,19 +266,20 @@ class FOAMDataloader(Dataloader):
         :rtype: pt.Tensor
         """
         return pt.stack(
-            [self._load_single_snapshot(field_name, time) for time in times],
-            dim=-1
+            [self._load_single_snapshot(field_name, time) for time in times], dim=-1
         )
 
-    def load_snapshot(self,
-                      field_name: Union[List[str], str],
-                      time: Union[List[str], str]) -> Union[List[pt.Tensor], pt.Tensor]:
+    def load_snapshot(
+        self, field_name: Union[List[str], str], time: Union[List[str], str]
+    ) -> Union[List[pt.Tensor], pt.Tensor]:
         check_list_or_str(field_name, "field_name")
         check_list_or_str(time, "time")
         # load multiple fields
         if isinstance(field_name, list):
             if isinstance(time, list):
-                return [self._load_multiple_snapshots(name, time) for name in field_name]
+                return [
+                    self._load_multiple_snapshots(name, time) for name in field_name
+                ]
             else:
                 return [self._load_single_snapshot(name, time) for name in field_name]
         # load a single field
@@ -350,7 +360,9 @@ class FOAMCase(object):
         """
         self._path = check_and_standardize_path(path)
 
-        self._distributed = distributed if distributed is not None else self._eval_distributed()
+        self._distributed = (
+            distributed if distributed is not None else self._eval_distributed()
+        )
         self._processors = self._eval_processors()
         self._time_folders = self._eval_write_times()
         self._field_names = self._eval_field_names()
@@ -385,16 +397,13 @@ class FOAMCase(object):
             for proc in range(self._processors):
                 files_found += [
                     isfile(
-                        join(self._path, f"processor{proc:d}",
-                             POLYMESH_PATH, mesh_file)
+                        join(self._path, f"processor{proc:d}", POLYMESH_PATH, mesh_file)
                     )
                     for mesh_file in MESH_FILES
                 ]
         else:
             files_found = [
-                isfile(
-                    join(self._path, POLYMESH_PATH, mesh_file)
-                )
+                isfile(join(self._path, POLYMESH_PATH, mesh_file))
                 for mesh_file in MESH_FILES
             ]
         return all(files_found)
@@ -433,7 +442,9 @@ class FOAMCase(object):
             folders contain the same time folders.
         """
         time_path = join(self._path, "processor0") if self._distributed else self._path
-        dirs = [folder for folder in listdir(time_path) if isdir(join(time_path, folder))]
+        dirs = [
+            folder for folder in listdir(time_path) if isdir(join(time_path, folder))
+        ]
         time_dirs = []
         for entry in dirs:
             try:
@@ -443,7 +454,9 @@ class FOAMCase(object):
             except ValueError:
                 continue
         if len(time_dirs) < 2:
-            logger.warning("Found only one or less time folders in {:s}".format(self._path))
+            logger.warning(
+                "Found only one or less time folders in {:s}".format(self._path)
+            )
         return sorted(time_dirs, key=float)
 
     def _eval_field_names(self) -> Dict[str, List[str]]:
@@ -457,9 +470,15 @@ class FOAMCase(object):
             for each time as values
         :rtype: Dict[str, List[str]]
         """
-        all_time_folders = [self.build_file_path("", time, 0) for time in self._time_folders]
-        return {self._time_folders[i]: [field for field in listdir(folder) if isfile(join(folder, field))]
-                      for i, folder in enumerate(all_time_folders)}
+        all_time_folders = [
+            self.build_file_path("", time, 0) for time in self._time_folders
+        ]
+        return {
+            self._time_folders[i]: [
+                field for field in listdir(folder) if isfile(join(folder, field))
+            ]
+            for i, folder in enumerate(all_time_folders)
+        }
 
     def build_file_path(self, field_name: str, time: str, processor: int = 0) -> str:
         """Create the path to file inside the time folder of a simulation.
@@ -571,7 +590,11 @@ class FOAMMesh(object):
         Create FOAMMesh object based on :class:`FOAMCase`.
         """
         if not isinstance(case, FOAMCase):
-            exit("Error: case must be of type FOAMCase, not {:s}".format(type(case).__name__))
+            exit(
+                "Error: case must be of type FOAMCase, not {:s}".format(
+                    type(case).__name__
+                )
+            )
         self._case = case
         self._dtype = dtype
         self._itype = pt.int64
@@ -647,16 +670,18 @@ class FOAMMesh(object):
                 start += 1
                 buffer = b"".join(data[start:])
                 values = struct.unpack(
-                    "{}d".format(3*length),
-                    buffer[SIZE_OF_CHAR:SIZE_OF_CHAR+SIZE_OF_DOUBLE*length*3]
+                    "{}d".format(3 * length),
+                    buffer[SIZE_OF_CHAR : SIZE_OF_CHAR + SIZE_OF_DOUBLE * length * 3],
                 )
                 return pt.tensor(values, dtype=self._dtype).reshape(length, 3)
             else:
                 start += 2
                 return pt.tensor(
-                    [list(map(float, line[1:-2].split()))
-                     for line in data[start:start + length]],
-                    dtype=self._dtype
+                    [
+                        list(map(float, line[1:-2].split()))
+                        for line in data[start : start + length]
+                    ],
+                    dtype=self._dtype,
                 )
 
     def _parse_faces(self, mesh_path: str) -> Tuple[pt.Tensor, pt.Tensor]:
@@ -671,9 +696,9 @@ class FOAMMesh(object):
             number of points; faces with fewer points are padded with zeros
         :rtype: Tuple[pt.Tensor, pt.Tensor]
         """
+
         def zero_pad(tensor, new_size):
-            """Increase the size of second tensor dimension.
-            """
+            """Increase the size of second tensor dimension."""
             diff = new_size - tensor.size()[1]
             pad = pt.zeros((tensor.size()[0], diff), dtype=self._itype)
             return pt.cat([tensor, pad], dim=1)
@@ -682,49 +707,58 @@ class FOAMMesh(object):
             data = file.readlines()
             start, length = self._get_list_length(data[:MAX_LINE_HEADER])
             if self._case.is_binary(data[:MAX_LINE_HEADER]):
-                n_points_faces = pt.zeros((length-1, 1), dtype=self._itype)
+                n_points_faces = pt.zeros((length - 1, 1), dtype=self._itype)
                 faces = pt.zeros_like(n_points_faces, dtype=self._itype)
                 start += 1
                 buffer = b"".join(data[start:])
                 idx = struct.unpack(
                     "{}i".format(length),
-                    buffer[SIZE_OF_CHAR:SIZE_OF_CHAR + SIZE_OF_INT*length]
+                    buffer[SIZE_OF_CHAR : SIZE_OF_CHAR + SIZE_OF_INT * length],
                 )
 
                 # search for the next opening bracket to see where the second list starts
                 # the length of the second list is interpreted as a sequence of characters,
                 # so looking 50 characters ahead allows for a very large number of faces
-                list_0_end = SIZE_OF_INT*length
+                list_0_end = SIZE_OF_INT * length
                 offset = 0
-                for i, c in enumerate(buffer[list_0_end:list_0_end + 50*SIZE_OF_CHAR]):
+                for i, c in enumerate(
+                    buffer[list_0_end : list_0_end + 50 * SIZE_OF_CHAR]
+                ):
                     if chr(c) == r"(":
-                        offset = i+1
+                        offset = i + 1
                 values = struct.unpack(
                     "{}i".format(idx[-1]),
-                    buffer[offset+SIZE_OF_INT*length:offset +
-                           (length+idx[-1])*SIZE_OF_INT]
+                    buffer[
+                        offset
+                        + SIZE_OF_INT * length : offset
+                        + (length + idx[-1]) * SIZE_OF_INT
+                    ],
                 )
-                for i in range(length-1):
+                for i in range(length - 1):
                     face_labels = pt.tensor(
-                        values[idx[i]:idx[i+1]], dtype=self._itype)
+                        values[idx[i] : idx[i + 1]], dtype=self._itype
+                    )
                     n_points_faces[i] = len(face_labels)
                     if len(face_labels) > faces.size()[1]:
                         faces = zero_pad(faces, len(face_labels))
-                    faces[i][:len(face_labels)] = face_labels
+                    faces[i][: len(face_labels)] = face_labels
             else:
                 n_points_faces = pt.zeros((length, 1), dtype=self._itype)
                 faces = pt.zeros_like(n_points_faces, dtype=self._itype)
                 start += 2
-                for i, line in enumerate(data[start:start + length]):
+                for i, line in enumerate(data[start : start + length]):
                     n_points_faces[i] = int(line[:1])
                     face_labels = pt.tensor(
-                        list(map(int, line[2:-2].split())), dtype=self._itype)
+                        list(map(int, line[2:-2].split())), dtype=self._itype
+                    )
                     if len(face_labels) > faces.size()[1]:
                         faces = zero_pad(faces, len(face_labels))
-                    faces[i][:len(face_labels)] = face_labels
+                    faces[i][: len(face_labels)] = face_labels
             return n_points_faces, faces
 
-    def _parse_owners_and_neighbors(self, mesh_path: str) -> Tuple[pt.Tensor, pt.Tensor]:
+    def _parse_owners_and_neighbors(
+        self, mesh_path: str
+    ) -> Tuple[pt.Tensor, pt.Tensor]:
         """Parse face owners and neighbors.
 
         - owners are parsed from *constant/polyMesh/owner*
@@ -744,13 +778,11 @@ class FOAMMesh(object):
                 buffer = b"".join(data[start:])
                 owner_values = struct.unpack(
                     "{}i".format(length),
-                    buffer[SIZE_OF_CHAR:SIZE_OF_CHAR+SIZE_OF_INT*length]
+                    buffer[SIZE_OF_CHAR : SIZE_OF_CHAR + SIZE_OF_INT * length],
                 )
             else:
                 start += 2
-                owner_values = [
-                    int(line[:-1]) for line in data[start:start + length]
-                ]
+                owner_values = [int(line[:-1]) for line in data[start : start + length]]
 
         with open(join(mesh_path, "neighbour"), "rb") as file:
             data = file.readlines()
@@ -760,17 +792,17 @@ class FOAMMesh(object):
                 buffer = b"".join(data[start:])
                 neighbor_values = struct.unpack(
                     "{}i".format(length),
-                    buffer[SIZE_OF_CHAR:SIZE_OF_CHAR+SIZE_OF_INT*length]
+                    buffer[SIZE_OF_CHAR : SIZE_OF_CHAR + SIZE_OF_INT * length],
                 )
             else:
                 start += 2
                 neighbor_values = [
-                    int(line[:-1]) for line in data[start:start + length]
+                    int(line[:-1]) for line in data[start : start + length]
                 ]
 
         return (
             pt.tensor(owner_values, dtype=self._itype),
-            pt.tensor(neighbor_values, dtype=self._itype)
+            pt.tensor(neighbor_values, dtype=self._itype),
         )
 
     @staticmethod
@@ -799,16 +831,18 @@ class FOAMMesh(object):
                 start += 1
                 buffer = b"".join(data[start:])
                 values = struct.unpack(
-                    "{}d".format(3*length),
-                    buffer[SIZE_OF_CHAR:SIZE_OF_CHAR+SIZE_OF_DOUBLE*length*3]
+                    "{}d".format(3 * length),
+                    buffer[SIZE_OF_CHAR : SIZE_OF_CHAR + SIZE_OF_DOUBLE * length * 3],
                 )
                 return pt.tensor(values, dtype=self._dtype).reshape(length, 3)
             else:
                 start += 2
                 return pt.tensor(
-                    [list(map(float, line[1:-2].split()))
-                     for line in data[start:start + length]],
-                    dtype=self._dtype
+                    [
+                        list(map(float, line[1:-2].split()))
+                        for line in data[start : start + length]
+                    ],
+                    dtype=self._dtype,
                 )
 
     def _parse_cell_volumes(self, path: str) -> pt.Tensor:
@@ -827,18 +861,19 @@ class FOAMMesh(object):
                 buffer = b"".join(data[start:])
                 values = struct.unpack(
                     "{}d".format(length),
-                    buffer[SIZE_OF_CHAR:SIZE_OF_CHAR+SIZE_OF_DOUBLE*length]
+                    buffer[SIZE_OF_CHAR : SIZE_OF_CHAR + SIZE_OF_DOUBLE * length],
                 )
                 return pt.tensor(values, dtype=self._dtype)
             else:
                 start += 2
                 return pt.tensor(
-                    [float(line[:-1]) for line in data[start:start + length]],
-                    dtype=self._dtype
+                    [float(line[:-1]) for line in data[start : start + length]],
+                    dtype=self._dtype,
                 )
 
-    def _compute_face_centers_and_areas(self, points: pt.Tensor, faces: pt.Tensor,
-                                        n_points_faces: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor]:
+    def _compute_face_centers_and_areas(
+        self, points: pt.Tensor, faces: pt.Tensor, n_points_faces: pt.Tensor
+    ) -> Tuple[pt.Tensor, pt.Tensor]:
         """Compute face centers and areas.
 
         The implemented algorithm is close to the one in makeFaceCentresAndAreas_.
@@ -862,40 +897,44 @@ class FOAMMesh(object):
             and the second one holds the face areas
         :rtype: Tuple[pt.Tensor, pt.Tensor]
         """
-        face_centers = pt.zeros(
-            (n_points_faces.size()[0], 3), dtype=self._dtype)
+        face_centers = pt.zeros((n_points_faces.size()[0], 3), dtype=self._dtype)
         face_areas = pt.zeros_like(face_centers, dtype=self._dtype)
         center_estimates = pt.zeros_like(face_centers, dtype=self._dtype)
 
         for i in range(faces.shape[1]):
-            center_estimates += points[faces[:, i]] * \
-                pt.where(i < n_points_faces, 1, 0)
+            center_estimates += points[faces[:, i]] * pt.where(i < n_points_faces, 1, 0)
         center_estimates /= n_points_faces
 
         area_sums = pt.zeros_like(n_points_faces, dtype=self._dtype)
         for i in range(faces.shape[1]):
             this_point_mask = pt.where(i < n_points_faces, 1, 0)
-            next_point_mask = pt.where(i+1 < n_points_faces, 1, 0)
-            last_point_mask = pt.where(i+1 == n_points_faces, 1, 0)
+            next_point_mask = pt.where(i + 1 < n_points_faces, 1, 0)
+            last_point_mask = pt.where(i + 1 == n_points_faces, 1, 0)
             this_point = points[faces[:, i]] * this_point_mask
-            if i+1 < faces.shape[1]:
-                next_point = points[faces[:, i+1]] * next_point_mask
+            if i + 1 < faces.shape[1]:
+                next_point = points[faces[:, i + 1]] * next_point_mask
             else:
                 next_point = pt.zeros_like(face_centers, dtype=self._dtype)
             next_point += points[faces[:, 0]] * last_point_mask
             c = center_estimates * this_point_mask + this_point + next_point
-            n = pt.cross(next_point - this_point, center_estimates * this_point_mask - this_point, dim=1)
+            n = pt.cross(
+                next_point - this_point,
+                center_estimates * this_point_mask - this_point,
+                dim=1,
+            )
             a = pt.norm(n, dim=1).unsqueeze(1)
             face_centers += c * a
             area_sums += a
             face_areas += n
 
-        face_centers /= (area_sums * 3.0)
+        face_centers /= area_sums * 3.0
         face_areas *= 0.5
 
         return face_centers, face_areas
 
-    def _compute_cell_centers_and_volumes(self, mesh_path: str) -> Tuple[pt.Tensor, pt.Tensor]:
+    def _compute_cell_centers_and_volumes(
+        self, mesh_path: str
+    ) -> Tuple[pt.Tensor, pt.Tensor]:
         """Compute the cell centers and volumes of an OpenFOAM mesh.
 
         The implemented algorithm is close to the one in makeCellCentresAndVols_.
@@ -918,7 +957,9 @@ class FOAMMesh(object):
         points = self._parse_points(mesh_path)
         n_points_faces, faces = self._parse_faces(mesh_path)
         owners, neighbors = self._parse_owners_and_neighbors(mesh_path)
-        face_centers, face_areas = self._compute_face_centers_and_areas(points, faces, n_points_faces)
+        face_centers, face_areas = self._compute_face_centers_and_areas(
+            points, faces, n_points_faces
+        )
         n_cells = self._get_n_cells(mesh_path)
         cell_centers = pt.zeros((n_cells, 3), dtype=self._dtype)
         cell_volumes = pt.zeros(n_cells, dtype=self._dtype)
@@ -936,13 +977,13 @@ class FOAMMesh(object):
 
         for i, owner in enumerate(owners):
             pyr_3vol = pt.dot(face_areas[i], face_centers[i] - center_estimate[owner])
-            pyr_ctr = 3.0/4.0 * face_centers[i] + center_estimate[owner] / 4.0
+            pyr_ctr = 3.0 / 4.0 * face_centers[i] + center_estimate[owner] / 4.0
             cell_centers[owner] += pyr_3vol * pyr_ctr
             cell_volumes[owner] += pyr_3vol
 
         for i, neigh in enumerate(neighbors):
             pyr_3vol = pt.dot(face_areas[i], center_estimate[neigh] - face_centers[i])
-            pyr_ctr = 3.0/4.0 * face_centers[i] + center_estimate[neigh] / 4.0
+            pyr_ctr = 3.0 / 4.0 * face_centers[i] + center_estimate[neigh] / 4.0
             cell_centers[neigh] += pyr_3vol * pyr_ctr
             cell_volumes[neigh] += pyr_3vol
 
@@ -964,22 +1005,28 @@ class FOAMMesh(object):
                 if self._centers_and_volumes_computed(
                     join(self._case.path, f"processor{proc:d}", CONSTANT_PATH)
                 ):
-                    logger.info(f"Loading precomputed cell centers and volumes from processor{proc:d}/{CONSTANT_PATH}")
-                    mesh_location = join(self._case.path, f"processor{proc:d}", CONSTANT_PATH)
+                    logger.info(
+                        f"Loading precomputed cell centers and volumes from processor{proc:d}/{CONSTANT_PATH}"
+                    )
+                    mesh_location = join(
+                        self._case.path, f"processor{proc:d}", CONSTANT_PATH
+                    )
                     proc_data.append(
                         (
                             self._parse_cell_centers(mesh_location),
-                            self._parse_cell_volumes(mesh_location)
+                            self._parse_cell_volumes(mesh_location),
                         )
                     )
                 else:
-                    mesh_location = join(self._case.path, f"processor{proc:d}", POLYMESH_PATH)
+                    mesh_location = join(
+                        self._case.path, f"processor{proc:d}", POLYMESH_PATH
+                    )
                     logger.warning(
-                        f"Could not find precomputed cell centers and volumes (processor{proc:d}).\n" +
-                        "Computing cell geometry from scratch (slow, not recommended for large meshes).\n" +
-                        "To compute cell centers and volumes in OpenFOAM, use:\n\n" +
-                        "runParallel postProcess -func \"writeCellCentres\" -constant -time none\n" +
-                        "runParallel postProcess -func \"writeCellVolumes\" -constant -time none\n"
+                        f"Could not find precomputed cell centers and volumes (processor{proc:d}).\n"
+                        + "Computing cell geometry from scratch (slow, not recommended for large meshes).\n"
+                        + "To compute cell centers and volumes in OpenFOAM, use:\n\n"
+                        + 'runParallel postProcess -func "writeCellCentres" -constant -time none\n'
+                        + 'runParallel postProcess -func "writeCellVolumes" -constant -time none\n'
                     )
                     proc_data.append(
                         self._compute_cell_centers_and_volumes(mesh_location)
@@ -987,25 +1034,22 @@ class FOAMMesh(object):
             centers = pt.cat(list(zip(*proc_data))[0])
             volumes = pt.cat(list(zip(*proc_data))[1])
         else:
-            if self._centers_and_volumes_computed(
-                join(self._case.path, CONSTANT_PATH)
-            ):
-                logger.info(f"Loading precomputed cell centers and volumes from {CONSTANT_PATH}")
-                centers = self._parse_cell_centers(
-                    join(self._case.path, CONSTANT_PATH))
-                volumes = self._parse_cell_volumes(
-                    join(self._case.path, CONSTANT_PATH))
+            if self._centers_and_volumes_computed(join(self._case.path, CONSTANT_PATH)):
+                logger.info(
+                    f"Loading precomputed cell centers and volumes from {CONSTANT_PATH}"
+                )
+                centers = self._parse_cell_centers(join(self._case.path, CONSTANT_PATH))
+                volumes = self._parse_cell_volumes(join(self._case.path, CONSTANT_PATH))
             else:
                 mesh_location = join(self._case.path, POLYMESH_PATH)
                 logger.warning(
-                    "Could not find precomputed cell centers and volumes.\n" +
-                    "Computing cell geometry from scratch (slow, not recommended for large meshes).\n" +
-                    "To compute cell centers and volumes in OpenFOAM, run:\n\n" +
-                    "postProcess -func \"writeCellCentres\" -constant -time none\n" +
-                    "postProcess -func \"writeCellVolumes\" -constant -time none"
+                    "Could not find precomputed cell centers and volumes.\n"
+                    + "Computing cell geometry from scratch (slow, not recommended for large meshes).\n"
+                    + "To compute cell centers and volumes in OpenFOAM, run:\n\n"
+                    + 'postProcess -func "writeCellCentres" -constant -time none\n'
+                    + 'postProcess -func "writeCellVolumes" -constant -time none'
                 )
-                centers, volumes = self._compute_cell_centers_and_volumes(
-                    mesh_location)
+                centers, volumes = self._compute_cell_centers_and_volumes(mesh_location)
         self._cell_centers = centers
         self._cell_volumes = volumes
 

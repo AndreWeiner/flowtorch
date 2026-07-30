@@ -1,9 +1,13 @@
 # third party packages
 import pytest
 from torch import rand, cat, zeros
+
 # flowtorch packages
-from flowtorch.data.utils import (format_byte_size, check_and_standardize_path,
-                                  check_list_or_str)
+from flowtorch.data.utils import (
+    format_byte_size,
+    check_and_standardize_path,
+    check_list_or_str,
+)
 from flowtorch.data.utils import CellWeightEstimator
 
 
@@ -11,9 +15,9 @@ def test_byte_formatting():
     size, unit = format_byte_size(int(1e3))
     assert size == 1e3 and unit == "b"
     size, unit = format_byte_size(int(1e4))
-    assert size == 1e4/1024 and unit == "Kb"
+    assert size == 1e4 / 1024 and unit == "Kb"
     size, unit = format_byte_size(int(1e7))
-    assert size == 1e7/1024**2 and unit == "Mb"
+    assert size == 1e7 / 1024**2 and unit == "Mb"
 
 
 def test_check_and_standardize_path():
@@ -60,4 +64,3 @@ def test_cell_weight_estimator(dims: int, n_points: int):
     # since we normalize the weights they should be in [0, 1]
     assert all(estimator.weights >= 0)
     assert all(estimator.weights <= 1)
-

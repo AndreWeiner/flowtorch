@@ -1,5 +1,4 @@
-"""Unit tests for linear controller.
-"""
+"""Unit tests for linear controller."""
 
 from pytest import raises
 import torch as pt

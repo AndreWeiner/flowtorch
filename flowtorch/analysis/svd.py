@@ -83,7 +83,9 @@ class SVD(object):
         self._opt_rank = self._optimal_rank(s)
         self.rank = self.opt_rank if rank is None else rank
         self._s_full = s
-        logger.info(f"Truncating SVD at index {self.rank}/{min(self._cols, self._rows)}")
+        logger.info(
+            f"Truncating SVD at index {self.rank}/{min(self._cols, self._rows)}"
+        )
         self._U = U[:, : self.rank].contiguous()
         self._s = s[: self.rank].clone()
         self._V = V[:, : self.rank].contiguous()
@@ -254,7 +256,7 @@ class SVD(object):
         :rtype: int
         """
         return self._opt_rank
-    
+
     @property
     def mode(self) -> str:
         """SVD compute path

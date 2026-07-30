@@ -1,5 +1,4 @@
-"""Dataset class for time series forecasting.
-"""
+"""Dataset class for time series forecasting."""
 
 import torch as pt
 from torch.utils.data import Dataset

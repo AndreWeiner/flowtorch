@@ -30,7 +30,6 @@ from numpy import pi
 # flowTorch packages
 from .svd import SVD
 
-
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
@@ -536,9 +535,7 @@ class AMSPOD(object):
             n_modes = self._n_keep
         n_available = self._modes.shape[-1]
         if self._adaptive:
-            n_available = min(
-                n_available, int(self._log["n_tapers"].min().item())
-            )
+            n_available = min(n_available, int(self._log["n_tapers"].min().item()))
         if n_modes > n_available:
             warnings.warn(
                 f"n_modes={n_modes:d} exceeds the minimum number of available "
@@ -593,10 +590,9 @@ class AMSPOD(object):
             rhs = basis_weighted.T @ snapshots_weighted
             coefficients_real = pt.linalg.pinv(gram) @ rhs
             n_basis = basis.shape[1]
-            coefficients = (
-                coefficients_real[:n_basis].type(basis.dtype)
-                + 1j * coefficients_real[n_basis:].type(basis.dtype)
-            )
+            coefficients = coefficients_real[:n_basis].type(
+                basis.dtype
+            ) + 1j * coefficients_real[n_basis:].type(basis.dtype)
         return coefficients.reshape(self._frequency.shape[0], n_modes, self._nt)
 
     def mode_reconstruction(
@@ -809,6 +805,6 @@ class PAMSPOD(AMSPOD):
         """
         rec = super().mode_reconstruction(f_idx, eig_idx, dt, N, scale)
         if hasattr(self, "_weight_org"):
-            return (self.svd.U  / self._weight_org).type(rec.dtype) @ rec
+            return (self.svd.U / self._weight_org).type(rec.dtype) @ rec
         else:
             return self.svd.U.type(rec.dtype) @ rec

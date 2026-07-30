@@ -10,8 +10,13 @@ from scipy.spatial import KDTree, ConvexHull
 from torch import Tensor, float32, from_numpy, where
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)-8s %(message)s', datefmt='%Y-%m-%d %H:%M:%S',
-                    force=True)
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(asctime)s] %(levelname)-8s %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    force=True,
+)
+
 
 def format_byte_size(size: int) -> Tuple[float, str]:
     """Convert a number of bytes into human-readable format.
@@ -116,7 +121,13 @@ class CellWeightEstimator:
     :type normalize: bool
     """
 
-    def __init__(self, coordinates: Tensor, n_workers: int = 4, normalize: bool = True, k: Union[int, None] = None):
+    def __init__(
+        self,
+        coordinates: Tensor,
+        n_workers: int = 4,
+        normalize: bool = True,
+        k: Union[int, None] = None,
+    ):
         self._normalize = normalize
         self._vertices = coordinates
         self._n_workers = n_workers

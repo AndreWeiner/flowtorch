@@ -15,7 +15,9 @@ from .utils import (
 )
 
 
-def _least_squares_operator(X: pt.Tensor, Y: pt.Tensor, G: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor]:
+def _least_squares_operator(
+    X: pt.Tensor, Y: pt.Tensor, G: pt.Tensor
+) -> Tuple[pt.Tensor, pt.Tensor]:
     n_states = X.shape[0]
     AB = Y @ pt.linalg.pinv(pt.cat((X, G), dim=0))
     return AB[:, :n_states], AB[:, n_states:]
@@ -38,7 +40,9 @@ class LinearControlModel(pt.nn.Module):
         self._check_input_consistency()
         A, B = _least_squares_operator(self._dm[:, :-1], self._dm[:, 1:], self._cm)
         self._eigvals, self._eigvecs = pt.linalg.eig(A)
-        self._amplitude = pt.linalg.inv(self._eigvecs) @ self._dm[:, 0].type(self._eigvecs.dtype)
+        self._amplitude = pt.linalg.inv(self._eigvecs) @ self._dm[:, 0].type(
+            self._eigvecs.dtype
+        )
         self._A = pt.nn.Parameter(A)
         self._B = pt.nn.Parameter(B)
         self._noise = pt.nn.Parameter(pt.zeros_like(self._dm))
@@ -54,7 +58,7 @@ class LinearControlModel(pt.nn.Module):
             )
 
     def forward(
-            self, x0: pt.Tensor, noise_idx: pt.Tensor, c: pt.Tensor, backward: bool
+        self, x0: pt.Tensor, noise_idx: pt.Tensor, c: pt.Tensor, backward: bool
     ) -> pt.Tensor:
         """Predict a batch of controlled trajectories.
 
@@ -68,7 +72,7 @@ class LinearControlModel(pt.nn.Module):
             forward: x0 corresponds to state at time step 0
             backward: x0 corresponds to state at time step N
         :type x0: pt.Tensor
-        :param noise_idx: noise indices of size B corresponding to x0 
+        :param noise_idx: noise indices of size B corresponding to x0
         :type noise_idx: pt.Tensor
         :param c: batch of control inputs of size B x S X N-1
             forward: control time indices [0, 1, ..., N-1] with x0 at 0
@@ -89,29 +93,29 @@ class LinearControlModel(pt.nn.Module):
             X[:, :, 0] = (x0 - self._noise[:, noise_idx].T) @ AT + c[:, :, 0] @ BT
             for n in range(1, N):
                 # X[:, :, n] = (A @ X[:, :, n-1].T).T + (B @ c[:, :, n-1].T).T
-                X[:, :, n] = X[:, :, n-1] @ AT + c[:, :, n-1] @ BT
+                X[:, :, n] = X[:, :, n - 1] @ AT + c[:, :, n - 1] @ BT
         else:
             AinvT = pt.linalg.inv(self._A).T
             # X[:, :, 0] = (Ainv @ ((x0 - self._noise[:, noise_idx].T) - (B @ c[:, :, 0].T).T).T).T
             X[:, :, 0] = (x0 - self._noise[:, noise_idx].T - c[:, :, 0].T @ BT) @ AinvT
             for n in range(1, N):
                 # X[:, :, n] = (Ainv @ (X[:, :, n-1] - (B @ c[:, :, n].T).T).T).T
-                X[:, :, n] = (X[:, :, n-1] - c[:, :, n] @ BT) @ AinvT
+                X[:, :, n] = (X[:, :, n - 1] - c[:, :, n] @ BT) @ AinvT
         return X
-    
+
     def train(
-            self,
-            epochs: int = 1000,
-            batch_size: Union[int, None] = None,
-            loss_function: Union[Callable, None] = None,
-            split_options: dict = {},
-            scheduler_options: dict = {},
-            stopping_options: dict = {},
-            optimizer: Type[pt.optim.Optimizer] = pt.optim.AdamW,
-            optimizer_options: dict = {},
-            loss_key: str = "full_loss",
-            device: str = "cpu",
-        ) -> None:
+        self,
+        epochs: int = 1000,
+        batch_size: Union[int, None] = None,
+        loss_function: Union[Callable, None] = None,
+        split_options: dict = {},
+        scheduler_options: dict = {},
+        stopping_options: dict = {},
+        optimizer: Type[pt.optim.Optimizer] = pt.optim.AdamW,
+        optimizer_options: dict = {},
+        loss_key: str = "full_loss",
+        device: str = "cpu",
+    ) -> None:
         optim = optimizer(self.parameters(), **optimizer_options)
         options = {
             key: scheduler_options[key] if key in scheduler_options else val
@@ -131,7 +135,7 @@ class LinearControlModel(pt.nn.Module):
         loss_function = _fro_loss_operator if loss_function is None else loss_function
         e, stop = 0, False
         self.to(device)
-    
+
     def predict(
         self, initial_condition: pt.Tensor, control_inputs: pt.Tensor
     ) -> pt.Tensor:
@@ -161,7 +165,9 @@ class LinearControlModel(pt.nn.Module):
         b = pt.linalg.pinv(self._eigvecs) @ initial_condition.type(self._eigvecs.dtype)
         n_steps = cm.shape[-1] + 1
         V = pt.linalg.vander(self._eigvals, N=n_steps)
-        C = pt.linalg.pinv(self._eigvecs) @ (self._B.detach() @ cm).type(self._eigvecs.dtype)
+        C = pt.linalg.pinv(self._eigvecs) @ (self._B.detach() @ cm).type(
+            self._eigvecs.dtype
+        )
         forcing = pt.vstack(
             [(C[:, :n] * V[:, :n].flip(-1)).sum(dim=1) for n in range(1, n_steps)]
         ).T

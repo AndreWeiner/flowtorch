@@ -2,7 +2,7 @@
 
 from setuptools import setup
 
-exec(open('flowtorch/version.py').read())
+exec(open("flowtorch/version.py").read())
 
 setup(
     name="flowTorch",
@@ -31,7 +31,7 @@ setup(
         "Topic :: Scientific/Engineering :: Artificial Intelligence",
         "Topic :: Scientific/Engineering :: Mathematics",
         "Topic :: Scientific/Engineering :: Physics",
-        "Topic :: Scientific/Engineering :: Visualization"
+        "Topic :: Scientific/Engineering :: Visualization",
     ],
     install_requires=[
         "h5py",
@@ -44,6 +44,6 @@ setup(
         "torch >= 1.9",
         "jupyterlab",
         "scikit-learn",
-        "vtk"
-    ]
+        "vtk",
+    ],
 )

@@ -1,10 +1,11 @@
-"""Higher-order optimized DMD version.
-"""
+"""Higher-order optimized DMD version."""
 
 # standard library packages
 from typing import Set
+
 # third party packages
 import torch as pt
+
 # flowtorch packages
 from .svd import SVD
 from .optdmd import OptDMD
@@ -17,8 +18,15 @@ class HOOptDMD(OptDMD):
     :param OptDMD: Optimized DMD base class
     :type OptDMD: `flowtorch.analysis.OptDMD`
     """
-    def __init__(self, data_matrix: pt.Tensor, dt: float, delay: int = 1,
-                 rank_dr: int = None, **dmd_options: dict):
+
+    def __init__(
+        self,
+        data_matrix: pt.Tensor,
+        dt: float,
+        delay: int = 1,
+        rank_dr: int = None,
+        **dmd_options: dict
+    ):
         """Project data on POD basis and create time delay embedding.
 
         :param data_matrix: data matrix with snapshots organized as column vectors
@@ -37,7 +45,8 @@ class HOOptDMD(OptDMD):
         self._delay = delay
         super(HOOptDMD, self).__init__(
             _create_time_delays(self._svd_dr.U.T @ self._dm_org, delay),
-            dt, **dmd_options
+            dt,
+            **dmd_options
         )
 
     def partial_reconstruction(self, mode_indices: Set[int]) -> pt.Tensor:
@@ -49,7 +58,7 @@ class HOOptDMD(OptDMD):
         if not self._dmd._complex:
             rec = rec.real
         return rec
-    
+
     def predict(self, initial_condition: pt.Tensor, n_steps: int) -> pt.Tensor:
         """Predict evolution over N steps starting from user-defined initial conditions.
 
@@ -76,7 +85,7 @@ class HOOptDMD(OptDMD):
         prediction = super().predict(ic, n_steps)
         r = self.svd_dr.rank
         return self.svd_dr.U @ prediction[-r:]
-    
+
     @property
     def dynamics(self) -> pt.Tensor:
         vander = pt.linalg.vander(self.eigvals, N=self._cols_org)
@@ -98,7 +107,7 @@ class HOOptDMD(OptDMD):
     @property
     def reconstruction_error(self) -> pt.Tensor:
         return self._dm_org - self.reconstruction
-    
+
     @property
     def svd_dr(self) -> SVD:
         return self._svd_dr

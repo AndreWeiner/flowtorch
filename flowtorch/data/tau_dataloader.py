@@ -8,6 +8,7 @@ to snapshot data.
 .. _TAU: https://www.dlr.de/as/desktopdefault.aspx/tabid-395/526_read-694/
 
 """
+
 # standard library packages
 import logging
 from abc import abstractmethod
@@ -15,9 +16,11 @@ from os.path import join, split
 from glob import glob
 from collections import defaultdict
 from typing import List, Dict, Union
+
 # third party packages
 from netCDF4 import Dataset
 import torch as pt
+
 # flowtorch packages
 from flowtorch import DEFAULT_DTYPE
 from .dataloader import Dataloader
@@ -111,8 +114,7 @@ class TAUConfig(object):
         bmap = {}
         for i, line in enumerate(content):
             if "Markers" in line:
-                markers = line.split(
-                    CONFIG_SEP)[-1].split(COMMENT_CHAR)[0].split(",")
+                markers = line.split(CONFIG_SEP)[-1].split(COMMENT_CHAR)[0].split(",")
                 markers = [int(m) for m in markers]
                 block_end_found = False
                 write_surface_data = False
@@ -122,8 +124,12 @@ class TAUConfig(object):
                     if "Write surface data (0/1)" in content[j]:
                         write_surface_data = True
                     elif "Name" in content[j]:
-                        name = content[j].split(
-                            CONFIG_SEP)[-1].split(COMMENT_CHAR)[0].strip()
+                        name = (
+                            content[j]
+                            .split(CONFIG_SEP)[-1]
+                            .split(COMMENT_CHAR)[0]
+                            .strip()
+                        )
                     elif "block end" in content[j]:
                         block_end_found = True
                     else:
@@ -132,14 +138,15 @@ class TAUConfig(object):
                     if name in bmap.keys():
                         name_with_marker = f"{name}_marker{str(int(markers[0]))}"
                         bmap[name_with_marker] = markers
-                        logger.warning(f"Duplicate zone name {name} replaced by {name_with_marker}.")
+                        logger.warning(
+                            f"Duplicate zone name {name} replaced by {name_with_marker}."
+                        )
                     else:
                         bmap[name] = markers
         return bmap
 
     def _gather_config(self):
-        """Gather all required configuration values.
-        """
+        """Gather all required configuration values."""
         config = {}
         config[SOLUTION_PREFIX_KEY] = self._parse_config("Output files prefix")
         config[GRID_FILE_KEY] = self._parse_config("Primary grid filename")
@@ -160,11 +167,14 @@ class TAUConfig(object):
 
 
 class TAUBase(Dataloader):
-    """Base class with shared functionality of TAU Dataloaders.
-    """
+    """Base class with shared functionality of TAU Dataloaders."""
 
-    def __init__(self, parameter_file: str, distributed: bool = False,
-                 dtype: pt.dtype = DEFAULT_DTYPE):
+    def __init__(
+        self,
+        parameter_file: str,
+        distributed: bool = False,
+        dtype: pt.dtype = DEFAULT_DTYPE,
+    ):
         self._para = TAUConfig(parameter_file)
         self._distributed = distributed
         self._dtype = dtype
@@ -185,7 +195,8 @@ class TAUBase(Dataloader):
         files = glob(f"{base}i=*t=*{suffix}")
         if len(files) < 1:
             raise FileNotFoundError(
-                f"Could not find solution files in {self._para.path}/")
+                f"Could not find solution files in {self._para.path}/"
+            )
         time_iter = {}
         split_at = PSOLUTION_POSTFIX if self._distributed else " "
         for f in files:
@@ -232,28 +243,27 @@ class TAUBase(Dataloader):
         """
         pass
 
-    def load_snapshot(self, field_name: Union[List[str], str],
-                      time: Union[List[str], str]) -> Union[List[pt.Tensor], pt.Tensor]:
+    def load_snapshot(
+        self, field_name: Union[List[str], str], time: Union[List[str], str]
+    ) -> Union[List[pt.Tensor], pt.Tensor]:
         check_list_or_str(field_name, "field_name")
         check_list_or_str(time, "time")
         # load multiple fields
         if isinstance(field_name, list):
             if isinstance(time, list):
                 return [
-                    pt.stack([self._load_single_snapshot(field, t)
-                              for t in time], dim=-1)
+                    pt.stack(
+                        [self._load_single_snapshot(field, t) for t in time], dim=-1
+                    )
                     for field in field_name
                 ]
             else:
-                return [
-                    self._load_single_snapshot(field, time) for field in field_name
-                ]
+                return [self._load_single_snapshot(field, time) for field in field_name]
         # load single field
         else:
             if isinstance(time, list):
                 return pt.stack(
-                    [self._load_single_snapshot(field_name, t) for t in time],
-                    dim=-1
+                    [self._load_single_snapshot(field_name, t) for t in time], dim=-1
                 )
             else:
                 return self._load_single_snapshot(field_name, time)
@@ -291,8 +301,12 @@ class TAUDataloader(TAUBase):
 
     """
 
-    def __init__(self, parameter_file: str, distributed: bool = False,
-                 dtype: pt.dtype = DEFAULT_DTYPE):
+    def __init__(
+        self,
+        parameter_file: str,
+        distributed: bool = False,
+        dtype: pt.dtype = DEFAULT_DTYPE,
+    ):
         """Create loader instance from a TAU parameter file.
 
         :param parameter_file: path to TAU simulation parameter file
@@ -323,8 +337,10 @@ class TAUDataloader(TAUBase):
             name = f"{prefix}_{name}"
         path = join(self._para.path, name)
         with Dataset(path) as data:
-            vertices = pt.stack([pt.tensor(data[key][:], dtype=self._dtype) 
-                                 for key in VERTEX_KEYS], dim=-1)
+            vertices = pt.stack(
+                [pt.tensor(data[key][:], dtype=self._dtype) for key in VERTEX_KEYS],
+                dim=-1,
+            )
             n_add_points = data[PADD_POINTS_KEY].shape[0]
 
         n_points = vertices.shape[0] - n_add_points
@@ -345,21 +361,21 @@ class TAUDataloader(TAUBase):
         if self._distributed:
             n = self._para.config[N_DOMAINS_KEY]
             self._mesh_data = pt.cat(
-                [self._load_domain_mesh_data(str(pid)) for pid in range(n)],
-                dim=0
+                [self._load_domain_mesh_data(str(pid)) for pid in range(n)], dim=0
             )
         else:
             path = join(self._para.path, self._para.config[GRID_FILE_KEY])
             with Dataset(path) as data:
                 vertices = pt.stack(
-                    [pt.tensor(data[key][:], dtype=self._dtype)
-                     for key in VERTEX_KEYS],
-                    dim=-1
+                    [pt.tensor(data[key][:], dtype=self._dtype) for key in VERTEX_KEYS],
+                    dim=-1,
                 )
             weights = pt.ones(vertices.shape[0], dtype=self._dtype)
             self._mesh_data = pt.cat((vertices, weights.unsqueeze(-1)), dim=-1)
         try:
-            self._mesh_data[:,3] = self._load_single_snapshot(WEIGHT_KEY, self.write_times[-1])
+            self._mesh_data[:, 3] = self._load_single_snapshot(
+                WEIGHT_KEY, self.write_times[-1]
+            )
         except KeyError:
             logger.warning(f"Could not find cell volumes in last snapshot.")
 
@@ -379,15 +395,13 @@ class TAUDataloader(TAUBase):
                 path = self._file_name(time, f".domain_{pid}")
                 with Dataset(path) as data:
                     field.append(
-                        pt.tensor(
-                            data.variables[field_name][:], dtype=self._dtype)
+                        pt.tensor(data.variables[field_name][:], dtype=self._dtype)
                     )
             return pt.cat(field, dim=0)
         else:
             path = self._file_name(time)
             with Dataset(path) as data:
-                field = pt.tensor(
-                    data.variables[field_name][:], dtype=self._dtype)
+                field = pt.tensor(data.variables[field_name][:], dtype=self._dtype)
         return field
 
     @property
@@ -480,29 +494,35 @@ class TAUSurfaceDataloader(TAUBase):
         path = join(self._para.path, self._para.config[GRID_FILE_KEY])
         with Dataset(path) as data:
             boundary_markers = pt.tensor(
-                data.variables["boundarymarker_of_surfaces"][:], dtype=pt.int)
+                data.variables["boundarymarker_of_surfaces"][:], dtype=pt.int
+            )
             surface_tri, surface_quad = None, None
             surface_tri_key = "points_of_surfacetriangles"
             if surface_tri_key in data.variables.keys():
                 surface_tri = pt.tensor(
-                    data.variables[surface_tri_key][:], dtype=pt.int)
+                    data.variables[surface_tri_key][:], dtype=pt.int
+                )
             surface_quad_key = "points_of_surfacequadrilaterals"
             if surface_quad_key in data.variables.keys():
                 surface_quad = pt.tensor(
-                    data.variables[surface_quad_key][:], dtype=pt.int)
+                    data.variables[surface_quad_key][:], dtype=pt.int
+                )
             self._zone_ids = {}
             for zone_name, zone_markers in self._para.config[BMAP_FILE_KEY].items():
-                marker_selection = pt.isin(
-                    boundary_markers, pt.tensor(zone_markers))
+                marker_selection = pt.isin(boundary_markers, pt.tensor(zone_markers))
                 if surface_tri is not None and surface_quad is not None:
                     expanded = pt.empty((surface_tri.size(0), 4), dtype=pt.float64)
                     expanded[:, :3] = surface_tri
                     expanded[:, 3] = float("nan")
                     merged = pt.unique(
-                        pt.cat((expanded, surface_quad), dim=0)[marker_selection].flatten())
-                    
-                    sorted_zones, indices = pt.sort(merged[~pt.isnan(
-                        merged)].type(pt.int64))
+                        pt.cat((expanded, surface_quad), dim=0)[
+                            marker_selection
+                        ].flatten()
+                    )
+
+                    sorted_zones, indices = pt.sort(
+                        merged[~pt.isnan(merged)].type(pt.int64)
+                    )
                     self._zone_ids[zone_name] = sorted_zones
                     del expanded, merged
                 elif surface_tri is not None:
@@ -526,25 +546,27 @@ class TAUSurfaceDataloader(TAUBase):
         path = join(self._para.path, self._para.config[GRID_FILE_KEY])
         with Dataset(path) as data:
             vertices = pt.stack(
-                [pt.tensor(data[key][:], dtype=self._dtype)
-                 for key in VERTEX_KEYS],
-                dim=-1
+                [pt.tensor(data[key][:], dtype=self._dtype) for key in VERTEX_KEYS],
+                dim=-1,
             )
 
         self._mesh_data = {}
         original_zone = self._zone
         for zone_name, zone_ids in self.zone_ids.items():
             self._mesh_data[zone_name] = pt.ones(
-                (zone_ids.size(0), 4), dtype=self._dtype)
+                (zone_ids.size(0), 4), dtype=self._dtype
+            )
             self._mesh_data[zone_name][:, :3] = vertices[zone_ids]
             self._zone = zone_name
             try:
                 weights = self._load_single_snapshot(WEIGHT_KEY, self.write_times[-1])
-                self._mesh_data[zone_name][:,  3] = weights
-                weights_found=True
+                self._mesh_data[zone_name][:, 3] = weights
+                weights_found = True
             except KeyError:
-                self._mesh_data[zone_name][:,  3] = pt.ones(zone_ids.size(0), dtype=self._dtype)
-                weights_found=False
+                self._mesh_data[zone_name][:, 3] = pt.ones(
+                    zone_ids.size(0), dtype=self._dtype
+                )
+                weights_found = False
         if not weights_found:
             logger.warning(f"Could not find cell volumes in last snapshot.")
         self._zone = original_zone
@@ -553,8 +575,7 @@ class TAUSurfaceDataloader(TAUBase):
         with Dataset(self._file_name(time)) as data:
             global_ids = pt.from_numpy(data.variables["global_id"][:])
             ids = pt.where(pt.isin(global_ids, self.zone_ids[self.zone]))[0].numpy()
-            field = pt.tensor(
-                data.variables[field_name][:], dtype=self._dtype)
+            field = pt.tensor(data.variables[field_name][:], dtype=self._dtype)
         return field[ids]
 
     @property
@@ -571,8 +592,7 @@ class TAUSurfaceDataloader(TAUBase):
         :rtype: Dict[str, List[str]]
         """
         self._field_names = defaultdict(list)
-        n_points = pt.unique(
-            pt.cat([ids for ids in self.zone_ids.values()])).size(0)
+        n_points = pt.unique(pt.cat([ids for ids in self.zone_ids.values()])).size(0)
         for time in self.write_times:
             with Dataset(self._file_name(time)) as data:
                 for key in data.variables.keys():
@@ -630,4 +650,6 @@ class TAUSurfaceDataloader(TAUBase):
         if value in self.zone_names:
             self._zone = value
         else:
-            logger.warning(f"Zone '{value}' not found. Available zones are {self.zone_names}")
+            logger.warning(
+                f"Zone '{value}' not found. Available zones are {self.zone_names}"
+            )

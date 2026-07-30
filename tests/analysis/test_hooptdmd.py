@@ -1,13 +1,13 @@
-"""Unit tests for the higher-order OptDMD class.
-"""
+"""Unit tests for the higher-order OptDMD class."""
 
 # third party packages
 import torch as pt
+
 # flowtorch packages
 from flowtorch.analysis.hooptdmd import HOOptDMD
 
 
-class TestHOOptDMD():
+class TestHOOptDMD:
     def test_init(self):
         dm = pt.rand((50, 15))
         dmd = HOOptDMD(dm, 1.0, rank_dr=10, rank=5)
@@ -32,4 +32,3 @@ class TestHOOptDMD():
         pred = dmd.predict(dm[:, -3:], 10)
         assert pred.shape == (50, 11)
         assert pred.dtype == dm.dtype
-        

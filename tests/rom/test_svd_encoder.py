@@ -1,9 +1,9 @@
 # thirdparty packages
 import torch as pt
 import pytest
+
 # flowtorch packages
 from tests.helpers import requires_datasets
-
 
 requires_dataset = requires_datasets("of_cylinder2D_binary")
 pytestmark = [requires_dataset, pytest.mark.integration]
@@ -14,7 +14,7 @@ from flowtorch.analysis import SVD
 from flowtorch.rom import SVDEncoder
 
 
-class TestSVDEncoder():
+class TestSVDEncoder:
     def setup_method(self):
         loader = FOAMDataloader(DATASETS["of_cylinder2D_binary"])
         self.data = loader.load_snapshot("p", loader.write_times[1:11])
@@ -40,7 +40,7 @@ class TestSVDEncoder():
             encoder.encode(pt.ones((3, 3, 3)))
         svd = SVD(self.data, rank=self.cols)
         a0 = encoder.encode(self.data[:, 0])
-        assert pt.allclose(a0, svd.V[0, :]*svd.s, rtol=1.0e-2)
+        assert pt.allclose(a0, svd.V[0, :] * svd.s, rtol=1.0e-2)
         A = encoder.encode(self.data[:, :5])
         assert pt.allclose(A, pt.diag(svd.s) @ svd.V.conj().T[:, :5], rtol=1.0e-2)
 

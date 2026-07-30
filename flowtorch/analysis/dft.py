@@ -11,7 +11,6 @@ import torch as pt
 from ..constants import FLOAT_TOLERANCE
 from .svd import SVD
 
-
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 

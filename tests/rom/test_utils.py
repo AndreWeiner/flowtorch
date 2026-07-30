@@ -1,11 +1,16 @@
 # standard library packages
 from time import sleep
 from pytest import raises
+
 # third party libraries
 import numpy as np
+
 # flowtorch packages
-from flowtorch.rom.utils import (log_time, check_int_larger_than,
-                                 remove_sequential_duplicates)
+from flowtorch.rom.utils import (
+    log_time,
+    check_int_larger_than,
+    remove_sequential_duplicates,
+)
 
 
 def test_log_time():
@@ -13,6 +18,7 @@ def test_log_time():
     def wait_seconds(time_to_wait: float):
         sleep(time_to_wait)
         return {"test": 0}
+
     log = wait_seconds(0.1)
     assert "execution_time" in log.keys()
     assert "test" in log.keys()
@@ -30,6 +36,5 @@ def test_check_int_larger_than():
 def test_remove_sequential_duplicates():
     sequence = np.array([1, 1, 2, 2, 3, 4, 5, 5])
     assert np.allclose(
-        remove_sequential_duplicates(sequence),
-        np.array([1, 2, 3, 4, 5])
+        remove_sequential_duplicates(sequence), np.array([1, 2, 3, 4, 5])
     )

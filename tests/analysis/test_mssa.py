@@ -1,5 +1,4 @@
-"""Unit tests for MSSA and PMSSA.
-"""
+"""Unit tests for MSSA and PMSSA."""
 
 import torch as pt
 from flowtorch.analysis.mssa import MSSA, PMSSA

@@ -1,13 +1,14 @@
 # standard library packages
 from collections import deque
+
 # third party packages
 import torch as pt
 import numpy as np
 import pytest
 from pytest import raises
+
 # flowtorch packages
 from tests.helpers import requires_datasets
-
 
 requires_dataset = requires_datasets("of_cylinder2D_binary")
 pytestmark = [requires_dataset, pytest.mark.integration]
@@ -18,7 +19,7 @@ from flowtorch.rom import SVDEncoder, CNM
 from flowtorch.rom.utils import remove_sequential_duplicates
 
 
-class TestCNM():
+class TestCNM:
     def setup_method(self):
         loader = FOAMDataloader(DATASETS["of_cylinder2D_binary"])
         self.data = loader.load_snapshot("p", loader.write_times[-10:])
@@ -54,14 +55,19 @@ class TestCNM():
         cnm._cluster.labels_ = np.array([0, 1, 1, 0, 1, 2, 2, 3, 2, 3])
         cnm._sequence = remove_sequential_duplicates(cnm._cluster.labels_)
         transition = cnm._compute_transition_time()
-        reference = {"0,1": 1.25, "1,0": 1.5,
-                     "1,2": 1.5, "2,3": 1.25, "3,2": 1.0}
+        reference = {"0,1": 1.25, "1,0": 1.5, "1,2": 1.5, "2,3": 1.25, "3,2": 1.0}
         assert set(reference.keys()).issubset(transition.keys())
         assert np.allclose(list(reference.values()), list(transition.values()))
         cnm.model_order = 2
         transition = cnm._compute_transition_time()
-        reference = {"0,1,0": 1.5, "1,0,1": 1.0, "0,1,2": 1.5,
-                     "1,2,3": 1.5, "2,3,2": 1.0, "3,2,3": 1.0}
+        reference = {
+            "0,1,0": 1.5,
+            "1,0,1": 1.0,
+            "0,1,2": 1.5,
+            "1,2,3": 1.5,
+            "2,3,2": 1.0,
+            "3,2,3": 1.0,
+        }
         assert set(reference.keys()).issubset(transition.keys())
         assert np.allclose(list(reference.values()), list(transition.values()))
 
@@ -73,7 +79,7 @@ class TestCNM():
                 [0, 1.2, 0, 1.2, 0],
                 [0, 1.2, 0, 1.2, 0],
                 [1, 0, 1, 0, 1],
-                [1, 1, 0, 0, 1]
+                [1, 1, 0, 0, 1],
             ]
         )
         assert cnm._find_closest_cluster(0) == 1
@@ -107,10 +113,9 @@ class TestCNM():
         assert np.allclose(t_time, cnm.T[key])
         history = deque([labels[-1], labels[1]], 2)
         closest = cnm._find_closest_cluster(history[-1])
-        closest_index = np.argmin((labels - closest)**2)
+        closest_index = np.argmin((labels - closest) ** 2)
         new_history, t_time = cnm._sample_next_cluster(history)
-        assert list(
-            new_history) == labels[closest_index:closest_index+2].tolist()
+        assert list(new_history) == labels[closest_index : closest_index + 2].tolist()
 
     def test_interpolate_trajectory(self):
         cnm = CNM(self.encoded_data, self.encoder, 1.0, model_order=2)

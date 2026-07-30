@@ -1,5 +1,4 @@
-"""Optimized DMD via gradient descent and backpropagation.
-"""
+"""Optimized DMD via gradient descent and backpropagation."""
 
 # standard library packages
 from typing import Union, Set, Callable, Tuple
@@ -135,7 +134,8 @@ class OptDMD(pt.nn.Module):
         :rtype: tuple
         """
         data = pt.utils.data.TensorDataset(
-            pt.tensor(range(self._dmd._dm[0].shape[1]), dtype=pt.int64))
+            pt.tensor(range(self._dmd._dm[0].shape[1]), dtype=pt.int64)
+        )
         n_train = int(len(data) * train_size / (train_size + val_size))
         n_val = len(data) - n_train
         if n_val > 0:
@@ -163,7 +163,7 @@ class OptDMD(pt.nn.Module):
         loss_function: Callable = fro_loss,
         scheduler_options: dict = {},
         stopping_options: dict = {},
-        loss_key: str = "val_loss"
+        loss_key: str = "val_loss",
     ):
         """Optimize modes and dynamics based on gradient descent.
 
@@ -271,7 +271,7 @@ class OptDMD(pt.nn.Module):
         n = min(n, mode_indices.shape[0])
         top_n = importance[mode_indices].abs().topk(n).indices
         return mode_indices[top_n]
-    
+
     def predict(self, initial_condition: pt.Tensor, n_steps: int) -> pt.Tensor:
         """Predict evolution over N steps starting from user-defined initial conditions.
 
@@ -284,7 +284,7 @@ class OptDMD(pt.nn.Module):
         """
         modes = self.eigvecs / self.amplitude
         b = pt.linalg.pinv(modes) @ initial_condition.type(modes.dtype)
-        prediction = modes @ pt.diag(b) @ pt.linalg.vander(self.eigvals, N=n_steps+1)
+        prediction = modes @ pt.diag(b) @ pt.linalg.vander(self.eigvals, N=n_steps + 1)
         if not self._dmd._complex:
             prediction = prediction.real
         return prediction

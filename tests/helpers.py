@@ -9,11 +9,11 @@ def requires_datasets(*dataset_names):
     """Skip a test module when required external datasets are unavailable."""
     missing = (
         [name for name in dataset_names if name not in DATASETS]
-        if dataset_names else ([] if DATASETS else ["<any dataset>"])
+        if dataset_names
+        else ([] if DATASETS else ["<any dataset>"])
     )
-    reason = (
-        "requires FLOWTORCH_DATASETS with datasets: "
-        + ", ".join(missing or dataset_names)
+    reason = "requires FLOWTORCH_DATASETS with datasets: " + ", ".join(
+        missing or dataset_names
     )
     marker = pytest.mark.skipif(bool(missing), reason=reason)
     if missing:

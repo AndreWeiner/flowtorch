@@ -1,10 +1,10 @@
-"""Collection of utilities for reduced-order modeling.
-"""
+"""Collection of utilities for reduced-order modeling."""
 
 # standars library packages
 from time import time
 import functools
 from typing import Callable, Union, List
+
 # third party libraries
 import numpy as np
 
@@ -19,11 +19,13 @@ def log_time(func) -> dict:
         entry for execution time
     :rtype: dict
     """
+
     @functools.wraps(func)
     def measure_time(*args, **kwargs) -> dict:
         start_time = time()
         log = func(*args, **kwargs)
-        return {**log, "execution_time": time()-start_time}
+        return {**log, "execution_time": time() - start_time}
+
     return measure_time
 
 
@@ -40,8 +42,7 @@ def check_larger_than(value: Union[int, float], limit: Union[int, float], name: 
         to the lower limit
     """
     if value <= limit:
-        raise ValueError(
-            f"The argument for {name} must be larger than {limit}")
+        raise ValueError(f"The argument for {name} must be larger than {limit}")
 
 
 def check_int_larger_than(value: int, limit: int, name: str):
@@ -71,4 +72,3 @@ def remove_sequential_duplicates(sequence: np.ndarray) -> np.ndarray:
     """
     is_different = np.diff(sequence).astype(bool)
     return sequence[np.insert(is_different, 0, True)]
-

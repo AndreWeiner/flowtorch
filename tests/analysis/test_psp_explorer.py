@@ -1,10 +1,11 @@
 # standard library packages
 import pytest
+
 # third party packages
 import plotly.graph_objects as go
+
 # flowtorch packages
 from tests.helpers import requires_datasets
-
 
 requires_dataset = requires_datasets("ipsp_fake.hdf5")
 pytestmark = [requires_dataset, pytest.mark.integration]

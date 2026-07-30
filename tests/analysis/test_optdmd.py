@@ -1,5 +1,4 @@
-"""Unit tests for the OptDMD class.
-"""
+"""Unit tests for the OptDMD class."""
 
 # third party packages
 import torch as pt

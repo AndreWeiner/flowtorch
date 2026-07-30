@@ -1,10 +1,10 @@
 """
- class for testing the s_cube_dataloader
+class for testing the s_cube_dataloader
 """
+
 import pytest
 
 from tests.helpers import requires_datasets
-
 
 requires_dataset = requires_datasets("s_cube")
 pytestmark = [requires_dataset, pytest.mark.integration]
@@ -25,7 +25,7 @@ def test_dataloader():
     n_nodes = 247
     n_dimensions = 2
     write_times = ["0.4"]
-    field_names = {'0.4': ['p']}
+    field_names = {"0.4": ["p"]}
 
     # instantiate dataloader
     dataloader = SCUBEDataloader(load_path, "s_cube_test_dataset.h5")

@@ -166,9 +166,7 @@ def test_AMSPOD_top_modes_log_segments():
 def test_AMSPOD_top_modes_negative_frequencies():
     spod = AMSPOD.__new__(AMSPOD)
     spod._frequency = pt.tensor([0.0, 1.0, 2.0, -20.0, -10.0, -5.0, -2.0, -1.0])
-    spod._eigvals = pt.tensor(
-        [[0.0], [1.0], [2.0], [4.0], [10.0], [3.0], [8.0], [5.0]]
-    )
+    spod._eigvals = pt.tensor([[0.0], [1.0], [2.0], [4.0], [10.0], [3.0], [8.0], [5.0]])
     spod._complex = True
     spod._adaptive = False
 

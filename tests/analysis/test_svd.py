@@ -1,5 +1,4 @@
-"""Unittests for the SVD class.
-"""
+"""Unittests for the SVD class."""
 
 # third party libraries
 import pytest

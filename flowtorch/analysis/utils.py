@@ -1,11 +1,9 @@
-"""Common functionality shared by multiple analysis tools.
-"""
+"""Common functionality shared by multiple analysis tools."""
 
 from typing import Tuple, List, Union
 from random import shuffle as random_shuffle
 import torch as pt
 from torch.utils.data import TensorDataset
-
 
 DEFAULT_SCHEDULER_OPT = {"mode": "min", "factor": 0.5, "patience": 20, "min_lr": 1.0e-6}
 

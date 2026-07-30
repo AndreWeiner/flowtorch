@@ -12,16 +12,21 @@ publication_.
 from typing import Dict, Tuple
 from collections import defaultdict, deque
 from itertools import groupby
+
 # third party packages
 import numpy as np
 import torch as pt
 from sklearn.cluster import KMeans
 from sklearn.neighbors import KDTree
 from scipy.interpolate import InterpolatedUnivariateSpline
+
 # flowtorch packages
 from .base import ROM, Encoder
-from .utils import (check_larger_than, check_int_larger_than,
-                    remove_sequential_duplicates)
+from .utils import (
+    check_larger_than,
+    check_int_larger_than,
+    remove_sequential_duplicates,
+)
 
 
 class CNM(ROM):
@@ -65,7 +70,7 @@ class CNM(ROM):
     :type cluster_centers: np.ndarray
 
     Examples
-    
+
     >>> from flowtorch.rom import SVDEncoder, CNM
     ... assemble data matrix
     >>> encoder = SVDEncoder(rank=20)
@@ -78,9 +83,15 @@ class CNM(ROM):
 
     """
 
-    def __init__(self, reduced_state: pt.Tensor, encoder: Encoder,
-                 dt: float, n_clusters: int = 10, model_order: int = 1,
-                 cluster_config: dict = {}):
+    def __init__(
+        self,
+        reduced_state: pt.Tensor,
+        encoder: Encoder,
+        dt: float,
+        n_clusters: int = 10,
+        model_order: int = 1,
+        cluster_config: dict = {},
+    ):
         """Create a new CNM instance
 
         :param reduced_state: time series data in the reduced state space
@@ -127,20 +138,21 @@ class CNM(ROM):
         """
 
         if self.model_order >= self._sequence.size:
-            raise Exception("Could not compute transition probabilities: " +
-                            f"length of cluster sequence ({self._sequence.size}) must be higher " +
-                            f"than chosen model order ({self.model_order})")
+            raise Exception(
+                "Could not compute transition probabilities: "
+                + f"length of cluster sequence ({self._sequence.size}) must be higher "
+                + f"than chosen model order ({self.model_order})"
+            )
 
-        visited_clusters = deque(
-            self._sequence[:self.model_order], self.model_order)
+        visited_clusters = deque(self._sequence[: self.model_order], self.model_order)
         prob = defaultdict(list)
-        for next_cluster in self._sequence[self.model_order:]:
+        for next_cluster in self._sequence[self.model_order :]:
             key = ",".join(map(str, visited_clusters))
             prob[key].append(next_cluster)
             visited_clusters.append(next_cluster)
         for key, next_clusters in prob.items():
             unique, counts = np.unique(next_clusters, return_counts=True)
-            prob[key] = np.stack((unique, counts/counts.sum())).T
+            prob[key] = np.stack((unique, counts / counts.sum())).T
         return prob
 
     def _compute_transition_time(self) -> Dict[str, float]:
@@ -167,16 +179,14 @@ class CNM(ROM):
         :rtype: Dict[str, float]
         """
         seq_duplicates = np.array(
-            [sum(1 for _ in group)
-             for _, group in groupby(self._cluster.labels_)]
+            [sum(1 for _ in group) for _, group in groupby(self._cluster.labels_)]
         )
         transition = defaultdict(list)
         for i in range(self._sequence.size - self.model_order):
             ip_order = i + self.model_order
-            key = ",".join(map(str, self._sequence[i:ip_order + 1]))
+            key = ",".join(map(str, self._sequence[i : ip_order + 1]))
             transition[key].append(
-                0.5 * self.dt *
-                np.sum(seq_duplicates[ip_order - 1:ip_order + 1])
+                0.5 * self.dt * np.sum(seq_duplicates[ip_order - 1 : ip_order + 1])
             )
         return {key: np.mean(value) for key, value in transition.items()}
 
@@ -217,19 +227,22 @@ class CNM(ROM):
           of the trajectory; this process continues until at least on potential
           history is found
         - if multiple possible histories are found that are equally similar to
-          the input trajectory, the final history is sampled at random 
+          the input trajectory, the final history is sampled at random
 
         :param history: trajectroy to replace or complete
         :type history: deque
         :return: a trajectory as similar as possible to the input for which a
-            transition probability is available 
+            transition probability is available
         :rtype: deque
         """
         count = 0
         while count < self.model_order:
             test_history = ",".join(map(str, list(history)[count:]))
-            possible_histories = [key for key in self._transition_prob.keys() if
-                                  key.endswith(test_history)]
+            possible_histories = [
+                key
+                for key in self._transition_prob.keys()
+                if key.endswith(test_history)
+            ]
             if len(possible_histories) > 0:
                 select_key = np.random.choice(possible_histories)
                 return deque(map(int, select_key.split(",")), self.model_order)
@@ -247,12 +260,9 @@ class CNM(ROM):
         :rtype: deque
         """
         if initial_reduced_state.ndim == 1:
-            label = self._cluster.predict(
-                np.expand_dims(initial_reduced_state, axis=0))
+            label = self._cluster.predict(np.expand_dims(initial_reduced_state, axis=0))
         else:
-            label = self._cluster.predict(
-                initial_reduced_state.T
-            )
+            label = self._cluster.predict(initial_reduced_state.T)
         history = deque(remove_sequential_duplicates(label), self.model_order)
         if len(history) < self.model_order:
             return self._find_history(history)
@@ -278,8 +288,10 @@ class CNM(ROM):
             history.append(self._find_closest_cluster(last_cluster))
             history = self._find_history(history)
             key = ",".join(map(str, list(history)))
-        next_cluster = int(np.random.choice(
-            self._transition_prob[key][:, 0], p=self._transition_prob[key][:, 1])
+        next_cluster = int(
+            np.random.choice(
+                self._transition_prob[key][:, 0], p=self._transition_prob[key][:, 1]
+            )
         )
         key += ",{:d}".format(next_cluster)
         history.append(next_cluster)
@@ -295,10 +307,11 @@ class CNM(ROM):
         :rtype: pt.Tensor
         """
         if len(self.times) < 2:
-            raise ValueError("At least two predictions must be available " +
-                             "to interpolate a trajectory")
-        times = np.arange(
-            self.times[0], self.times[-1]+0.5*step_size, step_size)
+            raise ValueError(
+                "At least two predictions must be available "
+                + "to interpolate a trajectory"
+            )
+        times = np.arange(self.times[0], self.times[-1] + 0.5 * step_size, step_size)
         if self.encoder is None:
             state_size = self.cluster_centers.shape[-1]
         else:
@@ -306,14 +319,16 @@ class CNM(ROM):
         prediction = pt.empty((state_size, times.size), dtype=self._dtype)
         for dim in range(state_size):
             spline = InterpolatedUnivariateSpline(
-                self._times, self.cluster_centers[self.visited_clusters][:, dim],
-                k=min(3, len(self.times)-1)
+                self._times,
+                self.cluster_centers[self.visited_clusters][:, dim],
+                k=min(3, len(self.times) - 1),
             )
             prediction[dim, :] = pt.from_numpy(spline(times))
         return prediction
 
-    def predict_reduced(self, initial_state: pt.Tensor, end_time: float,
-                        step_size: float) -> pt.Tensor:
+    def predict_reduced(
+        self, initial_state: pt.Tensor, end_time: float, step_size: float
+    ) -> pt.Tensor:
         """Advance given reduced state in time.
 
         :param initial_state: initial reduced state vector or sequence of

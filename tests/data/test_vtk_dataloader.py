@@ -1,10 +1,11 @@
 # standard library packages
 import pytest
+
 # third party packages
 import torch as pt
+
 # flowtorch packages
 from tests.helpers import requires_datasets
-
 
 requires_dataset = requires_datasets(
     "vtk_cylinder_re200_flexi",
@@ -122,8 +123,7 @@ def test_vtk_su2():
     assert p.shape == (n_points,)
     assert U.shape == (n_points, 3)
     # multiple fields, multiple snapshots
-    p_series, U_series = loader.load_snapshot(
-        ["Pressure", "Velocity"], write_times[:2])
+    p_series, U_series = loader.load_snapshot(["Pressure", "Velocity"], write_times[:2])
     assert p_series.shape == (n_points, 2)
     assert U_series.shape == (n_points, 3, 2)
     assert pt.allclose(p, p_series[:, 0])

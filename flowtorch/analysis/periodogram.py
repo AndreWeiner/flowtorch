@@ -9,7 +9,6 @@ from math import sqrt, log10
 # third-party packages
 import torch as pt
 
-
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
@@ -164,7 +163,7 @@ class AMPS(object):
         idx_l = (idx_c - shifts) % (2 * self._nfft)
         idx_u = (idx_c + shifts) % (2 * self._nfft)
         a = self._taper_norm * (Q_hat[:, idx_l] - Q_hat[:, idx_u]) / (2j)
-        return (a.abs()[0]**2 * self._parabolic_weights(n_tapers)).sum().abs().item()
+        return (a.abs()[0] ** 2 * self._parabolic_weights(n_tapers)).sum().abs().item()
 
     def _determine_n_tapers(self, Q_hat: pt.Tensor, n_freq: int) -> pt.Tensor:
         """Determine the number of tapers for each frequency bin.

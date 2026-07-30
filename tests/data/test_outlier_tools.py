@@ -1,15 +1,13 @@
 # third party packages
 import pytest
 import torch as pt
+
 # flowtorch packages
 from flowtorch.data import iqr_outlier_replacement
 
 
 def test_irq_outlier_replacement():
-    data = pt.tensor([
-        [3.0, 2.0, 4.0, 8.0, 1.0, 0.0],
-        [3.0, 2.0, 4.0, 5.0, 1.0, 0.0]
-    ])
+    data = pt.tensor([[3.0, 2.0, 4.0, 8.0, 1.0, 0.0], [3.0, 2.0, 4.0, 5.0, 1.0, 0.0]])
     clean_data = iqr_outlier_replacement(data)
     # the shape of both datasets should be equal
     assert clean_data.shape == data.shape

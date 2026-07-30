@@ -1,5 +1,4 @@
-"""Classes and functions to compute the dynamic mode decomposition (DMD) of a data matrix.
-"""
+"""Classes and functions to compute the dynamic mode decomposition (DMD) of a data matrix."""
 
 # standard library packages
 from typing import Tuple, Set, Union, List
@@ -102,7 +101,9 @@ def _fb_consistent_operator(
         log["p_res"].append(
             0.5 * ((A @ B - pt.eye(r)).norm() + (B @ A - pt.eye(r)).norm()).item()
         )
-        log["d_res"].append(0.5 * rho * pt.cat([A - A_old, B - B_old], dim=0).norm().item())
+        log["d_res"].append(
+            0.5 * rho * pt.cat([A - A_old, B - B_old], dim=0).norm().item()
+        )
         log["p_eps"].append(
             sqrt(r) * tol_abs
             + tol_rel * max((A @ B).norm().item(), max((B @ A).norm().item(), sqrt(r)))

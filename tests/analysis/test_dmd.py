@@ -1,5 +1,4 @@
-"""Unit tests for the DMD class.
-"""
+"""Unit tests for the DMD class."""
 
 # third party packages
 from pytest import raises

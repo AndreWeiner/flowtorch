@@ -1,8 +1,8 @@
-"""Encoder based on the singular value decomposition (SVD).
-"""
+"""Encoder based on the singular value decomposition (SVD)."""
 
 # third party packages
 import torch as pt
+
 # flowtorch packages
 from flowtorch import DEFAULT_DTYPE
 from flowtorch.analysis import SVD

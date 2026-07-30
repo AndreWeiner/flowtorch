@@ -12,10 +12,12 @@ research group.
 from os.path import exists
 from typing import List, Dict, Union
 import logging
+
 # third party packages
 from h5py import File
 import numpy as np
 import torch as pt
+
 # flowtorch packages
 from flowtorch import DEFAULT_DTYPE
 from .dataloader import Dataloader
@@ -29,9 +31,7 @@ INFO_KEY = "Info"
 PARAMETER_KEY = "Parameter"
 DESCRIPTION_KEY = "ParameterDescription"
 TIME_KEY = "TimeValues"
-FIELDS = {
-    "Cp": "Images"
-}
+FIELDS = {"Cp": "Images"}
 FREQUENCY_KEY = "SamplingFrequency"
 
 
@@ -107,7 +107,9 @@ class PSPDataloader(Dataloader):
         else:
             return int(round(float(time) * freq, 0))
 
-    def _load_single_field(self, field_name: str, ind: Union[np.ndarray, int]) -> pt.Tensor:
+    def _load_single_field(
+        self, field_name: str, ind: Union[np.ndarray, int]
+    ) -> pt.Tensor:
         """Load a single field from the HDF5 file.
 
         Note that there is usually a single field available in the iPSP data,
@@ -122,11 +124,12 @@ class PSPDataloader(Dataloader):
         """
         return pt.tensor(
             self._file[f"{self._zone}/{FIELDS[field_name]}"][:, :, ind],
-            dtype=self._dtype
+            dtype=self._dtype,
         )
 
-    def load_snapshot(self, field_name: Union[List[str], str],
-                      time: Union[List[str], str]) -> Union[List[pt.Tensor], pt.Tensor]:
+    def load_snapshot(
+        self, field_name: Union[List[str], str], time: Union[List[str], str]
+    ) -> Union[List[pt.Tensor], pt.Tensor]:
         check_list_or_str(field_name, "field_name")
         check_list_or_str(time, "time")
         ind = self._time_to_index(time)
@@ -137,9 +140,7 @@ class PSPDataloader(Dataloader):
                     self._load_single_field(name, np.array(ind)) for name in field_name
                 ]
             else:
-                return [
-                    self._load_single_field(name, ind) for name in field_name
-                ]
+                return [self._load_single_field(name, ind) for name in field_name]
         # load single field
         else:
             if isinstance(time, list):
@@ -183,7 +184,9 @@ class PSPDataloader(Dataloader):
             self._mask_names = None
             self._mask = self.mask_names[0]
         else:
-            logger.warning(f"{zone_name} not found. Available zones are {self._zone_names}")
+            logger.warning(
+                f"{zone_name} not found. Available zones are {self._zone_names}"
+            )
 
     @property
     def mask_names(self) -> List[str]:
@@ -216,7 +219,9 @@ class PSPDataloader(Dataloader):
         if mask_name in self._mask_names:
             self._mask = mask_name
         else:
-            logger.warning(f"{mask_name} not found. Available masks are {self._mask_names}")
+            logger.warning(
+                f"{mask_name} not found. Available masks are {self._mask_names}"
+            )
 
     @property
     def info(self) -> Dict[str, tuple]:
@@ -230,9 +235,7 @@ class PSPDataloader(Dataloader):
             descriptions = self._file[f"{INFO_KEY}/{DESCRIPTION_KEY}"].attrs
             self._info = dict()
             for key in parameters.keys():
-                self._info[key] = (
-                    parameters.get(key, ""), descriptions.get(key, "")
-                )
+                self._info[key] = (parameters.get(key, ""), descriptions.get(key, ""))
         return self._info
 
     @property
@@ -246,9 +249,7 @@ class PSPDataloader(Dataloader):
         descriptions = self._file[f"{self._zone}/{DESCRIPTION_KEY}"].attrs
         self._zone_info = dict()
         for key in parameters.keys():
-            self._zone_info[key] = (
-                parameters.get(key, ""), descriptions.get(key, "")
-            )
+            self._zone_info[key] = (parameters.get(key, ""), descriptions.get(key, ""))
         return self._zone_info
 
     @property
@@ -256,7 +257,7 @@ class PSPDataloader(Dataloader):
         freq = self.zone_info[FREQUENCY_KEY][0]
         field_name = "Cp"
         n_snapshots = self._file[f"{self._zone}/{FIELDS[field_name]}"].shape[-1]
-        times = [n/freq for n in range(n_snapshots)]
+        times = [n / freq for n in range(n_snapshots)]
         # loading the time dataset directly does not always work since the dataset
         # keys sometimes have spelling mistakes, e.g., TimValues instead of TimeValues
         # times = self._file[f"{self._zone}/{TIME_KEY}"][:]
@@ -268,9 +269,13 @@ class PSPDataloader(Dataloader):
 
     @property
     def vertices(self) -> pt.Tensor:
-        return pt.stack([pt.tensor(
-            self._file[f"{self.zone}/{coord}"][:, :], dtype=self._dtype
-        ) for coord in COORDINATE_KEYS], dim=-1)
+        return pt.stack(
+            [
+                pt.tensor(self._file[f"{self.zone}/{coord}"][:, :], dtype=self._dtype)
+                for coord in COORDINATE_KEYS
+            ],
+            dim=-1,
+        )
 
     @property
     def weights(self) -> pt.Tensor:

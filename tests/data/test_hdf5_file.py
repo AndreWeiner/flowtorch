@@ -1,12 +1,13 @@
 # standard library packages
 import os
 import pytest
+
 # third party packages
 import torch as pt
 from h5py import File
+
 # flowtorch packages
 from tests.helpers import requires_datasets
-
 
 requires_dataset = requires_datasets(
     "of_cavity_ascii",
@@ -17,8 +18,13 @@ requires_dataset = requires_datasets(
 pytestmark = [requires_dataset, pytest.mark.integration]
 
 from flowtorch import DATASET_PATH, DATASETS
-from flowtorch.data import (HDF5Dataloader, HDF5Writer, FOAM2HDF5,
-                            XDMFWriter, copy_hdf5_mesh)
+from flowtorch.data import (
+    HDF5Dataloader,
+    HDF5Writer,
+    FOAM2HDF5,
+    XDMFWriter,
+    copy_hdf5_mesh,
+)
 
 
 class HDF5TestData:
@@ -27,10 +33,9 @@ class HDF5TestData:
             "of_cavity_ascii",
             "of_cavity_binary",
             "of_cavity_ascii_parallel",
-            "of_cavity_binary_parallel"
+            "of_cavity_binary_parallel",
         ]
-        self.const_group = sorted(
-            ["vertices", "connectivity", "centers", "volumes"])
+        self.const_group = sorted(["vertices", "connectivity", "centers", "volumes"])
         self.var_group = ["0.1", "0.2", "0.3", "0.4", "0.5"]
 
 
@@ -44,8 +49,8 @@ class TestHDF5Writer:
         file_path = DATASET_PATH + "test_file.hdf5"
         writer = HDF5Writer(file_path)
         writer.write("ones", (3, 2), pt.ones(3, 2), "0.01")
-        writer.write("twos", (3, 2), pt.ones(3, 2)*2, "0.01")
-        writer.write("threes", (3, 2), pt.ones(3, 2)*3, "0.03")
+        writer.write("twos", (3, 2), pt.ones(3, 2) * 2, "0.01")
+        writer.write("threes", (3, 2), pt.ones(3, 2) * 3, "0.03")
         del writer
         hdf5_file = File(file_path, mode="a")
         assert os.path.isfile(file_path)
@@ -56,16 +61,22 @@ class TestHDF5Writer:
     def test_write_const(self, get_test_data):
         file_path = DATASET_PATH + "test_file.hdf5"
         writer = HDF5Writer(file_path)
-        writer.write("zeros", (3, 2), pt.zeros(
-            (3, 2), dtype=pt.float64), dtype=pt.float64)
-        writer.write("zeros_single", (3, 2), pt.zeros(
-            (3, 2), dtype=pt.float32), dtype=pt.float32)
-        writer.write("zeros_int", (3, 2), pt.zeros(
-            (3, 2), dtype=pt.int32), dtype=pt.int32)
+        writer.write(
+            "zeros", (3, 2), pt.zeros((3, 2), dtype=pt.float64), dtype=pt.float64
+        )
+        writer.write(
+            "zeros_single", (3, 2), pt.zeros((3, 2), dtype=pt.float32), dtype=pt.float32
+        )
+        writer.write(
+            "zeros_int", (3, 2), pt.zeros((3, 2), dtype=pt.int32), dtype=pt.int32
+        )
         del writer
         hdf5_file = File(file_path, mode="a")
         assert list(hdf5_file["constant"].keys()) == [
-            "zeros", "zeros_int", "zeros_single"]
+            "zeros",
+            "zeros_int",
+            "zeros_single",
+        ]
         assert hdf5_file["constant/zeros"].dtype == "float64"
         assert hdf5_file["constant/zeros_single"].dtype == "float32"
         assert hdf5_file["constant/zeros_int"].dtype == "int32"
@@ -91,8 +102,7 @@ def test_conversion(get_test_data):
         case_path = DATASET_PATH + case
         converter = FOAM2HDF5(case_path)
         # test all fields, selected times
-        converter.convert("flowtorch.hdf5", None,
-                          ["0.1", "0.2", "0.3", "0.4", "0.5"])
+        converter.convert("flowtorch.hdf5", None, ["0.1", "0.2", "0.3", "0.4", "0.5"])
         del converter
         filename = case_path + "/flowtorch.hdf5"
         if os.path.isfile(filename):
@@ -123,8 +133,7 @@ def test_conversion(get_test_data):
 def test_hdf5_dataloader():
     path = DATASETS["of_cavity_ascii"]
     converter = FOAM2HDF5(path)
-    converter.convert("flowtorch.hdf5", None,
-                      ["0.1", "0.2", "0.3", "0.4", "0.5"])
+    converter.convert("flowtorch.hdf5", None, ["0.1", "0.2", "0.3", "0.4", "0.5"])
     file_path = path + "/flowtorch.hdf5"
     loader = HDF5Dataloader(file_path)
     times = loader.write_times
@@ -167,12 +176,16 @@ def test_copy_hdf5_mesh(get_test_data):
             copy_hdf5_mesh(case_path, "flowtorch.hdf5", "mesh_only.hdf5")
             assert os.path.isfile(os.path.join(case_path, "mesh_only.hdf5"))
             assert os.path.isfile(os.path.join(case_path, "mesh_only.xdmf"))
-            hdf5_file = File(os.path.join(
-                case_path, "mesh_only.hdf5"), mode="a")
+            hdf5_file = File(os.path.join(case_path, "mesh_only.hdf5"), mode="a")
             assert hdf5_file["constant/volumes"].shape[0] == 400
             assert hdf5_file["constant/centers"].shape == (400, 3)
             assert "constant/vertices" in hdf5_file
             assert "constant/connectivity" in hdf5_file
             hdf5_file.close()
-            for f in ("flowtorch.hdf5", "flowtorch.xdmf", "mesh_only.hdf5", "mesh_only.xdmf"):
+            for f in (
+                "flowtorch.hdf5",
+                "flowtorch.xdmf",
+                "mesh_only.hdf5",
+                "mesh_only.xdmf",
+            ):
                 os.remove(os.path.join(case_path, f))

@@ -1,12 +1,15 @@
-"""Unit tests for `flowtorch.analysis.utils` module.
-"""
+"""Unit tests for `flowtorch.analysis.utils` module."""
 
 from os.path import join, isfile
 from os import remove
 from pytest import raises
 import torch as pt
 from flowtorch.analysis.optdmd import OptDMD
-from flowtorch.analysis.utils import unsqueeze_if_1d, trajectory_train_test_split, EarlyStopping
+from flowtorch.analysis.utils import (
+    unsqueeze_if_1d,
+    trajectory_train_test_split,
+    EarlyStopping,
+)
 
 
 def test_trajectory_train_test_split():

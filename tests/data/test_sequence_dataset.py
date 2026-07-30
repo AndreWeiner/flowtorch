@@ -1,5 +1,4 @@
-"""Unittests for SequenceDataset class.
-"""
+"""Unittests for SequenceDataset class."""
 
 from pytest import raises
 import torch as pt

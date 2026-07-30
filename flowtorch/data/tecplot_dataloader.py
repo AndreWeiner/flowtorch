@@ -1,5 +1,4 @@
-"""Read Tecplot data via the ParaView module.
-"""
+"""Read Tecplot data via the ParaView module."""
 
 # standard library packages
 import logging
@@ -7,11 +6,13 @@ from os.path import join
 from os import sep
 from glob import glob
 from typing import Union, List, Dict
+
 # third party packages
 import torch as pt
 from paraview import servermanager as sm
 from paraview.vtk.numpy_interface import dataset_adapter as dsa
 from paraview.simple import VisItTecplotBinaryReader
+
 # flowtorch packages
 from flowtorch import DEFAULT_DTYPE
 from .dataloader import Dataloader
@@ -19,6 +20,7 @@ from .utils import check_and_standardize_path, check_list_or_str
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
+
 
 class TecplotDataloader(Dataloader):
     """Dataloader for Tecplot binary format.
@@ -45,8 +47,13 @@ class TecplotDataloader(Dataloader):
 
     """
 
-    def __init__(self, path: str, file_names: Dict[str, str],
-                 reader: VisItTecplotBinaryReader, dtype: pt.dtype = DEFAULT_DTYPE):
+    def __init__(
+        self,
+        path: str,
+        file_names: Dict[str, str],
+        reader: VisItTecplotBinaryReader,
+        dtype: pt.dtype = DEFAULT_DTYPE,
+    ):
         """Default constructor function.
 
         :param path: path to snapshot location
@@ -66,7 +73,13 @@ class TecplotDataloader(Dataloader):
         self._zone = self.zone_names[0]
 
     @classmethod
-    def from_tau(cls, path: str, base_name: str = "", suffix: str = ".plt", dtype: pt.dtype = DEFAULT_DTYPE):
+    def from_tau(
+        cls,
+        path: str,
+        base_name: str = "",
+        suffix: str = ".plt",
+        dtype: pt.dtype = DEFAULT_DTYPE,
+    ):
         """Construct TecplotDataloader from TAU snapshots.
 
         :param path: path to snapshot location
@@ -82,16 +95,15 @@ class TecplotDataloader(Dataloader):
         :rtype: TecplotDataloader
         """
         path = check_and_standardize_path(path)
-        file_paths = glob(join(path,  f"{base_name}i=*t=*"))
+        file_paths = glob(join(path, f"{base_name}i=*t=*"))
         file_names = [f.split(sep)[-1] for f in file_paths]
-        write_times = [name.split("t=")[-1].split(suffix)[0]
-                       for name in file_names]
-        sorted_names = sorted(zip(write_times, file_names),
-                              key=lambda tup: float(tup[0]))
+        write_times = [name.split("t=")[-1].split(suffix)[0] for name in file_names]
+        sorted_names = sorted(
+            zip(write_times, file_names), key=lambda tup: float(tup[0])
+        )
         file_names = {time: name for time, name in sorted_names}
         if len(file_names.keys()) < 1:
-            raise FileNotFoundError(
-                f"Could not find solution files in {path}")
+            raise FileNotFoundError(f"Could not find solution files in {path}")
         return cls(path, file_names, VisItTecplotBinaryReader, dtype)
 
     def _assemble_file_path(self, time: str) -> str:
@@ -130,7 +142,7 @@ class TecplotDataloader(Dataloader):
         """
         return self._reader(
             registrationName=self._file_names[time],
-            FileName=[self._assemble_file_path(time)]
+            FileName=[self._assemble_file_path(time)],
         )
 
     def _load_single_snapshot(self, field_name: str, time: str) -> pt.Tensor:
@@ -147,9 +159,9 @@ class TecplotDataloader(Dataloader):
         field_names = self.field_names[self.write_times[0]]
         reader.PointArrayStatus = field_names
         reader = sm.Fetch(reader)
-        wrapper = dsa.WrapDataObject(reader.GetBlock(0).GetBlock(
-            self.zone_names.index(self.zone)
-        ))
+        wrapper = dsa.WrapDataObject(
+            reader.GetBlock(0).GetBlock(self.zone_names.index(self.zone))
+        )
         return pt.from_numpy(wrapper.PointData[field_names.index(field_name)])
 
     def _load_multiple_snapshots(self, field_name: str, times: List[str]) -> pt.Tensor:
@@ -165,13 +177,12 @@ class TecplotDataloader(Dataloader):
 
         """
         return pt.stack(
-            [self._load_single_snapshot(field_name, time) for time in times],
-            dim=-1
+            [self._load_single_snapshot(field_name, time) for time in times], dim=-1
         )
 
-    def load_snapshot(self,
-                      field_name: Union[List[str], str],
-                      time: Union[List[str], str]) -> Union[List[pt.Tensor], pt.Tensor]:
+    def load_snapshot(
+        self, field_name: Union[List[str], str], time: Union[List[str], str]
+    ) -> Union[List[pt.Tensor], pt.Tensor]:
         """Load snapshots of single or multiple fields and write times.
 
         :param field_name: single field name or list of field names
@@ -186,7 +197,9 @@ class TecplotDataloader(Dataloader):
         # load multiple fields
         if isinstance(field_name, list):
             if isinstance(time, list):
-                return [self._load_multiple_snapshots(name, time) for name in field_name]
+                return [
+                    self._load_multiple_snapshots(name, time) for name in field_name
+                ]
             else:
                 return [self._load_single_snapshot(name, time) for name in field_name]
         # load a single field
@@ -207,9 +220,8 @@ class TecplotDataloader(Dataloader):
             reader = sm.Fetch(self._create_tecplot_reader(self.write_times[0]))
             root_block = reader.GetBlock(0)
             self._zone_names = [
-                self._parse_block_name(
-                    str(root_block.GetMetaData(i))
-                ) for i in range(root_block.GetNumberOfBlocks())
+                self._parse_block_name(str(root_block.GetMetaData(i)))
+                for i in range(root_block.GetNumberOfBlocks())
             ]
         return self._zone_names
 
@@ -258,9 +270,7 @@ class TecplotDataloader(Dataloader):
         """
         time = self.write_times[0]
         reader = self._create_tecplot_reader(time)
-        return {
-            time: reader.GetProperty("PointArrayInfo")[::2]
-        }
+        return {time: reader.GetProperty("PointArrayInfo")[::2]}
 
     @property
     def vertices(self) -> pt.Tensor:
@@ -270,9 +280,9 @@ class TecplotDataloader(Dataloader):
         :rtype: pt.Tensor
         """
         reader = sm.Fetch(self._create_tecplot_reader(self.write_times[0]))
-        wrapper = dsa.WrapDataObject(reader.GetBlock(0).GetBlock(
-            self.zone_names.index(self.zone)
-        ))
+        wrapper = dsa.WrapDataObject(
+            reader.GetBlock(0).GetBlock(self.zone_names.index(self.zone))
+        )
         return pt.from_numpy(wrapper.Points)
 
     @property
@@ -286,9 +296,9 @@ class TecplotDataloader(Dataloader):
         :rtype: pt.Tensor
         """
         reader = sm.Fetch(self._create_tecplot_reader(self.write_times[0]))
-        wrapper = dsa.WrapDataObject(reader.GetBlock(0).GetBlock(
-            self.zone_names.index(self.zone)
-        ))
+        wrapper = dsa.WrapDataObject(
+            reader.GetBlock(0).GetBlock(self.zone_names.index(self.zone))
+        )
         # volume or area are not contained in the file; therefore, a tensor
         # of ones is returned for now
         n_points = wrapper.Points.shape[0]
