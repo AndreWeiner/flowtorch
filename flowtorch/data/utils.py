@@ -4,10 +4,12 @@
 import logging
 from os.path import exists
 from os import sep
-from typing import Tuple, List, Union
+from typing import List, Union
 
 from scipy.spatial import KDTree, ConvexHull
 from torch import Tensor, float32, from_numpy, where
+
+from flowtorch.utils import format_byte_size
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -16,26 +18,6 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
     force=True,
 )
-
-
-def format_byte_size(size: int) -> Tuple[float, str]:
-    """Convert a number of bytes into human-readable format.
-
-    The function is based on `this <https://stackoverflow.com/questions/12523586/python-format-size-application-converting-b-to-kb-mb-gb-tb>` Stackoverflow question.
-
-    :param size: size in bytes
-    :type size: int
-    :return: converted size corresponding unit
-    :rtype: tuple(float, str)
-
-    """
-    exponent_labels = {0: "b", 1: "Kb", 2: "Mb", 3: "Gb", 4: "Tb", 5: "Pt"}
-    exponent = 0
-    converted_size = float(size)
-    while converted_size > 1024:
-        converted_size /= 1024
-        exponent += 1
-    return converted_size, exponent_labels[exponent]
 
 
 def check_and_standardize_path(path: str, folder: bool = True):

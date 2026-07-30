@@ -1,0 +1,74 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flowtorch-fluid"
+dynamic = ["version"]
+description = "Analysis and reduced-order modeling of fluid flows"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "GPL-3.0-only"
+license-files = ["LICENSE"]
+authors = [
+    { name = "flowTorch contributors", email = "andre.weiner@tu-dresden.de" },
+]
+keywords = [
+    "data analysis",
+    "fluid dynamics",
+    "modal analysis",
+    "reduced-order modeling",
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Education",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Natural Language :: English",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Education",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Mathematics",
+    "Topic :: Scientific/Engineering :: Physics",
+]
+dependencies = ["torch>=1.9"]
+
+[project.optional-dependencies]
+analysis = ["numpy", "scipy"]
+data = ["h5py", "netCDF4", "numpy", "pandas", "Pillow", "scipy", "vtk"]
+rom = ["numpy", "scikit-learn", "scipy"]
+psp = ["h5py", "numpy", "plotly", "scipy"]
+all = [
+    "h5py",
+    "jupyterlab",
+    "matplotlib",
+    "netCDF4",
+    "numpy",
+    "pandas",
+    "Pillow",
+    "plotly",
+    "scikit-learn",
+    "scipy",
+    "vtk",
+]
+
+[project.urls]
+Homepage = "https://github.com/AndreWeiner/flowtorch"
+Documentation = "https://flowmodelingcontrol.github.io/flowtorch-docs/1.2/"
+Issues = "https://github.com/AndreWeiner/flowtorch/issues"
+Source = "https://github.com/AndreWeiner/flowtorch"
+
+[tool.setuptools.dynamic]
+version = { attr = "flowtorch.version.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["flowtorch*"]
+
+[tool.black]
+line-length = 88
+target-version = ["py310"]

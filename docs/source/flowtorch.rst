@@ -15,3 +15,11 @@ flowtorch.constants
    :members:
    :undoc-members:
    :show-inheritance:
+
+flowtorch.utils
+---------------
+
+.. automodule:: flowtorch.utils
+   :members:
+   :undoc-members:
+   :show-inheritance:

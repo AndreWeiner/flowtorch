@@ -25,7 +25,7 @@ class HOOptDMD(OptDMD):
         dt: float,
         delay: int = 1,
         rank_dr: int = None,
-        **dmd_options: dict
+        **dmd_options: dict,
     ):
         """Project data on POD basis and create time delay embedding.
 
@@ -46,7 +46,7 @@ class HOOptDMD(OptDMD):
         super(HOOptDMD, self).__init__(
             _create_time_delays(self._svd_dr.U.T @ self._dm_org, delay),
             dt,
-            **dmd_options
+            **dmd_options,
         )
 
     def partial_reconstruction(self, mode_indices: Set[int]) -> pt.Tensor:

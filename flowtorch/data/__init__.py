@@ -1,22 +1,51 @@
-from .foam_dataloader import FOAMDataloader, FOAMCase, FOAMMesh
-from .hdf5_file import HDF5Dataloader, HDF5Writer, FOAM2HDF5, XDMFWriter, copy_hdf5_mesh
-from .csv_dataloader import CSVDataloader
-from .vtk_dataloader import VTKDataloader
-from .psp_dataloader import PSPDataloader
-from .tau_dataloader import TAUDataloader, TAUSurfaceDataloader, TAUConfig
-from .selection_tools import mask_box, mask_sphere
-from .outlier_tools import iqr_outlier_replacement
-from .sequence_dataset import SequenceTensorDataset
-from .s_cube_dataloader import SCUBEDataloader
-from .image_dataloader import ImageDataloader
+"""Data loading and preprocessing tools.
 
-import logging
+Public objects are imported lazily so using one loader does not require the
+optional dependencies of every other loader.
+"""
 
-logger = logging.getLogger(__name__)
+from importlib import import_module
+from typing import Dict, Tuple
 
-try:
-    from .tecplot_dataloader import TecplotDataloader
-except ImportError:
-    logger.debug(
-        "TecplotDataloader can't be loaded. Most likely, the 'paraview' module is missing."
-    )
+_EXPORTS: Dict[str, Tuple[str, str]] = {
+    "FOAMDataloader": ("foam_dataloader", "FOAMDataloader"),
+    "FOAMCase": ("foam_dataloader", "FOAMCase"),
+    "FOAMMesh": ("foam_dataloader", "FOAMMesh"),
+    "HDF5Dataloader": ("hdf5_file", "HDF5Dataloader"),
+    "HDF5Writer": ("hdf5_file", "HDF5Writer"),
+    "FOAM2HDF5": ("hdf5_file", "FOAM2HDF5"),
+    "XDMFWriter": ("hdf5_file", "XDMFWriter"),
+    "copy_hdf5_mesh": ("hdf5_file", "copy_hdf5_mesh"),
+    "CSVDataloader": ("csv_dataloader", "CSVDataloader"),
+    "VTKDataloader": ("vtk_dataloader", "VTKDataloader"),
+    "PSPDataloader": ("psp_dataloader", "PSPDataloader"),
+    "TAUDataloader": ("tau_dataloader", "TAUDataloader"),
+    "TAUSurfaceDataloader": ("tau_dataloader", "TAUSurfaceDataloader"),
+    "TAUConfig": ("tau_dataloader", "TAUConfig"),
+    "TecplotDataloader": ("tecplot_dataloader", "TecplotDataloader"),
+    "SequenceTensorDataset": ("sequence_dataset", "SequenceTensorDataset"),
+    "SCUBEDataloader": ("s_cube_dataloader", "SCUBEDataloader"),
+    "ImageDataloader": ("image_dataloader", "ImageDataloader"),
+    "mask_box": ("selection_tools", "mask_box"),
+    "mask_sphere": ("selection_tools", "mask_sphere"),
+    "iqr_outlier_replacement": ("outlier_tools", "iqr_outlier_replacement"),
+}
+
+__all__ = list(_EXPORTS)
+
+
+def __getattr__(name: str):
+    """Load a public data object when it is first accessed."""
+    try:
+        module_name, object_name = _EXPORTS[name]
+    except KeyError as error:
+        raise AttributeError(
+            f"module {__name__!r} has no attribute {name!r}"
+        ) from error
+    value = getattr(import_module(f".{module_name}", __name__), object_name)
+    globals()[name] = value
+    return value
+
+
+def __dir__():
+    return sorted(set(globals()) | set(__all__))

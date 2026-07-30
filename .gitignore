@@ -10,7 +10,7 @@ private_data
 literature
 build
 dist
-flowTorch.egg-info
+*.egg-info
 datasets
 datasets_minimal
 compile_article

@@ -1,4 +1,3 @@
-from .psp_explorer import PSPExplorer
 from .dmd import DMD
 from .hodmd import HODMD
 
@@ -14,3 +13,30 @@ from .linear_model import LinearModel
 from .dft import DFT, PDFT
 from .spod import AMSPOD, PAMSPOD
 from .periodogram import AMPS
+
+__all__ = [
+    "AMPS",
+    "AMSPOD",
+    "DFT",
+    "DMD",
+    "HODMD",
+    "HOOptDMD",
+    "LinearModel",
+    "MSSA",
+    "OptDMD",
+    "PAMSPOD",
+    "PDFT",
+    "PMSSA",
+    "PSPExplorer",
+    "SVD",
+]
+
+
+def __getattr__(name: str):
+    """Load data-dependent analysis tools only when requested."""
+    if name == "PSPExplorer":
+        from .psp_explorer import PSPExplorer
+
+        globals()[name] = PSPExplorer
+        return PSPExplorer
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

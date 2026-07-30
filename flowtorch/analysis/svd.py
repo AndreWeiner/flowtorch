@@ -9,7 +9,7 @@ from typing import Tuple, Union
 import torch as pt
 
 # flowtorch packages
-from flowtorch.data.utils import format_byte_size
+from flowtorch.utils import format_byte_size
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="media/flowtorch_logo.svg" alt="flowTorch logo" height="240">
+  <img src="https://raw.githubusercontent.com/AndreWeiner/flowtorch/main/media/flowtorch_logo.svg" alt="flowTorch logo" height="240">
 </p>
 
 # flowTorch
@@ -76,27 +76,45 @@ Currently, the following sub-packages are under active development. Note that so
 
 The easiest way to install *flowTorch* is as follows (use the development branch *aweiner* for access to the latest developments):
 ```
-# install via pip
-pip3 install git+https://github.com/AndreWeiner/flowtorch
+# install from GitHub
+pip install "flowtorch-fluid @ git+https://github.com/AndreWeiner/flowtorch.git"
 # or install a specific branch, e.g., aweiner
-pip3 install git+https://github.com/AndreWeiner/flowtorch.git@aweiner
+pip install "flowtorch-fluid @ git+https://github.com/AndreWeiner/flowtorch.git@aweiner"
 
 # to uninstall flowTorch, run
-pip3 uninstall flowtorch
+pip uninstall flowtorch-fluid
 ```
+The base installation contains only the shared package and PyTorch dependency.
+Install the dependencies for the functionality you need with an optional extra:
+```
+# analysis algorithms
+pip install "flowtorch-fluid[analysis] @ git+https://github.com/AndreWeiner/flowtorch.git"
+
+# data loaders, reduced-order models, or the iPSP explorer
+pip install "flowtorch-fluid[data] @ git+https://github.com/AndreWeiner/flowtorch.git"
+pip install "flowtorch-fluid[rom] @ git+https://github.com/AndreWeiner/flowtorch.git"
+pip install "flowtorch-fluid[psp] @ git+https://github.com/AndreWeiner/flowtorch.git"
+
+# all optional functionality
+pip install "flowtorch-fluid[all] @ git+https://github.com/AndreWeiner/flowtorch.git"
+```
+With a local clone, extras can be installed and combined, for example
+`pip install ".[analysis,rom]"`.
+The analysis extra does not install the dependencies used exclusively by
+`flowtorch.data`.
+
 Alternatively, you can also clone the repository manually by running
 ```
-git clone git@github.com:FlowModelingControl/flowtorch.git
+git clone git@github.com:AndreWeiner/flowtorch.git
+cd flowtorch
 ```
-and install the dependencies listed in *requirements.txt*:
+and install it in editable mode with the desired optional dependencies:
 ```
-pip3 install -r requirements.txt
+pip install -e ".[all]"
 ```
-Installing all flowTorch dependencies requires a significant amount of disk space. When using isolated subpackages, one can also install the dependencies manually (by trial-and-error). To load the library package from within a Python script file or a Jupyter notebook, add the path to the cloned repository as follows:
-```
-import sys
-sys.path.insert(0, "/path/to/repository")
-```
+Installing all flowTorch dependencies requires significant disk space. Replace
+`all` with `analysis`, `data`, `rom`, or `psp` when only part of the library is
+needed.
 
 To get an overview of what *flowTorch* can do for you, have a look at the [online documentation](https://flowmodelingcontrol.github.io/flowtorch-docs/1.2/index.html). The examples presented in the online documentation are also contained in this repository. In fact, the documentation is a static version of several [Jupyter notebooks](https://jupyter.org/) with end-to-end analyses. If you are interested in an interactive version of one particular example, navigate to `./docs/source/notebooks` and run `jupyter lab`. Note that to execute some of the notebooks, the **corresponding datasets are required**. The datasets can be downloaded [here](https://datashare.tu-dresden.de/s/rekLnoqzRCp9zk9) (~2.6GB). If the data are only required for unit testing, a reduced dataset may be downloaded [here](https://datashare.tu-dresden.de/s/dr7gBPSdeyXQrgd) (~411MB). Download the data into a directory of your choice and navigate into that directory. To extract the archive, run:
 ```
@@ -160,10 +178,19 @@ generated HTML documentation is written to `docs/build/html`; open
 `docs/build/html/index.html` in a browser to view it. The build treats Sphinx
 warnings as errors so that documentation problems are caught locally.
 
+### Packaging
+
+Build the source distribution and wheel and validate their PyPI metadata with:
+```
+tox -e package
+```
+The generated artifacts are written to `dist/`. The PyPI distribution is named
+`flowtorch-fluid`, while the Python import package remains `flowtorch`.
+
 ### Unit testing
 The test suite is located in the top-level `tests` directory. To install the development testing tools, run:
 ```
-pip3 install -r requirements-dev.txt
+pip install -r requirements-dev.txt
 ```
 To run the default test suite with the active Python interpreter, execute:
 ```
@@ -204,7 +231,7 @@ tox -e py312 -- -m integration
 Python code is formatted with [Black](https://black.readthedocs.io/) using its
 default line length of 88 characters. Tox installs the pinned Black version in
 an isolated environment, so no separate Black installation is required. Format
-the package, tests, and setup script with:
+the package and tests with:
 ```
 tox -e format
 ```
@@ -233,7 +260,7 @@ The shared type-checking options are defined in `mypy.ini`.
 
 ## Getting help
 
-If you encounter any issues using *flowTorch* or if you have any questions regarding current and future development plans, please use the repository's [issue tracker](https://github.com/FlowModelingControl/flowtorch/issues). Consider the following steps before and when opening a new issue:
+If you encounter any issues using *flowTorch* or if you have any questions regarding current and future development plans, please use the repository's [issue tracker](https://github.com/AndreWeiner/flowtorch/issues). Consider the following steps before and when opening a new issue:
 
 0. Have you searched for similar issues that may have been already reported? The issue tracker has a *filter* function to search for keywords in open issues.
 1. Click on the green *New issue* button in the upper right corner and describe your problem in as much detail as possible. The issue should state what **the problem** is, what the **expected behavior** should be, and, maybe, suggest a **solution**. Note that you can also attach files or images to the issue.
@@ -263,4 +290,4 @@ For a list of scientific works relying on flowTorch, refer to [this list](refere
 
 ## License
 
-*flowTorch* is [GPLv3](https://en.wikipedia.org/wiki/GNU_General_Public_License)-licensed; refer to the [LICENSE](https://github.com/FlowModelingControl/flowtorch/blob/main/LICENSE) file for more information.
+*flowTorch* is [GPLv3](https://en.wikipedia.org/wiki/GNU_General_Public_License)-licensed; refer to the [LICENSE](https://github.com/AndreWeiner/flowtorch/blob/main/LICENSE) file for more information.

@@ -12,7 +12,7 @@ from scipy.linalg import solve_sylvester
 
 # flowtorch packages
 from .svd import SVD
-from flowtorch.data.utils import format_byte_size
+from flowtorch.utils import format_byte_size
 
 
 def _dft_properties(dt: float, n_times: int) -> Tuple[float, float, float]:
