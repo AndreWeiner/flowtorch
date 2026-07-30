@@ -74,36 +74,36 @@ Currently, the following sub-packages are under active development. Note that so
 
 ## Getting started
 
-The easiest way to install *flowTorch* is as follows (use the development branch *aweiner* for access to the latest developments):
+Install the latest stable release from PyPI:
 ```
-# install from GitHub
-pip install "flowtorch-fluid @ git+https://github.com/AndreWeiner/flowtorch.git"
-# or install a specific branch, e.g., aweiner
-pip install "flowtorch-fluid @ git+https://github.com/AndreWeiner/flowtorch.git@aweiner"
+pip install flowtorch-fluid
 
 # to uninstall flowTorch, run
 pip uninstall flowtorch-fluid
 ```
-The base installation contains only the shared package and PyTorch dependency.
-Install the dependencies for the functionality you need with an optional extra:
+The default installation includes all dependencies required by
+`flowtorch.analysis` except for the optional iPSP explorer. Install additional
+functionality with an optional extra:
 ```
-# analysis algorithms
-pip install "flowtorch-fluid[analysis] @ git+https://github.com/AndreWeiner/flowtorch.git"
-
 # data loaders, reduced-order models, or the iPSP explorer
-pip install "flowtorch-fluid[data] @ git+https://github.com/AndreWeiner/flowtorch.git"
-pip install "flowtorch-fluid[rom] @ git+https://github.com/AndreWeiner/flowtorch.git"
-pip install "flowtorch-fluid[psp] @ git+https://github.com/AndreWeiner/flowtorch.git"
+pip install "flowtorch-fluid[data]"
+pip install "flowtorch-fluid[rom]"
+pip install "flowtorch-fluid[psp]"
 
 # all optional functionality
+pip install "flowtorch-fluid[all]"
+```
+Extras can be combined, for example
+`pip install "flowtorch-fluid[data,rom]"`.
+
+The PyPI distribution is named `flowtorch-fluid`, while the Python package and
+imports remain `flowtorch`.
+
+To install the latest development version directly from GitHub, run:
+```
 pip install "flowtorch-fluid[all] @ git+https://github.com/AndreWeiner/flowtorch.git"
 ```
-With a local clone, extras can be installed and combined, for example
-`pip install ".[analysis,rom]"`.
-The analysis extra does not install the dependencies used exclusively by
-`flowtorch.data`.
-
-Alternatively, you can also clone the repository manually by running
+Alternatively, clone the repository:
 ```
 git clone git@github.com:AndreWeiner/flowtorch.git
 cd flowtorch
@@ -113,8 +113,8 @@ and install it in editable mode with the desired optional dependencies:
 pip install -e ".[all]"
 ```
 Installing all flowTorch dependencies requires significant disk space. Replace
-`all` with `analysis`, `data`, `rom`, or `psp` when only part of the library is
-needed.
+`all` with `data`, `rom`, or `psp` when only part of the optional functionality
+is needed.
 
 To get an overview of what *flowTorch* can do for you, have a look at the [online documentation](https://flowmodelingcontrol.github.io/flowtorch-docs/1.2/index.html). The examples presented in the online documentation are also contained in this repository. In fact, the documentation is a static version of several [Jupyter notebooks](https://jupyter.org/) with end-to-end analyses. If you are interested in an interactive version of one particular example, navigate to `./docs/source/notebooks` and run `jupyter lab`. Note that to execute some of the notebooks, the **corresponding datasets are required**. The datasets can be downloaded [here](https://datashare.tu-dresden.de/s/rekLnoqzRCp9zk9) (~2.6GB). If the data are only required for unit testing, a reduced dataset may be downloaded [here](https://datashare.tu-dresden.de/s/dr7gBPSdeyXQrgd) (~411MB). Download the data into a directory of your choice and navigate into that directory. To extract the archive, run:
 ```

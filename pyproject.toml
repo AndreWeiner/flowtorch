@@ -36,24 +36,21 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Mathematics",
     "Topic :: Scientific/Engineering :: Physics",
 ]
-dependencies = ["torch>=1.9"]
+dependencies = ["numpy", "scipy", "torch>=1.9"]
 
 [project.optional-dependencies]
-analysis = ["numpy", "scipy"]
-data = ["h5py", "netCDF4", "numpy", "pandas", "Pillow", "scipy", "vtk"]
-rom = ["numpy", "scikit-learn", "scipy"]
-psp = ["h5py", "numpy", "plotly", "scipy"]
+data = ["h5py", "netCDF4", "pandas", "Pillow", "vtk"]
+rom = ["scikit-learn"]
+psp = ["h5py", "plotly"]
 all = [
     "h5py",
     "jupyterlab",
     "matplotlib",
     "netCDF4",
-    "numpy",
     "pandas",
     "Pillow",
     "plotly",
     "scikit-learn",
-    "scipy",
     "vtk",
 ]
 
