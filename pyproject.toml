@@ -69,3 +69,12 @@ include = ["flowtorch*"]
 [tool.black]
 line-length = 88
 target-version = ["py310"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.ruff.lint]
+# Start with correctness rules so linting can be required without making
+# unrelated, pre-existing style findings block every pull request.
+select = ["E9", "F63", "F7", "F82"]

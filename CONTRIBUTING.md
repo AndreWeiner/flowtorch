@@ -18,7 +18,39 @@ Most of the library contains [type hints](https://docs.python.org/3/library/typi
 
 Python is a language that allows implementing operations with enormous complexity in a single line of code. Therefore, it is extremely important to provide a detailed documentation of new functionality containing all considerations the developer had in mind and also potential references or resources that were used as basis. *flowTorch* generates the documentation using [Sphinx](https://www.sphinx-doc.org/en/master/), and therefore, doc-stings should be formatted as [reStructuredText](https://docutils.sourceforge.io/rst.html).
 
-We use PyLint to ensure proper code formatting. If VSCode is your editor of choice, have a look at the [documentation for linting](https://code.visualstudio.com/docs/python/linting) to setup automated code formatting.
+Python code is formatted with [Black](https://black.readthedocs.io/) using a
+line length of 88 characters. Run the formatter through tox before submitting
+your changes:
+
+```bash
+tox -e format
+```
+
+Check that formatting is correct without modifying any files with:
+
+```bash
+tox -e format-check
+```
+
+Python code is linted with [Ruff](https://docs.astral.sh/ruff/). Run the same
+lint check that is used by continuous integration with:
+
+```bash
+tox -e lint
+```
+
+These commands check the `flowtorch` package and the test suite by default.
+Specific files or directories can be supplied after `--`, for example:
+
+```bash
+tox -e lint -- flowtorch/analysis tests/analysis
+```
+
+Type annotations can optionally be checked with:
+
+```bash
+tox -e type-check
+```
 
 ## 3. Provide unit tests
 
@@ -26,6 +58,78 @@ If new features are added, accompanying unit tests should be provided. We use [P
 
 ## 4. Push changes and create a pull-request
 
-To complete your contribution, create a new [pull request](https://docs.github.com/en/github/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request) for your feature or bug-fix. The changes will then be tested by someone with write access to the main repository before they are merged. If datasets are required, please provide a download link such that unit tests or examples can be executed.
+To complete your contribution, push your branch and create a new [pull
+request](https://docs.github.com/en/github/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request)
+against the `main` branch of the *flowTorch* repository. Automated checks will
+verify formatting, linting, and the dataset-free test suite. The type-checking
+job is currently optional and does not block merging. If datasets are required,
+please provide a download link so that the integration tests or examples can be
+executed.
+
+## Example contribution workflow
+
+The following commands illustrate how to contribute a feature named
+`improve-svd-api`. Replace `<your-github-username>` and the example branch name
+with your own values.
+
+First, fork the repository on GitHub. Then clone your fork and add the upstream
+*flowTorch* repository as a remote:
+
+```bash
+git clone https://github.com/<your-github-username>/flowtorch.git
+cd flowtorch
+git remote add upstream https://github.com/AndreWeiner/flowtorch.git
+```
+
+Update your local `main` branch and create a feature branch from it:
+
+```bash
+git switch main
+git pull --ff-only upstream main
+git switch -c feature/improve-svd-api
+```
+
+Implement the feature and its tests. Then run the local quality checks and
+dataset-free tests:
+
+```bash
+tox -e format
+tox -e format-check
+tox -e lint
+tox -e py310
+```
+
+Type checking is optional:
+
+```bash
+tox -e type-check
+```
+
+Review and commit the changes:
+
+```bash
+git status
+git diff
+git add flowtorch tests
+git commit -m "Add improved SVD API"
+```
+
+Push the feature branch to your fork:
+
+```bash
+git push -u origin feature/improve-svd-api
+```
+
+Finally, create a pull request targeting the upstream `main` branch. This can
+be done in the GitHub web interface or with the GitHub CLI:
+
+```bash
+gh pr create \
+  --repo AndreWeiner/flowtorch \
+  --base main \
+  --head <your-github-username>:feature/improve-svd-api \
+  --title "Add improved SVD API" \
+  --body "Implements the proposed SVD API improvement and adds tests."
+```
 
 **Thank you for considering to contribute to the *flowTorch* project!**

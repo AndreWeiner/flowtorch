@@ -32,7 +32,7 @@ class TestSVDEncoder:
     def test_encode(self):
         encoder = SVDEncoder(rank=self.cols)
         with pytest.raises(Exception):
-            encoder.encode(data[:, 0])
+            encoder.encode(self.data[:, 0])
         encoder.train(self.data)
         with pytest.raises(ValueError):
             encoder.encode(pt.ones(10))
