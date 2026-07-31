@@ -137,34 +137,62 @@ echo "export FLOWTORCH_DATASETS=\"$(pwd)/datasets_minimal/\"" >> ~/.bashrc
 
 ## Installing ParaView
 
-**Note:** the following installation of ParaView is only necessary if the *TecplotDataloader* is needed.
+ParaView is required only by `TecplotDataloader`, which uses ParaView's
+`VisItTecplotBinaryReader` to access binary
+[Tecplot](https://www.tecplot.com/) files. Download and install a ParaView build
+that includes the VisItBridge readers, then locate the `pvpython` executable
+included in that installation.
 
-*flowTorch* uses the ParaView Python module for accessing [Tecplot](https://www.tecplot.com/) data. When installing ParaView, special attention must be paid to the installed Python and VTK versions. Therefore, the following manual installation is recommended instead of using a standard package installation of ParaView.
+ParaView runs in an isolated subprocess. Its bundled Python packages are not
+added to the flowTorch interpreter, so ParaView does not need to match the
+Python version of the flowTorch environment. Do not add ParaView's
+`site-packages` directory to the global `PYTHONPATH`, and do not remove or
+replace packages inside the ParaView installation.
 
-1. Determine the version of Python:
+Pass the executable path when constructing the loader:
+
+```python
+from flowtorch.data import TecplotDataloader
+
+loader = TecplotDataloader.from_tau(
+    path,
+    "alfa16.surface.pval.unsteady_",
+    pvpython="/opt/ParaView/bin/pvpython",
+)
 ```
-python3 --version
-# example output
-Python 3.8.10
+
+Alternatively, configure the executable once:
+
+```bash
+export FLOWTORCH_PVPYTHON=/opt/ParaView/bin/pvpython
 ```
-2. Download the ParaView binaries according to your Python version from [here](https://www.paraview.org/download/). Note that you may have to use an older version of ParaView to match your Python version.
-3. Install the ParaView binaries, e.g., as follows:
+
+When `pvpython` is already on `PATH`, no explicit configuration is required.
+The selected ParaView installation can be checked with:
+
+```bash
+"${FLOWTORCH_PVPYTHON:-pvpython}" -c \
+  "from paraview.simple import VisItTecplotBinaryReader; print('Tecplot reader available')"
 ```
-# optional: remove old package installation if available
-sudo apt remove paraview
-# replace the archive's name if needed in the commands below
-sudo mv ParaView-5.9.1-MPI-Linux-Python3.8-64bit.tar.gz /opt/
-cd /opt
-sudo tar xf ParaView-5.9.1-MPI-Linux-Python3.8-64bit.tar.gz
-sudo rm ParaView-5.9.1-MPI-Linux-Python3.8-64bit.tar.gz
-cd ParaView-5.9.1-MPI-Linux-Python3.8-64bit/
-# add path to ParaView binary and Python modules
-echo export PATH="\$PATH:$(pwd)/bin" >> ~/.bashrc
-echo export PYTHONPATH="\$PYTHONPATH:$(pwd)/lib/python3.8/site-packages" >> ~/.bashrc
+
+The loader keeps one `pvpython` worker running and transfers arrays directly
+over a binary inter-process channel; it does not create temporary data files.
+Close the worker explicitly when finished:
+
+```python
+loader.close()
 ```
-In case of version conflicts between Python packages coming with ParaView and local versions of these packages, the following options exist:
-1. go to your ParaView installation and manually delete or rename the affected packages; the packages are located at */path/to/ParaView/lib/python3.8/site-packages*
-2. use *pvpython*, a modified Python interpreter shipped with ParaView and add a virtual environment containing flowTorch but not the conflicting packages (see [Using pvpython and virtualenv](https://www.kitware.com/using-pvpython-and-virtualenv/))
+
+The loader can also be used as a context manager:
+
+```python
+with TecplotDataloader.from_tau(
+    path,
+    "alfa16.surface.pval.unsteady_",
+    pvpython="/opt/ParaView/bin/pvpython",
+) as loader:
+    density = loader.load_snapshot("density", loader.write_times)
+```
 
 ## Development
 ### Documentation

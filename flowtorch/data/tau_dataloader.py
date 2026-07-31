@@ -34,8 +34,10 @@ SURF_SOLUTION_NAME = ".surface.pval.unsteady_"
 PSOLUTION_POSTFIX = ".domain_"
 PMESH_NAME = "domain_{:s}"
 PADD_POINTS_KEY = "addpoint_id"
+PADD_POINTS_KEY_COMPACT = "addpoint_idx"
 PGLOBAL_ID_KEY = "global_id"
 VERTEX_KEYS = ("points_xc", "points_yc", "points_zc")
+VERTEX_KEY_COMPACT = "pcoord"
 WEIGHT_KEY = "volume"
 
 COMMENT_CHAR = "#"
@@ -335,17 +337,19 @@ class TAUDataloader(TAUBase):
             coordinates of the vertices (x, y, z) and the cell volumes
         :rtype: pt.Tensor
         """
-        prefix = self._para.config[GRID_FILE_KEY]
-        name = PMESH_NAME.format(pid)
-        if not (prefix == "(none)"):
-            name = f"{prefix}_{name}"
+        prefix = self._para.config[GRID_PREFIX_KEY]
+        name = f"{prefix}_{PMESH_NAME.format(pid)}_grid_1"
         path = join(self._para.path, name)
         with Dataset(path) as data:
-            vertices = pt.stack(
-                [pt.tensor(data[key][:], dtype=self._dtype) for key in VERTEX_KEYS],
-                dim=-1,
-            )
-            n_add_points = data[PADD_POINTS_KEY].shape[0]
+            if VERTEX_KEY_COMPACT in data.variables:
+                vertices = pt.tensor(data[VERTEX_KEY_COMPACT][:], dtype=self._dtype)
+                n_add_points = data[PADD_POINTS_KEY_COMPACT].shape[0]
+            else:
+                vertices = pt.stack(
+                    [pt.tensor(data[key][:], dtype=self._dtype) for key in VERTEX_KEYS],
+                    dim=-1,
+                )
+                n_add_points = data[PADD_POINTS_KEY].shape[0]
 
         n_points = vertices.shape[0] - n_add_points
         data = pt.zeros((n_points, 4), dtype=self._dtype)

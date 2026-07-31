@@ -29,8 +29,19 @@ def test_lightweight_data_export_does_not_import_loader_dependencies():
     modules = _imported_modules("""
 import sys
 from flowtorch.data import mask_box
-for name in ("h5py", "netCDF4", "pandas", "vtk"):
+for name in ("h5py", "netCDF4", "pandas", "paraview", "vtk"):
     if name in sys.modules:
+        print(name)
+""")
+    assert modules == []
+
+
+def test_tecplot_loader_does_not_import_paraview():
+    modules = _imported_modules("""
+import sys
+from flowtorch.data import TecplotDataloader
+for name in sys.modules:
+    if name == "paraview" or name.startswith("paraview."):
         print(name)
 """)
     assert modules == []

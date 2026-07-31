@@ -19,6 +19,10 @@ class TestTecplotDataloader:
     path = DATASETS["plt_naca2409_surface"]
     loader = TecplotDataloader.from_tau(path, "alfa16.surface.pval.unsteady_")
 
+    @classmethod
+    def teardown_class(cls):
+        cls.loader.close()
+
     def test_from_tau(self):
         file_names = [
             "alfa16.surface.pval.unsteady_i=1600_t=5.6805000e-01.plt",
@@ -35,10 +39,6 @@ class TestTecplotDataloader:
             self.path, "alfa16.surface.pval.unsteady_i=1600_t=5.6805000e-01.plt"
         )
         assert first_file_path == true_path
-
-    def test_create_tecplot_reader(self):
-        reader = self.loader._create_tecplot_reader("5.6805000e-01")
-        assert type(reader).__name__ == "VisItTecplotBinaryReader"
 
     def test_field_names(self):
         field_names = self.loader.field_names
