@@ -244,6 +244,19 @@ Check formatting without changing any files with:
 tox -e format-check
 ```
 
+### Code linting
+
+Python code is linted with [Ruff](https://docs.astral.sh/ruff/). Tox installs
+the pinned Ruff version in an isolated environment. Lint the package and tests
+with:
+```
+tox -e lint
+```
+To lint only specific files or directories, pass them after `--`, for example:
+```
+tox -e lint -- flowtorch/analysis tests/analysis
+```
+
 ### Type checking
 
 Python type annotations are checked with [mypy](https://mypy.readthedocs.io/).
