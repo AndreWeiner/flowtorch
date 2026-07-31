@@ -10,6 +10,7 @@ to snapshot data.
 """
 
 # standard library packages
+from functools import partial
 import logging
 from abc import abstractmethod
 from os.path import join, split
@@ -23,7 +24,7 @@ import torch as pt
 
 # flowtorch packages
 from flowtorch import DEFAULT_DTYPE
-from .dataloader import Dataloader
+from .dataloader import Dataloader, _preallocate_time_series
 from .utils import check_list_or_str
 
 logger = logging.getLogger(__name__)
@@ -258,8 +259,9 @@ class TAUBase(Dataloader):
         if isinstance(field_name, list):
             if isinstance(time, list):
                 return [
-                    pt.stack(
-                        [self._load_single_snapshot(field, t) for t in time], dim=-1
+                    _preallocate_time_series(
+                        partial(self._load_single_snapshot, field),
+                        time,
                     )
                     for field in field_name
                 ]
@@ -268,8 +270,8 @@ class TAUBase(Dataloader):
         # load single field
         else:
             if isinstance(time, list):
-                return pt.stack(
-                    [self._load_single_snapshot(field_name, t) for t in time], dim=-1
+                return _preallocate_time_series(
+                    lambda t: self._load_single_snapshot(field_name, t), time
                 )
             else:
                 return self._load_single_snapshot(field_name, time)

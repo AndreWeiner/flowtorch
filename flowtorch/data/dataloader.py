@@ -6,8 +6,35 @@ formats.
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Dict, Union
+from typing import Callable, Dict, List, Sequence, Union
 from torch import Tensor
+
+
+def _preallocate_time_series(
+    load_snapshot: Callable[[str], Tensor], times: Sequence[str]
+) -> Tensor:
+    """Load snapshots into a preallocated tensor with time last.
+
+    Only the output tensor and one independently loaded snapshot are resident
+    at a time.
+    """
+    if not times:
+        raise ValueError("At least one snapshot time must be provided")
+    first = load_snapshot(times[0])
+    snapshot_shape = first.shape
+    series = first.new_empty((*snapshot_shape, len(times)))
+    series[..., 0].copy_(first)
+    del first
+    for index, time in enumerate(times[1:], start=1):
+        snapshot = load_snapshot(time)
+        if snapshot.shape != snapshot_shape:
+            raise ValueError(
+                "All snapshots must have the same shape; "
+                f"expected {tuple(snapshot_shape)}, found {tuple(snapshot.shape)} "
+                f"at time {time!r}"
+            )
+        series[..., index].copy_(snapshot)
+    return series
 
 
 class Dataloader(ABC):

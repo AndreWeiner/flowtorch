@@ -306,17 +306,7 @@ class CSVDataloader(Dataloader):
         # load multiple fields
         if isinstance(field_name, list):
             if isinstance(time, list):
-                snapshots = [self._load_csv(t) for t in time]
-                return [
-                    pt.stack(
-                        [
-                            pt.tensor(snapshot[field].values, dtype=self._dtype)
-                            for snapshot in snapshots
-                        ],
-                        dim=-1,
-                    )
-                    for field in field_name
-                ]
+                return self._load_multiple_snapshots(field_name, time)
             else:
                 snapshot = self._load_csv(time)
                 return [
@@ -326,17 +316,38 @@ class CSVDataloader(Dataloader):
         # load single field
         else:
             if isinstance(time, list):
-                snapshots = [self._load_csv(t) for t in time]
-                return pt.stack(
-                    [
-                        pt.tensor(snapshot[field_name].values, dtype=self._dtype)
-                        for snapshot in snapshots
-                    ],
-                    dim=-1,
-                )
+                return self._load_multiple_snapshots([field_name], time)[0]
             else:
                 snapshot = self._load_csv(time)
                 return pt.tensor(snapshot[field_name].values, dtype=self._dtype)
+
+    def _load_multiple_snapshots(
+        self, field_names: List[str], times: List[str]
+    ) -> List[pt.Tensor]:
+        """Load each CSV file once into preallocated time-last tensors."""
+        if not times:
+            raise ValueError("At least one snapshot time must be provided")
+        snapshot = self._load_csv(times[0])
+        first_fields = [
+            pt.tensor(snapshot[field].values, dtype=self._dtype)
+            for field in field_names
+        ]
+        field_shapes = [first.shape for first in first_fields]
+        series = [first.new_empty((*first.shape, len(times))) for first in first_fields]
+        for output, first in zip(series, first_fields):
+            output[..., 0].copy_(first)
+        del first_fields
+        for index, time in enumerate(times[1:], start=1):
+            snapshot = self._load_csv(time)
+            for output, field, shape in zip(series, field_names, field_shapes):
+                current = pt.tensor(snapshot[field].values, dtype=self._dtype)
+                if current.shape != shape:
+                    raise ValueError(
+                        f"Field {field!r} has shape {tuple(current.shape)} at "
+                        f"time {time!r}; expected {tuple(shape)}"
+                    )
+                output[..., index].copy_(current)
+        return series
 
     @property
     def write_times(self) -> List[str]:
