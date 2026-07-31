@@ -48,10 +48,6 @@ extensions = [
         'recommonmark'
 ]
 
-# ParaView is an optional dependency used only by TecplotDataloader. Mock it
-# during API documentation builds so a full ParaView installation is not
-# required.
-autodoc_mock_imports = ['paraview']
 
 nbsphinx_execute_arguments = [
     "--InlineBackend.figure_formats={'svg', 'pdf'}",

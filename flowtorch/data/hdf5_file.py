@@ -316,7 +316,7 @@ class FOAM2HDF5(object):
         file_path = join(self._loader._case.path, filename)
         self._remove_file_if_present(file_path)
         # trigger error message when the case is distributed
-        if self._loader._case._eval_processors():
+        if self._loader._case.distributed:
             message = """The direct conversion of distributed cases is currently not supported.\n
         Workaround:
             1.  run reconstructPar (OpenFOAM utility)
