@@ -118,8 +118,9 @@ def test_AMSPOD_cpu():
     assert res is not None
     assert res.shape == (n_freq, K - 2)
     rec = spod.mode_reconstruction(N // 2, 0)
-    assert rec.shape == dm_even_complex.shape
+    assert rec.shape == (M, 25)
     assert rec.dtype == dm_even_complex.dtype
+    assert pt.allclose(rec[:, 0], rec[:, -1])
     rec = spod.mode_reconstruction(N // 2, 0, 1.0, 10)
     assert rec.shape == (M, 10)
     assert rec.dtype == dm_even_complex.dtype
@@ -305,9 +306,9 @@ def test_PAMSPOD():
     assert spod._dm.shape == (N, N)
     assert spod.modes.shape == (n_freq, M, 3)
     r = spod.mode_reconstruction(0, 0)
-    assert r.shape == dm.shape
+    assert r.shape == (M, 25)
     assert r.dtype == dm.dtype
-    r = spod.mode_reconstruction(0, 0, 1.0, 35, scale=True)
+    r = spod.mode_reconstruction(0, 0, 1.0, 35)
     assert r.shape == (M, 35)
     assert r.dtype == dm.dtype
     m = spod.get_mode(5, 0)
