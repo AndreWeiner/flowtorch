@@ -21,7 +21,7 @@ import torch as pt
 
 # flowtorch packages
 from flowtorch import DEFAULT_DTYPE
-from .dataloader import Dataloader
+from .dataloader import Dataloader, _preallocate_time_series
 from .utils import check_and_standardize_path, check_list_or_str
 
 logger = logging.getLogger(__name__)
@@ -346,8 +346,8 @@ class TecplotDataloader(Dataloader):
 
     def _load_multiple_snapshots(self, field_name: str, times: List[str]) -> pt.Tensor:
         """Load one field from multiple snapshots."""
-        return pt.stack(
-            [self._load_single_snapshot(field_name, time) for time in times], dim=-1
+        return _preallocate_time_series(
+            lambda time: self._load_single_snapshot(field_name, time), times
         )
 
     def load_snapshot(

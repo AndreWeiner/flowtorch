@@ -9,6 +9,7 @@ of reconstructed OpenFOAM simulation cases into the HDF5-based flowTorch format.
 """
 
 # standard library packages
+from functools import partial
 import logging
 from os.path import isfile, exists, join
 from os import remove
@@ -20,7 +21,7 @@ from h5py import File
 
 # flowtorch packages
 from flowtorch import DEFAULT_DTYPE
-from .dataloader import Dataloader
+from .dataloader import Dataloader, _preallocate_time_series
 from .foam_dataloader import (
     FOAMDataloader,
     POLYMESH_PATH,
@@ -102,6 +103,13 @@ class HDF5Dataloader(Dataloader):
         self._dtype = dtype
         self._file = File(self._file_path, mode="a")
 
+    def _load_single_snapshot(self, field_name: str, time: str) -> pt.Tensor:
+        """Load one field at one time."""
+        return pt.tensor(
+            self._file[f"{VAR_GROUP}/{time}/{field_name}"][:].copy(),
+            dtype=self._dtype,
+        ).squeeze()
+
     def load_snapshot(
         self, field_name: Union[List[str], str], time: Union[List[str], str]
     ) -> Union[List[pt.Tensor], pt.Tensor]:
@@ -111,44 +119,23 @@ class HDF5Dataloader(Dataloader):
         if isinstance(field_name, list):
             if isinstance(time, list):
                 return [
-                    pt.stack(
-                        [
-                            pt.tensor(
-                                self._file[f"{VAR_GROUP}/{t}/{field}"][:].copy(),
-                                dtype=self._dtype,
-                            ).squeeze()
-                            for t in time
-                        ],
-                        dim=-1,
+                    _preallocate_time_series(
+                        partial(self._load_single_snapshot, field),
+                        time,
                     )
                     for field in field_name
                 ]
             else:
-                return [
-                    pt.tensor(
-                        self._file[f"{VAR_GROUP}/{time}/{field}"][:].copy(),
-                        dtype=self._dtype,
-                    ).squeeze()
-                    for field in field_name
-                ]
+                return [self._load_single_snapshot(field, time) for field in field_name]
         # load single field
         else:
             if isinstance(time, list):
-                return pt.stack(
-                    [
-                        pt.tensor(
-                            self._file[f"{VAR_GROUP}/{t}/{field_name}"][:].copy(),
-                            dtype=self._dtype,
-                        ).squeeze()
-                        for t in time
-                    ],
-                    dim=-1,
+                return _preallocate_time_series(
+                    partial(self._load_single_snapshot, field_name),
+                    time,
                 )
             else:
-                return pt.tensor(
-                    self._file[f"{VAR_GROUP}/{time}/{field_name}"][:].copy(),
-                    dtype=self._dtype,
-                ).squeeze()
+                return self._load_single_snapshot(field_name, time)
 
     @property
     def write_times(self) -> List[str]:
