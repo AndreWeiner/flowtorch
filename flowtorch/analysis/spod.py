@@ -596,6 +596,91 @@ class AMSPOD(object):
             ) + 1j * coefficients_real[n_basis:].type(basis.dtype)
         return coefficients.reshape(self._frequency.shape[0], n_modes, self._nt)
 
+    def partial_reconstruction(
+        self,
+        f_min: Union[int, float],
+        f_max: Union[int, float],
+        n_modes: int = 1,
+        start_idx: int = 0,
+        n_snapshots: int = 100,
+        add_mean: bool = False,
+    ) -> pt.Tensor:
+        """Reconstruct snapshots from a subset of frequency bins and modes.
+
+        If both frequency limits are integers, they are interpreted as
+        frequency-bin indices. Otherwise, they are interpreted as physical
+        frequency values and all bins within the inclusive range are selected.
+        The reconstruction is formed from the SPOD modes and their temporal
+        coefficients. If fewer modes are available than requested, the number
+        is reduced according to :meth:`temporal_coefficients`.
+
+        :param f_min: first frequency-bin index or minimum frequency to include
+        :type f_min: Union[int, float]
+        :param f_max: last frequency-bin index or maximum frequency to include
+        :type f_max: Union[int, float]
+        :param n_modes: maximum number of leading modes to include per frequency
+            bin; defaults to 1
+        :type n_modes: int, optional
+        :param start_idx: index of the first snapshot to reconstruct; defaults to 0
+        :type start_idx: int, optional
+        :param n_snapshots: maximum number of snapshots to reconstruct; defaults
+            to 100
+        :type n_snapshots: int, optional
+        :param add_mean: add the temporal mean if it was subtracted during the
+            SPOD computation; defaults to False
+        :type add_mean: bool, optional
+        :raises ValueError: for invalid frequency-bin or snapshot indices
+        :raises ValueError: if ``n_modes`` or ``n_snapshots`` is smaller than one
+        :return: partial reconstruction arranged as
+            ``(n_spatial_points, n_reconstructed_snapshots)``
+        :rtype: pt.Tensor
+        """
+        n_freq = self._frequency.shape[0]
+        use_indices = isinstance(f_min, int) and isinstance(f_max, int)
+        if use_indices:
+            if f_min < 0 or f_min >= n_freq:
+                raise ValueError(f"f_min must be in the range [0, {n_freq - 1:d}]")
+            if f_max < f_min or f_max >= n_freq:
+                raise ValueError(
+                    f"f_max must be in the range [{f_min:d}, {n_freq - 1:d}]"
+                )
+            frequency_indices = pt.arange(f_min, f_max + 1, dtype=pt.int64)
+        else:
+            if f_max < f_min:
+                raise ValueError("f_max must be greater than or equal to f_min")
+            in_range = pt.logical_and(
+                self._frequency >= f_min, self._frequency <= f_max
+            )
+            frequency_indices = pt.arange(n_freq, dtype=pt.int64)[in_range]
+            if frequency_indices.numel() == 0:
+                raise ValueError(
+                    f"no frequency bins are included in [{f_min:g}, {f_max:g}]"
+                )
+        if start_idx < 0 or start_idx >= self._nt:
+            raise ValueError(f"start_idx must be in the range [0, {self._nt - 1:d}]")
+        if n_snapshots < 1:
+            raise ValueError("n_snapshots must be at least 1")
+
+        stop_idx = min(start_idx + n_snapshots, self._nt)
+        available = stop_idx - start_idx
+        if available < n_snapshots:
+            warnings.warn(
+                f"only {available:d} snapshots are available from "
+                f"start_idx={start_idx:d}; reconstructing all available snapshots",
+                UserWarning,
+            )
+
+        coefficients = self.temporal_coefficients(n_modes)
+        n_modes = coefficients.shape[1]
+        modes = self._modes[frequency_indices, :, :n_modes]
+        coefficients = coefficients[frequency_indices, :, start_idx:stop_idx]
+        reconstruction = pt.einsum("fxm,fmt->xt", modes, coefficients)
+        if not self._complex:
+            reconstruction = reconstruction.real
+        if add_mean and self._subtract_mean:
+            reconstruction += self._dm.mean(dim=1).unsqueeze(-1)
+        return reconstruction
+
     def mode_reconstruction(
         self,
         f_idx: int,
@@ -810,3 +895,33 @@ class PAMSPOD(AMSPOD):
             return (self.svd.U / self._weight_org).type(rec.dtype) @ rec
         else:
             return self.svd.U.type(rec.dtype) @ rec
+
+    def partial_reconstruction(
+        self,
+        f_min: Union[int, float],
+        f_max: Union[int, float],
+        n_modes: int = 1,
+        start_idx: int = 0,
+        n_snapshots: int = 100,
+        add_mean: bool = False,
+    ) -> pt.Tensor:
+        """Reconstruct snapshots in full space from selected bins and modes.
+
+        See :meth:`AMSPOD.partial_reconstruction` for the argument definitions.
+
+        :return: partial reconstruction in the original state space
+        :rtype: pt.Tensor
+        """
+        rec = super().partial_reconstruction(
+            f_min, f_max, n_modes, start_idx, n_snapshots, add_mean=False
+        )
+        if hasattr(self, "_weight_org"):
+            rec = (self.svd.U / self._weight_org).type(rec.dtype) @ rec
+        else:
+            rec = self.svd.U.type(rec.dtype) @ rec
+        if add_mean and hasattr(self, "_mean_org"):
+            mean = self._mean_org
+            if hasattr(self, "_weight_org"):
+                mean = mean / self._weight_org.squeeze()
+            rec += mean.unsqueeze(-1)
+        return rec
