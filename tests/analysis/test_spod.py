@@ -268,6 +268,63 @@ def test_AMSPOD_temporal_coefficients_adaptive_mode_limit():
     assert coeffs.shape == (N // 2 + 1, 2, N)
 
 
+def test_AMSPOD_partial_reconstruction():
+    M, N, K = 12, 14, 4
+    dm = pt.rand((M, N), dtype=pt.float32)
+    spod = AMSPOD(
+        dm,
+        1.0,
+        adaptive=False,
+        max_tapers=K,
+        keep_n_modes=2,
+    )
+    coefficients = spod.temporal_coefficients(n_modes=2)
+    expected = pt.einsum(
+        "fxm,fmt->xt",
+        spod.modes[1:4, :, :2],
+        coefficients[1:4, :, 2:7],
+    ).real
+    reconstruction = spod.partial_reconstruction(
+        1, 3, n_modes=2, start_idx=2, n_snapshots=5
+    )
+    pt.testing.assert_close(reconstruction, expected)
+    assert reconstruction.dtype == dm.dtype
+
+    frequency_reconstruction = spod.partial_reconstruction(
+        float(spod.frequency[1]),
+        float(spod.frequency[3]),
+        n_modes=2,
+        start_idx=2,
+        n_snapshots=5,
+    )
+    pt.testing.assert_close(frequency_reconstruction, expected)
+
+    with pytest.warns(UserWarning, match="exceeds keep_n_modes"):
+        reconstruction = spod.partial_reconstruction(1, 3, n_modes=3, n_snapshots=N)
+    assert reconstruction.shape == (M, N)
+    with pytest.warns(UserWarning, match="only 2 snapshots"):
+        reconstruction = spod.partial_reconstruction(1, 3, start_idx=N - 2)
+    assert reconstruction.shape == (M, 2)
+
+    mean = dm.mean(dim=1).unsqueeze(-1)
+    without_mean = spod.partial_reconstruction(1, 3, n_snapshots=5)
+    with_mean = spod.partial_reconstruction(1, 3, n_snapshots=5, add_mean=True)
+    pt.testing.assert_close(with_mean, without_mean + mean)
+
+    with raises(ValueError):
+        _ = spod.partial_reconstruction(-1, 3)
+    with raises(ValueError):
+        _ = spod.partial_reconstruction(1, spod.frequency.shape[0])
+    with raises(ValueError):
+        _ = spod.partial_reconstruction(3, 1)
+    with raises(ValueError):
+        _ = spod.partial_reconstruction(10.0, 11.0)
+    with raises(ValueError):
+        _ = spod.partial_reconstruction(1, 3, start_idx=N)
+    with raises(ValueError):
+        _ = spod.partial_reconstruction(1, 3, n_snapshots=0)
+
+
 @pytest.mark.skipif(not pt.cuda.is_available(), reason="CUDA not available")
 def test_AMSPOD_cuda():
     # real input data, even number of snapshots
@@ -310,6 +367,10 @@ def test_PAMSPOD():
     assert r.dtype == dm.dtype
     r = spod.mode_reconstruction(0, 0, 1.0, 35)
     assert r.shape == (M, 35)
+    assert r.dtype == dm.dtype
+    with pytest.warns(UserWarning, match="only 20 snapshots"):
+        r = spod.partial_reconstruction(0, 2, add_mean=True)
+    assert r.shape == dm.shape
     assert r.dtype == dm.dtype
     m = spod.get_mode(5, 0)
     assert m.shape == (M,)
