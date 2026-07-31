@@ -602,25 +602,25 @@ class AMSPOD(object):
         eig_idx: int = 0,
         dt: Union[float, None] = None,
         N: Union[int, None] = None,
-        scale: bool = False,
     ) -> pt.Tensor:
-        """Compute time-domain reconstruction based on a single mode.
+        """Compute a time-domain reconstruction based on a single mode.
 
         The mode is selected based on the frequency bin and the eigenbasis index.
         Note that the size of the eigenbasis may vary across frequency bins
-        if `adaptive=True`.
+        if `adaptive=True`. By default, one period is reconstructed at 25
+        equally spaced time values, including both period boundaries. For the
+        zero-frequency mode, the original time step is used instead.
 
         :param f_idx: frequency bin index
         :type f_idx: int
         :param eig_idx: index of eigenvector-eigenvalue pair; defaults to 0, i.e.,
             the most dominant mode at the selected frequency
         :type eig_idx: int, optional
-        :param dt: optional reconstruction time step; defaults to None (use original time step)
+        :param dt: optional reconstruction time step; defaults to None (distribute
+            the time values over one period)
         :type dt: Union[float, None], optional
-        :param N: optional number of steps to reconstruct; defaults to None (use original number of snapshots)
+        :param N: optional number of time values; defaults to None (use 25)
         :type N: Union[int, None], optional
-        :param scale: energy-consistent model scaling; defaults to False
-        :type scale: bool, optional
         :raises ValueError: for invalid frequency bins
         :raises ValueError: for invalid eigenbasis index
         :raises ValueError: if the corresponding mode was not saved due to `keep_n_modes`
@@ -641,12 +641,15 @@ class AMSPOD(object):
             raise ValueError(
                 f"mode {eig_idx} was not saved (keep_n_modes={self._n_keep})"
             )
-        s = (self.eigvals[f_idx, eig_idx] * K).sqrt() if scale else 1.0
         m = self._modes[f_idx, :, eig_idx]
-        t_res = self._dt if dt is None else dt
-        steps = self._nt if N is None else N
+        steps = 25 if N is None else N
+        frequency = self._frequency[f_idx]
+        if dt is None and frequency != 0.0 and steps > 1:
+            t_res = 1.0 / (frequency.abs() * (steps - 1))
+        else:
+            t_res = self._dt if dt is None else dt
         t = pt.arange(steps) * t_res
-        osc = pt.exp(2j * pi * self._frequency[f_idx] * t) * s
+        osc = pt.exp(2j * pi * frequency * t)
         if self._complex:
             return pt.outer(m, osc)
         else:
@@ -783,7 +786,6 @@ class PAMSPOD(AMSPOD):
         eig_idx: int = 0,
         dt: Union[float, None] = None,
         N: Union[int, None] = None,
-        scale: bool = False,
     ) -> pt.Tensor:
         """Compute time-domain reconstruction based on a single mode.
 
@@ -795,16 +797,15 @@ class PAMSPOD(AMSPOD):
         :param eig_idx: index of eigenvector-eigenvalue pair; defaults to 0, i.e.,
             the most dominant mode at the selected frequency
         :type eig_idx: int, optional
-        :param dt: optional reconstruction time step; defaults to None (use original time step)
+        :param dt: optional reconstruction time step; defaults to None (distribute
+            the time values over one period)
         :type dt: Union[float, None], optional
-        :param N: optional number of steps to reconstruct; defaults to None (use original number of snapshots)
+        :param N: optional number of time values; defaults to None (use 25)
         :type N: Union[int, None], optional
-        :param scale: energy-consistent model scaling; defaults to False
-        :type scale: bool, optional
         :return: reconstruction based on a single mode
         :rtype: pt.Tensor
         """
-        rec = super().mode_reconstruction(f_idx, eig_idx, dt, N, scale)
+        rec = super().mode_reconstruction(f_idx, eig_idx, dt, N)
         if hasattr(self, "_weight_org"):
             return (self.svd.U / self._weight_org).type(rec.dtype) @ rec
         else:
