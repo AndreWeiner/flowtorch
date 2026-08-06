@@ -90,6 +90,14 @@ flowtorch.data.interpolation\_tools
    :undoc-members:
    :show-inheritance:
 
+flowtorch.data.geometry\_tools
+------------------------------
+
+.. automodule:: flowtorch.data.geometry_tools
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 flowtorch.data.utils
 --------------------
 
