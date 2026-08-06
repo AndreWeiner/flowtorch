@@ -26,6 +26,7 @@ _EXPORTS: Dict[str, Tuple[str, str]] = {
     "SequenceTensorDataset": ("sequence_dataset", "SequenceTensorDataset"),
     "SCUBEDataloader": ("s_cube_dataloader", "SCUBEDataloader"),
     "ImageDataloader": ("image_dataloader", "ImageDataloader"),
+    "replace_masked_values": ("interpolation_tools", "replace_masked_values"),
     "mask_box": ("selection_tools", "mask_box"),
     "mask_image_interactive": ("selection_tools", "mask_image_interactive"),
     "mask_polygon": ("selection_tools", "mask_polygon"),
