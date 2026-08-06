@@ -6,6 +6,7 @@ from typing import Callable
 
 # third party packages
 import torch as pt
+from torch.nn import functional as F
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -57,3 +58,62 @@ def iqr_outlier_replacement(
         i, j = row.item(), col.item()
         clean_data[i, j] = replace(data[i, max(0, j - nb) : min(shape[-1], j + nb + 1)])
     return clean_data.reshape(initial_shape)
+
+
+def replace_spatial_outliers(
+    data: pt.Tensor,
+    threshold: float = 3.5,
+    window_size: int = 3,
+) -> pt.Tensor:
+    """Replace spatial outliers using a local median and MAD criterion.
+
+    The first two dimensions are interpreted as spatial axes. Every trailing
+    index, such as snapshot and vector-component indices, is processed
+    independently. Finite values whose robust local score exceeds
+    ``threshold`` are replaced by the neighborhood median. Existing non-finite
+    values are preserved.
+
+    :param data: data with two spatial axes and optional trailing dimensions
+    :type data: pt.Tensor
+    :param threshold: robust-score threshold, defaults to 3.5
+    :type threshold: float, optional
+    :param window_size: positive odd spatial window size, defaults to 3
+    :type window_size: int, optional
+    :return: data with detected spatial outliers replaced
+    :rtype: pt.Tensor
+
+    **References**
+
+    The robust score and default threshold follow the modified Z-score from
+    B. Iglewicz and D. C. Hoaglin, *How to Detect and Handle Outliers*,
+    ASQC Quality Press, 1993. Here, the statistic is applied to local 2D
+    neighborhoods as a spatial Hampel-style filter, and detected values are
+    replaced by the local median.
+    """
+    if data.ndim < 2:
+        raise ValueError("data must have at least two dimensions")
+    if not data.is_floating_point():
+        raise ValueError("data must have a floating-point dtype")
+    if threshold <= 0.0:
+        raise ValueError("threshold must be positive")
+    if window_size < 1 or window_size % 2 == 0:
+        raise ValueError("window_size must be a positive odd integer")
+    if window_size == 1:
+        return data.clone()
+
+    nx, ny = data.shape[:2]
+    channels = data.reshape(nx, ny, -1).permute(2, 0, 1).unsqueeze(1)
+    radius = window_size // 2
+    padding_mode = "reflect" if radius < min(nx, ny) else "replicate"
+    padded = F.pad(channels, (radius, radius, radius, radius), mode=padding_mode)
+    neighborhoods = F.unfold(padded, kernel_size=window_size)
+    median = pt.nanmedian(neighborhoods, dim=1).values
+    deviation = pt.abs(neighborhoods - median.unsqueeze(1))
+    mad = pt.nanmedian(deviation, dim=1).values
+
+    center = channels.flatten(start_dim=2).squeeze(1)
+    scale = 1.4826 * mad + pt.finfo(data.dtype).eps
+    outliers = pt.isfinite(center) & pt.isfinite(median)
+    outliers &= pt.abs(center - median) > threshold * scale
+    clean = pt.where(outliers, median, center)
+    return clean.reshape(-1, nx, ny).permute(1, 2, 0).reshape(data.shape)
