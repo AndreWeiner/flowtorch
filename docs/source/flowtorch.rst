@@ -7,6 +7,7 @@ flowtorch
    flowtorch.data
    flowtorch.analysis
    flowtorch.rom
+   flowtorch.visualization
 
 flowtorch.constants
 -------------------
