@@ -36,7 +36,10 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Mathematics",
     "Topic :: Scientific/Engineering :: Physics",
 ]
-dependencies = ["numpy", "scipy", "torch>=1.9"]
+dependencies = ["matplotlib", "numpy", "scipy", "torch>=1.9"]
+
+[project.scripts]
+flowtoch-mask-psp = "flowtorch.data.psp_mask_cli:main"
 
 [project.optional-dependencies]
 data = ["h5py", "netCDF4", "pandas", "Pillow", "vtk"]
@@ -45,7 +48,6 @@ psp = ["h5py", "plotly"]
 all = [
     "h5py",
     "jupyterlab",
-    "matplotlib",
     "netCDF4",
     "pandas",
     "Pillow",

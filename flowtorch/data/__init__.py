@@ -27,6 +27,9 @@ _EXPORTS: Dict[str, Tuple[str, str]] = {
     "SCUBEDataloader": ("s_cube_dataloader", "SCUBEDataloader"),
     "ImageDataloader": ("image_dataloader", "ImageDataloader"),
     "mask_box": ("selection_tools", "mask_box"),
+    "mask_image_interactive": ("selection_tools", "mask_image_interactive"),
+    "mask_polygon": ("selection_tools", "mask_polygon"),
+    "mask_psp_interactive": ("selection_tools", "mask_psp_interactive"),
     "mask_sphere": ("selection_tools", "mask_sphere"),
     "iqr_outlier_replacement": ("outlier_tools", "iqr_outlier_replacement"),
 }
