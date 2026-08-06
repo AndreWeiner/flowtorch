@@ -140,6 +140,229 @@ def curvilinear_gradient(
     return gradient[:, :, 0] if single_snapshot else gradient
 
 
+def curvilinear_jacobian(
+    field: pt.Tensor,
+    x: pt.Tensor,
+    y: pt.Tensor,
+    z: pt.Tensor | None = None,
+    smoothing_sigma: float | Tuple[float, float] | None = None,
+    smoothing_mode: str = "reflect",
+    smoothing_truncate: float = 3.0,
+    edge_order: int = 2,
+    metric_tolerance: float = 1.0e-12,
+    outlier_threshold: float | None = None,
+    outlier_window_size: int = 3,
+) -> pt.Tensor:
+    """Compute the Jacobian of a vector field on a curvilinear grid.
+
+    A single vector-field snapshot has shape ``(nx, ny, n_components)``; a
+    sequence has shape ``(nx, ny, n_snapshots, n_components)``. The returned
+    Jacobian has shape ``(..., n_components, n_dimensions)``, where rows index
+    field components and columns index ambient Cartesian derivative
+    directions. ``n_dimensions`` is two for ``x, y`` grids and three when
+    ``z`` is supplied.
+
+    Smoothing and spatial outlier replacement follow
+    :func:`curvilinear_gradient` and are applied independently to every
+    snapshot and field component.
+
+    :param field: vector field or sequence of vector fields
+    :type field: pt.Tensor
+    :param x: first Cartesian coordinate on the structured grid
+    :type x: pt.Tensor
+    :param y: second Cartesian coordinate on the structured grid
+    :type y: pt.Tensor
+    :param z: optional third Cartesian coordinate on an embedded surface
+    :type z: pt.Tensor, optional
+    :param smoothing_sigma: Gaussian width in grid-index units
+    :type smoothing_sigma: float or Tuple[float, float], optional
+    :param smoothing_mode: Gaussian boundary mode
+    :type smoothing_mode: str, optional
+    :param smoothing_truncate: Gaussian kernel radius in multiples of sigma
+    :type smoothing_truncate: float, optional
+    :param edge_order: finite-difference boundary accuracy, either 1 or 2
+    :type edge_order: int, optional
+    :param metric_tolerance: relative threshold for singular metric tensors
+    :type metric_tolerance: float, optional
+    :param outlier_threshold: local robust-score threshold; disabled if ``None``
+    :type outlier_threshold: float, optional
+    :param outlier_window_size: odd spatial window size for outlier replacement
+    :type outlier_window_size: int, optional
+    :return: vector-field Jacobian
+    :rtype: pt.Tensor
+    """
+    if field.ndim not in (3, 4):
+        raise ValueError(
+            "field must have shape (nx, ny, n_components) or "
+            "(nx, ny, n_snapshots, n_components)"
+        )
+    if field.shape[-1] < 1:
+        raise ValueError("field must contain at least one component")
+    is_single_snapshot = field.ndim == 3
+    sequence = field.unsqueeze(2) if is_single_snapshot else field
+    nx, ny, n_snapshots, n_components = sequence.shape
+    flattened = sequence.reshape(nx, ny, n_snapshots * n_components)
+    gradient = curvilinear_gradient(
+        flattened,
+        x,
+        y,
+        z,
+        smoothing_sigma=smoothing_sigma,
+        smoothing_mode=smoothing_mode,
+        smoothing_truncate=smoothing_truncate,
+        edge_order=edge_order,
+        metric_tolerance=metric_tolerance,
+        outlier_threshold=outlier_threshold,
+        outlier_window_size=outlier_window_size,
+    )
+    n_dimensions = 2 if z is None else 3
+    jacobian = gradient.reshape(nx, ny, n_snapshots, n_components, n_dimensions)
+    return jacobian[:, :, 0] if is_single_snapshot else jacobian
+
+
+def curvilinear_hessian(
+    field: pt.Tensor,
+    x: pt.Tensor,
+    y: pt.Tensor,
+    z: pt.Tensor | None = None,
+    first_smoothing_sigma: float | Tuple[float, float] | None = None,
+    second_smoothing_sigma: float | Tuple[float, float] | None = None,
+    smoothing_mode: str = "reflect",
+    smoothing_truncate: float = 3.0,
+    edge_order: int = 2,
+    metric_tolerance: float = 1.0e-12,
+    first_outlier_threshold: float | None = None,
+    second_outlier_threshold: float | None = None,
+    outlier_window_size: int = 3,
+    symmetrize: bool = True,
+) -> pt.Tensor:
+    """Compute the Hessian of a scalar field on a curvilinear grid.
+
+    A field has shape ``(nx, ny)`` or ``(nx, ny, n_snapshots)``. The result
+    appends two ambient Cartesian derivative axes and therefore has shape
+    ``(..., n_dimensions, n_dimensions)``. For an embedded ``x, y, z``
+    surface, the ambient derivative of the surface gradient is projected onto
+    the local tangent plane, yielding the covariant surface Hessian in ambient
+    Cartesian coordinates.
+
+    The first and second differentiations may use different Gaussian widths
+    and outlier thresholds. Both smoothing widths follow the grid-index-unit
+    guidance in :func:`curvilinear_gradient`. Smoothing is disabled at either
+    stage by leaving its parameter as ``None``. In many applications it is
+    preferable to smooth only before the first derivative, for example
+    ``first_smoothing_sigma=1.0`` and ``second_smoothing_sigma=None``, to avoid
+    broadening the field twice.
+
+    :param field: scalar field or sequence of scalar fields
+    :type field: pt.Tensor
+    :param x: first Cartesian coordinate on the structured grid
+    :type x: pt.Tensor
+    :param y: second Cartesian coordinate on the structured grid
+    :type y: pt.Tensor
+    :param z: optional third Cartesian coordinate on an embedded surface
+    :type z: pt.Tensor, optional
+    :param first_smoothing_sigma: smoothing before the first differentiation
+    :type first_smoothing_sigma: float or Tuple[float, float], optional
+    :param second_smoothing_sigma: smoothing before the second differentiation
+    :type second_smoothing_sigma: float or Tuple[float, float], optional
+    :param smoothing_mode: Gaussian boundary mode used at both stages
+    :type smoothing_mode: str, optional
+    :param smoothing_truncate: Gaussian truncation used at both stages
+    :type smoothing_truncate: float, optional
+    :param edge_order: finite-difference boundary accuracy, either 1 or 2
+    :type edge_order: int, optional
+    :param metric_tolerance: relative threshold for singular metric tensors
+    :type metric_tolerance: float, optional
+    :param first_outlier_threshold: outlier threshold after the first derivative
+    :type first_outlier_threshold: float, optional
+    :param second_outlier_threshold: outlier threshold after the second derivative
+    :type second_outlier_threshold: float, optional
+    :param outlier_window_size: spatial outlier window used at both stages
+    :type outlier_window_size: int, optional
+    :param symmetrize: average the two mixed derivatives, defaults to ``True``
+    :type symmetrize: bool, optional
+    :return: scalar-field Hessian
+    :rtype: pt.Tensor
+
+    **Examples**
+
+    .. code-block:: python
+
+        hessian = curvilinear_hessian(
+            field,
+            x,
+            y,
+            z,
+            first_smoothing_sigma=1.0,
+            second_smoothing_sigma=None,
+            first_outlier_threshold=3.5,
+            second_outlier_threshold=4.0,
+        )
+    """
+    first_gradient = curvilinear_gradient(
+        field,
+        x,
+        y,
+        z,
+        smoothing_sigma=first_smoothing_sigma,
+        smoothing_mode=smoothing_mode,
+        smoothing_truncate=smoothing_truncate,
+        edge_order=edge_order,
+        metric_tolerance=metric_tolerance,
+        outlier_threshold=first_outlier_threshold,
+        outlier_window_size=outlier_window_size,
+    )
+    single_snapshot = field.ndim == 2
+    n_dimensions = 2 if z is None else 3
+    second_derivatives = []
+    for component in range(n_dimensions):
+        component_gradient = curvilinear_gradient(
+            first_gradient[..., component],
+            x,
+            y,
+            z,
+            smoothing_sigma=second_smoothing_sigma,
+            smoothing_mode=smoothing_mode,
+            smoothing_truncate=smoothing_truncate,
+            edge_order=edge_order,
+            metric_tolerance=metric_tolerance,
+            outlier_threshold=second_outlier_threshold,
+            outlier_window_size=outlier_window_size,
+        )
+        second_derivatives.append(component_gradient)
+    hessian = pt.stack(second_derivatives, dim=-2)
+
+    if z is not None:
+        projection = _surface_tangent_projection(x, y, z, edge_order, metric_tolerance)
+        if not single_snapshot:
+            projection = projection.unsqueeze(2)
+        hessian = projection @ hessian @ projection
+    if symmetrize:
+        hessian = 0.5 * (hessian + hessian.transpose(-2, -1))
+    return hessian
+
+
+def _surface_tangent_projection(
+    x: pt.Tensor,
+    y: pt.Tensor,
+    z: pt.Tensor,
+    edge_order: int,
+    metric_tolerance: float,
+) -> pt.Tensor:
+    effective_edge_order = edge_order if min(x.shape) >= edge_order + 1 else 1
+    position = pt.stack((x, y, z), dim=-1)
+    dr_di, dr_dj = pt.gradient(position, dim=(0, 1), edge_order=effective_edge_order)
+    normal = pt.linalg.cross(dr_di, dr_dj, dim=-1)
+    norm_squared = pt.sum(normal * normal, dim=-1)
+    metric_scale = pt.sum(dr_di * dr_di, dim=-1) * pt.sum(dr_dj * dr_dj, dim=-1)
+    invalid = norm_squared <= metric_tolerance * metric_scale
+    safe_norm = pt.sqrt(pt.where(invalid, pt.ones_like(norm_squared), norm_squared))
+    unit_normal = normal / safe_norm.unsqueeze(-1)
+    identity = pt.eye(3, dtype=x.dtype, device=x.device)
+    projection = identity - unit_normal.unsqueeze(-1) * unit_normal.unsqueeze(-2)
+    return projection.masked_fill(invalid[..., None, None], float("nan"))
+
+
 def _gaussian_smooth_2d(
     field: pt.Tensor,
     sigma: float | Tuple[float, float] | None,

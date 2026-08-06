@@ -27,6 +27,8 @@ _EXPORTS: Dict[str, Tuple[str, str]] = {
     "SCUBEDataloader": ("s_cube_dataloader", "SCUBEDataloader"),
     "ImageDataloader": ("image_dataloader", "ImageDataloader"),
     "curvilinear_gradient": ("differential_tools", "curvilinear_gradient"),
+    "curvilinear_hessian": ("differential_tools", "curvilinear_hessian"),
+    "curvilinear_jacobian": ("differential_tools", "curvilinear_jacobian"),
     "element_areas_to_node_weights": (
         "geometry_tools",
         "element_areas_to_node_weights",
