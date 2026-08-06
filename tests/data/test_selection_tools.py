@@ -3,7 +3,7 @@ import pytest
 import torch as pt
 
 # flowtorch packages
-from flowtorch.data import mask_box, mask_sphere
+from flowtorch.data import mask_box, mask_polygon, mask_sphere
 
 
 def test_mask_box_1d():
@@ -48,3 +48,31 @@ def test_mask_sphere_3d():
     mask = mask_sphere(vertices, [0, 0, 0], 1.0)
     true_mask = pt.tensor([True, True, True, False])
     assert pt.all(mask == true_mask)
+
+
+def test_mask_polygon():
+    vertices = pt.tensor([[0.5, 0.5], [3.5, 0.5], [3.5, 3.5], [0.5, 3.5]])
+    mask = mask_polygon((5, 5), vertices)
+
+    assert mask.dtype == pt.bool
+    assert mask.shape == (5, 5)
+    assert mask[2, 2]
+    assert not mask[0, 0]
+
+
+def test_mask_polygon_with_too_few_vertices_is_empty():
+    mask = mask_polygon((2, 3), pt.tensor([[0.0, 0.0], [1.0, 1.0]]))
+
+    assert not mask.any()
+
+
+@pytest.mark.parametrize(
+    "shape, vertices",
+    [
+        ((2, 3, 4), pt.zeros((3, 2))),
+        ((2, 3), pt.zeros((3, 3))),
+    ],
+)
+def test_mask_polygon_rejects_invalid_inputs(shape, vertices):
+    with pytest.raises(ValueError):
+        mask_polygon(shape, vertices)
