@@ -4,6 +4,7 @@ from importlib import import_module
 from typing import Dict, Tuple
 
 _EXPORTS: Dict[str, Tuple[str, str]] = {
+    "animate_scalar_field": ("animations", "animate_scalar_field"),
     "line_integral_convolution": ("lic", "line_integral_convolution"),
 }
 
