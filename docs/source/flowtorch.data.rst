@@ -98,6 +98,14 @@ flowtorch.data.geometry\_tools
    :undoc-members:
    :show-inheritance:
 
+flowtorch.data.differential\_tools
+----------------------------------
+
+.. automodule:: flowtorch.data.differential_tools
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 flowtorch.data.utils
 --------------------
 

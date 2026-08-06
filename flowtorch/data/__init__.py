@@ -26,6 +26,7 @@ _EXPORTS: Dict[str, Tuple[str, str]] = {
     "SequenceTensorDataset": ("sequence_dataset", "SequenceTensorDataset"),
     "SCUBEDataloader": ("s_cube_dataloader", "SCUBEDataloader"),
     "ImageDataloader": ("image_dataloader", "ImageDataloader"),
+    "curvilinear_gradient": ("differential_tools", "curvilinear_gradient"),
     "element_areas_to_node_weights": (
         "geometry_tools",
         "element_areas_to_node_weights",
@@ -39,6 +40,7 @@ _EXPORTS: Dict[str, Tuple[str, str]] = {
     "mask_psp_interactive": ("selection_tools", "mask_psp_interactive"),
     "mask_sphere": ("selection_tools", "mask_sphere"),
     "iqr_outlier_replacement": ("outlier_tools", "iqr_outlier_replacement"),
+    "replace_spatial_outliers": ("outlier_tools", "replace_spatial_outliers"),
 }
 
 __all__ = list(_EXPORTS)

@@ -3,7 +3,7 @@ import pytest
 import torch as pt
 
 # flowtorch packages
-from flowtorch.data import iqr_outlier_replacement
+from flowtorch.data import iqr_outlier_replacement, replace_spatial_outliers
 
 
 def test_irq_outlier_replacement():
@@ -26,3 +26,15 @@ def test_irq_outlier_replacement():
     data_clean = iqr_outlier_replacement(data)
     assert len(data_clean.shape) == 1
     assert data_clean[3] == 2.0
+
+
+def test_replace_spatial_outliers():
+    data = pt.ones((5, 5, 2))
+    data[2, 2, 0] = 100.0
+    data[1, 1, 1] = float("nan")
+
+    clean = replace_spatial_outliers(data)
+
+    assert clean[2, 2, 0] == 1.0
+    assert pt.isnan(clean[1, 1, 1])
+    assert pt.equal(clean[..., 1].isnan(), data[..., 1].isnan())
