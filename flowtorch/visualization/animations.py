@@ -1,8 +1,8 @@
 """Matplotlib animations for scalar and vector field sequences."""
 
 # standard library packages
-from math import isfinite
-from typing import Any, Dict, Tuple
+from math import isfinite, sqrt
+from typing import Any, Dict, Literal, Tuple
 
 # third party packages
 import matplotlib.pyplot as plt
@@ -24,7 +24,10 @@ def animate_scalar_field(
     vmin: float | None = None,
     vmax: float | None = None,
     background: str = "white",
-    figsize: Tuple[float, float] = (6.0, 4.0),
+    figsize: Tuple[float, float] | None = None,
+    colorbar_orientation: Literal["auto", "vertical", "horizontal"] = "auto",
+    layout: Literal["constrained", "compressed"] | None = "constrained",
+    padding: float | None = None,
     show_axes: bool = False,
     aspect: str | float = "equal",
     quiver_step: int = 10,
@@ -79,8 +82,20 @@ def animate_scalar_field(
     :type vmax: float, optional
     :param background: figure and axes background color
     :type background: str, optional
-    :param figsize: figure size in inches
+    :param figsize: figure size in inches; inferred from the image shape or
+        coordinate extents when omitted
     :type figsize: Tuple[float, float], optional
+    :param colorbar_orientation: colorbar orientation; ``"auto"`` places a
+        horizontal colorbar below wide data and a vertical one beside other
+        data, defaults to ``"auto"``
+    :type colorbar_orientation: {"auto", "vertical", "horizontal"}, optional
+    :param layout: Matplotlib figure layout, defaults to ``"constrained"``;
+        use ``"compressed"`` for a still tighter fixed-aspect layout or
+        ``None`` to disable automatic layout
+    :type layout: {"constrained", "compressed"}, optional
+    :param padding: outer layout padding in inches; defaults to ``0.1`` with
+        hidden axes and ``0.4`` with visible axes
+    :type padding: float, optional
     :param show_axes: show axes decorations, defaults to ``False``
     :type show_axes: bool, optional
     :param aspect: Matplotlib axes aspect, defaults to ``"equal"``
@@ -134,6 +149,9 @@ def animate_scalar_field(
         vmin,
         vmax,
         figsize,
+        colorbar_orientation,
+        layout,
+        padding,
         quiver_step,
         quiver_scale,
     )
@@ -159,7 +177,20 @@ def animate_scalar_field(
             quiver_scale,
         )
 
-    figure, axes = plt.subplots(figsize=figsize)
+    data_ratio = _data_aspect_ratio(field.shape[:2], coordinates)
+    orientation = _colorbar_orientation(data_ratio, colorbar_orientation)
+    colorbar_options["orientation"] = orientation
+    colorbar_options.setdefault("pad", _default_colorbar_pad(orientation, show_axes))
+    selected_figsize = (
+        _automatic_figure_size(data_ratio, colorbar, orientation)
+        if figsize is None
+        else figsize
+    )
+    figure, axes = plt.subplots(figsize=selected_figsize, layout=layout)
+    layout_engine = figure.get_layout_engine()
+    if layout_engine is not None and hasattr(layout_engine, "set"):
+        outer_padding = (0.4 if show_axes else 0.1) if padding is None else padding
+        layout_engine.set(w_pad=outer_padding, h_pad=outer_padding)
     figure.patch.set_facecolor(background)
     axes.set_facecolor(background)
     if coordinates is None:
@@ -191,7 +222,7 @@ def animate_scalar_field(
     if not show_axes:
         axes.set_axis_off()
         axes.margins(0.0)
-        if not colorbar:
+        if not colorbar and layout is None:
             figure.subplots_adjust(left=0.0, right=1.0, bottom=0.0, top=1.0)
 
     def update(frame: int):
@@ -273,6 +304,49 @@ def _arrow_coordinates(
     return index_i[::step, ::step], index_j[::step, ::step]
 
 
+def _data_aspect_ratio(
+    shape: pt.Size,
+    coordinates: tuple[np.ndarray, np.ndarray] | None,
+) -> float:
+    if coordinates is None:
+        return float(shape[0] / shape[1])
+    x_extent = float(np.ptp(coordinates[0]))
+    y_extent = float(np.ptp(coordinates[1]))
+    if x_extent <= 0.0 or y_extent <= 0.0:
+        return 1.5
+    return x_extent / y_extent
+
+
+def _colorbar_orientation(
+    data_ratio: float,
+    orientation: Literal["auto", "vertical", "horizontal"],
+) -> Literal["vertical", "horizontal"]:
+    if orientation == "auto":
+        return "horizontal" if data_ratio >= 1.25 else "vertical"
+    return orientation
+
+
+def _automatic_figure_size(
+    data_ratio: float,
+    colorbar: bool,
+    orientation: str,
+) -> tuple[float, float]:
+    ratio = min(max(data_ratio, 1.0 / 3.0), 3.0)
+    width = sqrt(24.0 * ratio)
+    height = sqrt(24.0 / ratio)
+    if colorbar and orientation == "vertical":
+        width += 0.8
+    elif colorbar and orientation == "horizontal":
+        height += 0.6
+    return width, height
+
+
+def _default_colorbar_pad(orientation: str, show_axes: bool) -> float:
+    if orientation == "horizontal":
+        return 0.08 if show_axes else 0.04
+    return 0.03 if show_axes else 0.025
+
+
 def _validate_inputs(
     field: pt.Tensor,
     x: pt.Tensor | None,
@@ -282,7 +356,10 @@ def _validate_inputs(
     color_percentile: float,
     vmin: float | None,
     vmax: float | None,
-    figsize: Tuple[float, float],
+    figsize: Tuple[float, float] | None,
+    colorbar_orientation: str,
+    layout: str | None,
+    padding: float | None,
     quiver_step: int,
     quiver_scale: float,
 ) -> None:
@@ -313,8 +390,16 @@ def _validate_inputs(
         raise ValueError("vmin must be finite")
     if vmax is not None and not isfinite(vmax):
         raise ValueError("vmax must be finite")
-    if len(figsize) != 2 or min(figsize) <= 0.0:
+    if figsize is not None and (len(figsize) != 2 or min(figsize) <= 0.0):
         raise ValueError("figsize must contain two positive values")
+    if colorbar_orientation not in {"auto", "vertical", "horizontal"}:
+        raise ValueError(
+            "colorbar_orientation must be 'auto', 'vertical', or 'horizontal'"
+        )
+    if layout not in {"constrained", "compressed", None}:
+        raise ValueError("layout must be 'constrained', 'compressed', or None")
+    if padding is not None and (not isfinite(padding) or padding < 0.0):
+        raise ValueError("padding must be finite and non-negative")
     if not isinstance(quiver_step, int) or quiver_step < 1:
         raise ValueError("quiver_step must be a positive integer")
     if not isfinite(quiver_scale) or quiver_scale < 0.0:
