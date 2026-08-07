@@ -112,6 +112,71 @@ def test_animation_optionally_adds_colorbar_and_background():
     _finish(animation)
 
 
+def test_wide_image_uses_horizontal_colorbar_and_automatic_size():
+    field = pt.ones((8, 2, 1))
+
+    animation = animate_scalar_field(field)
+    animation._fig.canvas.draw()
+    width, height = animation._fig.get_size_inches()
+    colorbar_axes = animation._fig.axes[1]
+
+    assert width == pytest.approx(np.sqrt(72.0))
+    assert height == pytest.approx(np.sqrt(8.0) + 0.6)
+    assert colorbar_axes.get_position().width > colorbar_axes.get_position().height
+    _finish(animation)
+
+
+def test_tall_image_uses_vertical_colorbar():
+    field = pt.ones((2, 8, 1))
+
+    animation = animate_scalar_field(field)
+    animation._fig.canvas.draw()
+    colorbar_axes = animation._fig.axes[1]
+
+    assert colorbar_axes.get_position().height > colorbar_axes.get_position().width
+    _finish(animation)
+
+
+def test_curvilinear_size_uses_coordinate_extents():
+    x, y, field = _field()
+    x = 100.0 * x
+
+    animation = animate_scalar_field(field, x, y)
+    width, height = animation._fig.get_size_inches()
+
+    assert width == pytest.approx(np.sqrt(72.0))
+    assert height == pytest.approx(np.sqrt(8.0) + 0.6)
+    _finish(animation)
+
+
+def test_explicit_figure_size_and_colorbar_orientation_override_automatic_values():
+    field = pt.ones((8, 2, 1))
+
+    animation = animate_scalar_field(
+        field,
+        figsize=(5.0, 7.0),
+        colorbar_orientation="vertical",
+    )
+    animation._fig.canvas.draw()
+    colorbar_axes = animation._fig.axes[1]
+
+    assert animation._fig.get_size_inches() == pytest.approx((5.0, 7.0))
+    assert colorbar_axes.get_position().height > colorbar_axes.get_position().width
+    _finish(animation)
+
+
+def test_layout_padding_depends_on_axes_visibility():
+    _, _, field = _field()
+
+    compact = animate_scalar_field(field, colorbar=False)
+    labeled = animate_scalar_field(field, colorbar=False, show_axes=True)
+
+    assert compact._fig.get_layout_engine().get()["w_pad"] == pytest.approx(0.1)
+    assert labeled._fig.get_layout_engine().get()["w_pad"] == pytest.approx(0.4)
+    _finish(compact)
+    _finish(labeled)
+
+
 def test_animation_does_not_mutate_keyword_dictionaries():
     _, _, field = _field()
     scalar_kwargs = {"interpolation": "nearest"}
