@@ -82,6 +82,14 @@ flowtorch.data.selection\_tools
    :undoc-members:
    :show-inheritance:
 
+flowtorch.data.masking\_tools
+-----------------------------
+
+.. automodule:: flowtorch.data.masking_tools
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 flowtorch.data.interpolation\_tools
 -----------------------------------
 

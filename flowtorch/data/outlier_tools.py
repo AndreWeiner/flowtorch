@@ -12,6 +12,28 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 
+def _spatial_median_inward(data: pt.Tensor, window_size: tuple[int, int]) -> pt.Tensor:
+    """Return spatial medians using the nearest complete boundary window."""
+    if data.ndim != 3:
+        raise ValueError("data must have shape (n_fields, nx, ny)")
+    window_x, window_y = window_size
+    _, nx, ny = data.shape
+    if window_x > nx or window_y > ny:
+        raise ValueError("window dimensions cannot exceed the spatial dimensions")
+
+    neighborhoods = F.unfold(data.unsqueeze(1), kernel_size=(window_x, window_y))
+    median = pt.nanmedian(neighborhoods, dim=1).values
+    valid_x = nx - window_x + 1
+    valid_y = ny - window_y + 1
+    median = median.reshape(-1, 1, valid_x, valid_y)
+    radius_x, radius_y = window_x // 2, window_y // 2
+    return F.pad(
+        median,
+        (radius_y, radius_y, radius_x, radius_x),
+        mode="replicate",
+    )[:, 0]
+
+
 def iqr_outlier_replacement(
     data: pt.Tensor, k: float = 1.5, nb: int = 3, replace: Callable = pt.median
 ) -> pt.Tensor:
