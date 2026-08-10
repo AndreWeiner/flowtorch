@@ -24,3 +24,11 @@ flowtorch.visualization.spectra
    :members:
    :undoc-members:
    :show-inheritance:
+
+flowtorch.visualization.modes
+-----------------------------
+
+.. automodule:: flowtorch.visualization.modes
+   :members:
+   :undoc-members:
+   :show-inheritance:
