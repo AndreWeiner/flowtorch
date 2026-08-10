@@ -33,6 +33,14 @@ flowtorch.visualization.coefficients
    :undoc-members:
    :show-inheritance:
 
+flowtorch.visualization.residuals
+---------------------------------
+
+.. automodule:: flowtorch.visualization.residuals
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 flowtorch.visualization.modes
 -----------------------------
 
