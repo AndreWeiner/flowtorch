@@ -10,7 +10,10 @@ from matplotlib.animation import FuncAnimation
 from matplotlib.collections import QuadMesh
 from matplotlib.image import AxesImage
 
-from flowtorch.visualization import animate_scalar_field
+from flowtorch.visualization import (
+    animate_line_integral_convolution,
+    animate_scalar_field,
+)
 
 
 def _field():
@@ -21,6 +24,11 @@ def _field():
 def _finish(animation):
     animation._draw_was_started = True
     plt.close(animation._fig)
+
+
+def _vector_sequence():
+    x, y, field = _field()
+    return x, y, pt.stack((pt.ones_like(field), 0.2 * field), dim=-1)
 
 
 def test_animate_scalar_field_uses_image_without_coordinates():
@@ -204,3 +212,83 @@ def test_animation_rejects_inconsistent_color_limits():
 
     with pytest.raises(ValueError, match="color limits are inconsistent"):
         animate_scalar_field(field, vmin=100.0, colorbar=False)
+
+
+def test_lic_animation_ignores_colorbar_without_magnitude():
+    x, y, vector = _vector_sequence()
+
+    animation = animate_line_integral_convolution(
+        vector, x, y, steps=2, seed=0, colorbar=True
+    )
+
+    assert len(animation._fig.axes) == 1
+    assert len(animation._fig.axes[0].collections) == 1
+    assert animation._fig.axes[0].collections[0].get_alpha() == pytest.approx(1.0)
+    _finish(animation)
+
+
+def test_lic_animation_overlays_magnitude_and_adds_its_colorbar():
+    x, y, vector = _vector_sequence()
+
+    animation = animate_line_integral_convolution(
+        vector,
+        x,
+        y,
+        steps=2,
+        seed=0,
+        show_magnitude=True,
+        colorbar_kwargs={"label": "speed"},
+    )
+    artists = animation._func(1)
+
+    assert len(animation._fig.axes) == 2
+    assert len(artists) == 2
+    assert artists[1].get_alpha() == pytest.approx(0.45)
+    assert animation._fig.axes[1].get_ylabel() == "speed"
+    expected = pt.linalg.vector_norm(vector[:, :, 1], dim=-1).numpy()
+    assert np.allclose(artists[0].get_array(), expected)
+    _finish(animation)
+
+
+def test_lic_animation_does_not_mutate_keyword_dictionaries():
+    x, y, vector = _vector_sequence()
+    scalar_kwargs = {"edgecolors": "none"}
+    lic_kwargs = {"alpha": 0.6}
+    colorbar_kwargs = {"label": "magnitude"}
+
+    animation = animate_line_integral_convolution(
+        vector,
+        x,
+        y,
+        steps=2,
+        seed=0,
+        show_magnitude=True,
+        scalar_kwargs=scalar_kwargs,
+        lic_kwargs=lic_kwargs,
+        colorbar_kwargs=colorbar_kwargs,
+    )
+
+    assert scalar_kwargs == {"edgecolors": "none"}
+    assert lic_kwargs == {"alpha": 0.6}
+    assert colorbar_kwargs == {"label": "magnitude"}
+    _finish(animation)
+
+
+def test_lic_animation_updates_gouraud_meshes_without_flattening():
+    x, y, vector = _vector_sequence()
+    animation = animate_line_integral_convolution(
+        vector,
+        x,
+        y,
+        steps=2,
+        seed=0,
+        show_magnitude=True,
+        scalar_kwargs={"shading": "gouraud"},
+        lic_kwargs={"shading": "gouraud"},
+    )
+
+    artists = animation._func(1)
+
+    assert artists[0].get_array().shape == x.shape
+    assert artists[1].get_array().shape == x.shape
+    _finish(animation)
