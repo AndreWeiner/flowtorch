@@ -385,6 +385,57 @@ class AMSPOD(object):
                 ev[1:] *= 2
         return ev
 
+    def show_spectrum(
+        self,
+        n_show: int = 3,
+        show_sum: bool = True,
+        reference_timescale: Union[float, None] = None,
+        energy_density: bool = False,
+        normalize_energy: bool = False,
+        ax: Any = None,
+        **kwargs: Any,
+    ):
+        r"""Plot the SPOD eigenvalue spectrum and its half-bandwidth.
+
+        This convenience method passes :attr:`frequency`, :attr:`eigvals`, and
+        :attr:`half_bandwidth` to
+        :func:`flowtorch.visualization.plot_spod_spectrum`. The returned figure
+        and axes remain fully modifiable.
+
+        :param n_show: maximum number of leading eigenvalues, defaults to 3
+        :type n_show: int, optional
+        :param show_sum: plot the sum over all eigenvalues, defaults to ``True``
+        :type show_sum: bool, optional
+        :param reference_timescale: reference time used to plot against
+            Strouhal number
+        :type reference_timescale: float, optional
+        :param energy_density: convert bin energy to density in the displayed
+            horizontal coordinate, defaults to ``False``
+        :type energy_density: bool, optional
+        :param normalize_energy: divide by the total resolved spectral energy,
+            defaults to ``False``
+        :type normalize_energy: bool, optional
+        :param ax: existing Matplotlib axes
+        :type ax: matplotlib.axes.Axes, optional
+        :param kwargs: additional arguments for ``plot_spod_spectrum``
+        :return: modifiable Matplotlib figure and axes
+        :rtype: Tuple[matplotlib.figure.Figure, matplotlib.axes.Axes]
+        """
+        from flowtorch.visualization import plot_spod_spectrum
+
+        return plot_spod_spectrum(
+            self.frequency,
+            self.eigvals,
+            n_show=n_show,
+            show_sum=show_sum,
+            reference_timescale=reference_timescale,
+            energy_density=energy_density,
+            normalize_energy=normalize_energy,
+            half_bandwidth=self.half_bandwidth,
+            ax=ax,
+            **kwargs,
+        )
+
     @property
     def modes(self) -> pt.Tensor:
         """Leading eigenvectors (modes) of the cross spectral density realizations.
