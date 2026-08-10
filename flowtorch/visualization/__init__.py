@@ -10,6 +10,8 @@ _EXPORTS: Dict[str, Tuple[str, str]] = {
     ),
     "animate_scalar_field": ("animations", "animate_scalar_field"),
     "line_integral_convolution": ("lic", "line_integral_convolution"),
+    "plot_spod_mode_2d": ("modes", "plot_spod_mode_2d"),
+    "plot_spod_modes_2d": ("modes", "plot_spod_modes_2d"),
     "plot_spod_spectra": ("spectra", "plot_spod_spectra"),
     "plot_spod_spectrum": ("spectra", "plot_spod_spectrum"),
 }
