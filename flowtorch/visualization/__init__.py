@@ -4,6 +4,10 @@ from importlib import import_module
 from typing import Dict, Tuple
 
 _EXPORTS: Dict[str, Tuple[str, str]] = {
+    "plot_spod_time_coefficients": (
+        "coefficients",
+        "plot_spod_time_coefficients",
+    ),
     "animate_line_integral_convolution": (
         "animations",
         "animate_line_integral_convolution",
