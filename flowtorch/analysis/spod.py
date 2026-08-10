@@ -436,6 +436,48 @@ class AMSPOD(object):
             **kwargs,
         )
 
+    def show_time_coefficients(
+        self,
+        n_modes: int = 1,
+        reference_timescale: Union[float, None] = None,
+        ax: Any = None,
+        **kwargs: Any,
+    ):
+        r"""Plot the L2 amplitude of the SPOD temporal coefficients.
+
+        Temporal coefficients are computed by oblique projection before they
+        are passed with :attr:`frequency` and the sampling times to
+        :func:`flowtorch.visualization.plot_spod_time_coefficients`. Computing
+        the coefficients can be substantially more expensive than plotting
+        the eigenvalue spectrum.
+
+        :param n_modes: number of leading modes included per frequency,
+            defaults to 1
+        :type n_modes: int, optional
+        :param reference_timescale: common scale for nondimensional time and
+            frequency
+        :type reference_timescale: float, optional
+        :param ax: existing Matplotlib axes
+        :type ax: matplotlib.axes.Axes, optional
+        :param kwargs: additional arguments for ``plot_spod_time_coefficients``
+        :return: modifiable Matplotlib figure and axes
+        :rtype: Tuple[matplotlib.figure.Figure, matplotlib.axes.Axes]
+        """
+        from flowtorch.visualization import plot_spod_time_coefficients
+
+        coefficients = self.temporal_coefficients(n_modes=n_modes)
+        time = pt.arange(self._nt, dtype=self._dm.real.dtype, device=self._device)
+        time *= self._dt
+        return plot_spod_time_coefficients(
+            time,
+            self.frequency,
+            coefficients,
+            n_modes=coefficients.shape[1],
+            reference_timescale=reference_timescale,
+            ax=ax,
+            **kwargs,
+        )
+
     @property
     def modes(self) -> pt.Tensor:
         """Leading eigenvectors (modes) of the cross spectral density realizations.

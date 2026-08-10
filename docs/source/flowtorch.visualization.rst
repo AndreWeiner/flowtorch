@@ -25,6 +25,14 @@ flowtorch.visualization.spectra
    :undoc-members:
    :show-inheritance:
 
+flowtorch.visualization.coefficients
+------------------------------------
+
+.. automodule:: flowtorch.visualization.coefficients
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 flowtorch.visualization.modes
 -----------------------------
 
