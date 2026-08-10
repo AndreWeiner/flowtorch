@@ -36,6 +36,8 @@ _EXPORTS: Dict[str, Tuple[str, str]] = {
     "grid_element_areas": ("geometry_tools", "grid_element_areas"),
     "map_points_to_grid_2d": ("interpolation_tools", "map_points_to_grid_2d"),
     "replace_masked_values": ("interpolation_tools", "replace_masked_values"),
+    "create_image_mask": ("masking_tools", "create_image_mask"),
+    "ImageMaskDiagnostics": ("masking_tools", "ImageMaskDiagnostics"),
     "mask_box": ("selection_tools", "mask_box"),
     "mask_image_interactive": ("selection_tools", "mask_image_interactive"),
     "mask_polygon": ("selection_tools", "mask_polygon"),
