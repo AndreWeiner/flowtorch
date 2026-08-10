@@ -8,6 +8,8 @@ _EXPORTS: Dict[str, Tuple[str, str]] = {
         "coefficients",
         "plot_spod_time_coefficients",
     ),
+    "plot_adaptive_residual": ("residuals", "plot_adaptive_residual"),
+    "plot_adaptive_residuals": ("residuals", "plot_adaptive_residuals"),
     "animate_line_integral_convolution": (
         "animations",
         "animate_line_integral_convolution",

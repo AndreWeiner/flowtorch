@@ -522,6 +522,42 @@ class AMSPOD(object):
             logger.warning("residuals are only available for adaptive taper selection")
             return None
 
+    def show_residual(
+        self,
+        reference_timescale: Union[float, None] = None,
+        ax: Any = None,
+        **kwargs: Any,
+    ):
+        r"""Plot the adaptive leading-mode convergence residual.
+
+        For AMSPOD, ``r`` is the absolute difference between one and the
+        leading-mode similarity at consecutive taper counts. Residuals are
+        available only when adaptive taper selection was enabled.
+
+        :param reference_timescale: reference time used to plot Strouhal number
+        :type reference_timescale: float, optional
+        :param ax: existing Matplotlib axes
+        :type ax: matplotlib.axes.Axes, optional
+        :param kwargs: additional arguments for ``plot_adaptive_residual``
+        :raises RuntimeError: if adaptive taper selection was disabled
+        :return: modifiable Matplotlib figure and axes
+        :rtype: Tuple[matplotlib.figure.Figure, matplotlib.axes.Axes]
+        """
+        if not self._adaptive:
+            raise RuntimeError("residuals require adaptive taper selection")
+        from flowtorch.visualization import plot_adaptive_residual
+
+        residual = self.residual
+        if residual is None:
+            raise RuntimeError("adaptive residuals are unavailable")
+        return plot_adaptive_residual(
+            self.frequency,
+            residual,
+            reference_timescale=reference_timescale,
+            ax=ax,
+            **kwargs,
+        )
+
     def top_modes(
         self,
         n: int = 10,
