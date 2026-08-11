@@ -1,11 +1,9 @@
-# standard library packages
-from time import sleep
-from pytest import raises
-
 # third party libraries
 import numpy as np
+from pytest import raises
 
 # flowtorch packages
+import flowtorch.rom.utils as utils_module
 from flowtorch.rom.utils import (
     log_time,
     check_int_larger_than,
@@ -13,16 +11,18 @@ from flowtorch.rom.utils import (
 )
 
 
-def test_log_time():
+def test_log_time(monkeypatch):
+    timestamps = iter((10.0, 10.1))
+    monkeypatch.setattr(utils_module, "time", lambda: next(timestamps))
+
     @log_time
-    def wait_seconds(time_to_wait: float):
-        sleep(time_to_wait)
+    def operation():
         return {"test": 0}
 
-    log = wait_seconds(0.1)
+    log = operation()
     assert "execution_time" in log.keys()
     assert "test" in log.keys()
-    assert abs(log["execution_time"] - 0.1) < 0.01
+    assert np.isclose(log["execution_time"], 0.1)
 
 
 def test_check_int_larger_than():

@@ -20,13 +20,20 @@ def test_byte_formatting():
     assert size == 1e7 / 1024**2 and unit == "Mb"
 
 
-def test_check_and_standardize_path():
+def test_check_and_standardize_path(tmp_path):
     with pytest.raises(ValueError):
         _ = check_and_standardize_path("does/not/exist/")
     path = check_and_standardize_path("./")
     assert path == "."
     path = check_and_standardize_path("./flowtorch/__init__.py", folder=False)
-    assert path == "./flowtorch/__init__.py"
+    assert path == "flowtorch/__init__.py"
+
+    file_path = tmp_path / "data.txt"
+    file_path.touch()
+    with pytest.raises(ValueError, match="Directory does not exist"):
+        check_and_standardize_path(str(file_path))
+    with pytest.raises(ValueError, match="File does not exist"):
+        check_and_standardize_path(str(tmp_path), folder=False)
 
 
 def test_check_list_or_str():
