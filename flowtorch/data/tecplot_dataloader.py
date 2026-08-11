@@ -12,6 +12,7 @@ import shutil
 import socket
 import struct
 import subprocess
+import sys
 from threading import Lock, Thread
 from typing import Any, Dict, List, Union
 
@@ -38,6 +39,10 @@ class _PvpythonClient:
     """Manage a persistent pvpython process and its binary response channel."""
 
     def __init__(self, executable: str, worker_path: Path | None = None):
+        if sys.platform == "win32":
+            raise NotImplementedError(
+                "TecplotDataloader is not supported on Windows. Use Linux or macOS."
+            )
         self._lock = Lock()
         self._stderr: deque[str] = deque(maxlen=50)
         self._closed = False
@@ -228,6 +233,8 @@ def _resolve_pvpython(pvpython: Union[str, Path, None]) -> str:
 
 class TecplotDataloader(Dataloader):
     """Dataloader for Tecplot binary files using an isolated pvpython worker.
+
+    This loader is supported on Linux and macOS only.
 
     ParaView and its bundled Python packages remain in a separate process.
     Arrays are transferred through a binary socket protocol without temporary

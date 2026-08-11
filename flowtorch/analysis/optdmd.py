@@ -82,8 +82,8 @@ class OptDMD(pt.nn.Module):
     >>> from flowtorch.analysis import OptDMD
     >>> dm = pt.rand((200, 100))
     >>> dmd = DMD(dm, dt=1.0)
-    >>> dmd.train(stopping_options={'patience' : 80, 'checkpoint' : '/tmp/best_model.pt'})
-    >>> dmd.load_state_dict(pt.load('/tmp/best_model.pt'))
+    >>> dmd.train(stopping_options={'patience' : 80, 'checkpoint' : 'best_model.pt'})
+    >>> dmd.load_state_dict(pt.load('best_model.pt'))
     >>> train_loss = dmd.log['train_loss']
     >>> val_loss = dmd.log['val_loss']
     """

@@ -40,6 +40,10 @@ class _FakeClient:
         self.closed = True
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Tecplot subprocess backend requires POSIX file-descriptor passing",
+)
 def test_binary_subprocess_protocol():
     worker = Path(__file__).with_name("_fake_tecplot_worker.py")
     client = _PvpythonClient(sys.executable, worker_path=worker)
@@ -53,6 +57,12 @@ def test_binary_subprocess_protocol():
             client.request("error")
     finally:
         client.close()
+
+
+def test_binary_subprocess_backend_rejects_windows(monkeypatch):
+    monkeypatch.setattr(tecplot_module.sys, "platform", "win32")
+    with pytest.raises(NotImplementedError, match="not supported on Windows"):
+        _PvpythonClient(sys.executable)
 
 
 def test_from_tau_uses_configured_pvpython_without_paraview(tmp_path, monkeypatch):

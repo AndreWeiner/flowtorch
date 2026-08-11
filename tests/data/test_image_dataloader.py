@@ -1,9 +1,7 @@
 """Unittests for the ImageDataloader class."""
 
 # standard library packages
-from os import makedirs
 from os.path import join
-from shutil import rmtree
 
 # third party packages
 from pytest import raises, fixture
@@ -16,19 +14,20 @@ from flowtorch.data.image_dataloader import ImageDataloader
 
 
 @fixture()
-def create_image_dir(tmp_path: str = "/tmp/image_testing", prefix: str = ""):
+def create_image_dir(tmp_path):
     H, W = 12, 11
+    prefix = ""
     data = {
         "0001": 0,
         "0002": 2**16 // 2,
         "0003": 2**16 - 1,
     }
-    makedirs(tmp_path, exist_ok=True)
+    image_dir = tmp_path / "images"
+    image_dir.mkdir()
     for t, v in data.items():
         img = np.full((H, W), v, dtype=np.uint16)
-        Image.fromarray(img).save(join(tmp_path, f"{prefix}{t}.tif"))
-    yield tmp_path, data, prefix
-    rmtree(tmp_path)
+        Image.fromarray(img).save(image_dir / f"{prefix}{t}.tif")
+    return str(image_dir), data, prefix
 
 
 def test_ImageDataloader(create_image_dir):

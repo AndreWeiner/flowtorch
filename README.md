@@ -138,7 +138,8 @@ echo "export FLOWTORCH_DATASETS=\"$(pwd)/datasets_minimal/\"" >> ~/.bashrc
 
 ## Installing ParaView
 
-ParaView is required only by `TecplotDataloader`, which uses ParaView's
+`TecplotDataloader` is supported on Linux and macOS only. ParaView is required
+only by this loader, which uses ParaView's
 `VisItTecplotBinaryReader` to access binary
 [Tecplot](https://www.tecplot.com/) files. Download and install a ParaView build
 that includes the VisItBridge readers, then locate the `pvpython` executable
