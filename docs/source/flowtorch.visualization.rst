@@ -17,6 +17,14 @@ flowtorch.visualization.animations
    :undoc-members:
    :show-inheritance:
 
+flowtorch.visualization.fields
+------------------------------
+
+.. automodule:: flowtorch.visualization.fields
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 flowtorch.visualization.spectra
 -------------------------------
 
