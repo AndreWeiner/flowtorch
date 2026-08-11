@@ -17,7 +17,7 @@ from vtk.numpy_interface.dataset_adapter import WrapDataObject, UnstructuredGrid
 # flowtorch packages
 from flowtorch import DEFAULT_DTYPE
 from .dataloader import Dataloader
-from .utils import check_and_standardize_path, check_list_or_str
+from .utils import check_list_or_str
 
 
 class VTKDataloader(Dataloader):

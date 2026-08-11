@@ -2,8 +2,8 @@
 
 # standard library packages
 import logging
-from os.path import exists
-from os import sep
+from os import fspath
+from pathlib import Path
 from typing import List, Union
 
 from scipy.spatial import KDTree, ConvexHull
@@ -21,7 +21,7 @@ logging.basicConfig(
 
 
 def check_and_standardize_path(path: str, folder: bool = True):
-    """Check if the path exists and remove trailing slash if present.
+    """Check if a path exists and normalize folder paths.
 
     :param path: path to folder or file
     :type path: str
@@ -31,13 +31,12 @@ def check_and_standardize_path(path: str, folder: bool = True):
     :rtype: str
 
     """
-    if exists(path):
-        if folder and path[-1] == sep:
-            return path[:-1]
-        else:
-            return path
-    else:
-        raise ValueError(f"Could not find {path}")
+    normalized = Path(path)
+    valid = normalized.is_dir() if folder else normalized.is_file()
+    if not valid:
+        path_type = "Directory" if folder else "File"
+        raise ValueError(f"{path_type} does not exist: {path}")
+    return fspath(normalized)
 
 
 def check_list_or_str(arg_value: Union[List[str], str], arg_name: str):
