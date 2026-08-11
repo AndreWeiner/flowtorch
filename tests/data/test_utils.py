@@ -1,3 +1,6 @@
+# standard library packages
+from pathlib import Path
+
 # third party packages
 import pytest
 from torch import rand, cat, zeros
@@ -26,7 +29,7 @@ def test_check_and_standardize_path(tmp_path):
     path = check_and_standardize_path("./")
     assert path == "."
     path = check_and_standardize_path("./flowtorch/__init__.py", folder=False)
-    assert path == "flowtorch/__init__.py"
+    assert Path(path) == Path("flowtorch/__init__.py")
 
     file_path = tmp_path / "data.txt"
     file_path.touch()
