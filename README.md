@@ -16,7 +16,7 @@ The animation shows the shock buffet on a NACA-0012 airfoil at $Re=10^7$, $Ma=0.
 
 ## Why *flowTorch*?
 
-The *flowTorch* project was started to make the analysis and modeling of fluid data **easy** and **accessible** to everyone. The library design intends to strike a balance between **usability** and **flexibility**. Instead of a monolithic, black-box analysis tool, the library offers modular components that allow assembling custom analysis and modeling workflows with ease. *flowTorch* helps to fuse data from a wide range of file formats typical for fluid flow data, for example, to compare experimental and simulation data. The available analysis and modeling tools are rigorously tested and demonstrated on a variety of different fluid flow datasets. Moreover, one can significantly accelerate the entire process of accessing, cleaning, analyzing, and modeling fluid flow data by starting with one of the pipelines available in the *flowTorch* [documentation](https://flowmodelingcontrol.github.io/flowtorch-docs/1.2/index.html).
+The *flowTorch* project was started to make the analysis and modeling of fluid data **easy** and **accessible** to everyone. The library design intends to strike a balance between **usability** and **flexibility**. Instead of a monolithic, black-box analysis tool, the library offers modular components that allow assembling custom analysis and modeling workflows with ease. *flowTorch* helps to fuse data from a wide range of file formats typical for fluid flow data, for example, to compare experimental and simulation data. The available analysis and modeling tools are rigorously tested and demonstrated on a variety of different fluid flow datasets. Moreover, one can significantly accelerate the entire process of accessing, cleaning, analyzing, and modeling fluid flow data by starting with one of the pipelines available in the *flowTorch* [documentation](https://flowtorch.readthedocs.io/en/latest/).
 
 To get a first impression of what working with *flowTorch* looks like, the code snippet below shows part of a pipeline for performing a dynamic mode decomposition (DMD) of a transient *OpenFOAM* simulation.
 
@@ -53,9 +53,10 @@ Currently, the following sub-packages are under active development. Note that so
 
 | package | content |
 | :------ | :-------|
-|flowtorch.data | data loading, domain reduction (masked selection), outlier removal |
+|flowtorch.data | data loading, domain reduction (masked selection), outlier removal/masking |
 | flowtorch.analysis | algorithms for dimensionality reduction and modal analysis (e.g., SVD, DMD, MSSA) |
-| flowtorch.rom | reduced-order modeling (CNM) |
+| flowtorch.rom | reduced-order modeling |
+| flowtorch.visualization | convenience functions for comparative plots and animations |
 
 *flowTorch* uses the [PyTorch](https://github.com/pytorch/pytorch) library as a backend for data structures, data types, and linear algebra operations on CPU and GPU. Some cool features of *flowTorch* include:
 
@@ -327,7 +328,7 @@ journal = {Journal of Open Source Software}
 } 
 ```
 
-For a list of scientific works relying on flowTorch, refer to [this list](references.md).
+For a list of scientific works relying on flowTorch, refer to [Google Scholar](https://scholar.google.de/scholar?oi=bibs&hl=de&cites=3453204270157785607&as_sdt=5).
 
 ## License
 
