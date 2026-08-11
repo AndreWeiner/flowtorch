@@ -1,7 +1,5 @@
 """Unit tests for `flowtorch.analysis.utils` module."""
 
-from os.path import join, isfile
-from os import remove
 from pytest import raises
 import torch as pt
 from flowtorch.analysis.optdmd import OptDMD
@@ -75,20 +73,18 @@ class TestEarlyStopping:
         _ = stopper(2.0)
         assert stopper._counter == 1
 
-    def test_checkpoint(self):
+    def test_checkpoint(self, tmp_path):
         dm = pt.rand((50, 20))
         dmd = OptDMD(dm, 1.0, 5)
-        chp = join("/tmp", "optDMDchp.pt")
-        stopper = EarlyStopping(checkpoint=chp, model=dmd)
+        checkpoint = tmp_path / "optDMDchp.pt"
+        stopper = EarlyStopping(checkpoint=str(checkpoint), model=dmd)
         _ = stopper(1.0)
-        assert isfile(chp)
+        assert checkpoint.is_file()
         eigs_before = dmd.eigvals
         dmd.train(3)
-        dmd.load_state_dict(pt.load(chp))
+        dmd.load_state_dict(pt.load(checkpoint))
         eigs_after = dmd.eigvals
         assert all(pt.isclose(eigs_after, eigs_before))
-        if isfile(chp):
-            remove(chp)
 
 
 def test_unsqueeze_if_1d():

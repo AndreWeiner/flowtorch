@@ -39,18 +39,26 @@ jobs:
         run: tox -e lint
 
   tests:
-    name: Tests (Python ${{ matrix.python-version }})
-    runs-on: ubuntu-latest
+    name: Tests (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+        tox-environment:
+          - py310
+          - py312
+          - py314
         include:
-          - python-version: "3.10"
-            tox-environment: py310
-          - python-version: "3.12"
-            tox-environment: py312
-          - python-version: "3.14"
-            tox-environment: py314
+          - tox-environment: py310
+            python-version: "3.10"
+          - tox-environment: py312
+            python-version: "3.12"
+          - tox-environment: py314
+            python-version: "3.14"
 
     steps:
       - name: Check out repository
