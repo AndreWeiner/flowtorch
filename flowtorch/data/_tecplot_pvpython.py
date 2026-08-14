@@ -113,19 +113,14 @@ def _metadata_name(parent, index, name_key=None):
 
 def _leaf_records(root, name_key=None):
     """Return all non-composite descendants with stable names and paths."""
-    leaves = []
+    leaves: list[tuple[str, str, list[int]]] = []
 
     def visit(data, index_path, name_path):
         api = _child_api(data)
         if api is None:
             full_name = "/".join(name_path) if name_path else "root"
-            leaves.append(
-                {
-                    "leaf_name": name_path[-1] if name_path else "root",
-                    "full_name": full_name,
-                    "path": list(index_path),
-                }
-            )
+            leaf_name = name_path[-1] if name_path else "root"
+            leaves.append((leaf_name, full_name, list(index_path)))
             return
         count, child_at = api
         for index in range(count()):
@@ -138,27 +133,22 @@ def _leaf_records(root, name_key=None):
             visit(child, index_path + [index], name_path + [name])
 
     visit(root, [], [])
-    leaf_counts = {}
-    for leaf in leaves:
-        name = leaf["leaf_name"]
-        leaf_counts[name] = leaf_counts.get(name, 0) + 1
+    leaf_counts: dict[str, int] = {}
+    for leaf_name, _, _ in leaves:
+        leaf_counts[leaf_name] = leaf_counts.get(leaf_name, 0) + 1
     used_names = set()
     records = []
-    for leaf in leaves:
-        public_name = (
-            leaf["leaf_name"]
-            if leaf_counts[leaf["leaf_name"]] == 1
-            else leaf["full_name"]
-        )
+    for leaf_name, full_name, path in leaves:
+        public_name = leaf_name if leaf_counts[leaf_name] == 1 else full_name
         if public_name in used_names:
-            indices = "/".join(str(index) for index in leaf["path"])
+            indices = "/".join(str(index) for index in path)
             public_name = f"{public_name} [{indices}]"
         used_names.add(public_name)
         records.append(
             {
                 "name": public_name,
-                "full_name": leaf["full_name"],
-                "path": leaf["path"],
+                "full_name": full_name,
+                "path": path,
             }
         )
     return records
@@ -171,7 +161,7 @@ def _resolve_leaf(root, block_path):
     ):
         raise ValueError(f"Invalid block path: {block_path!r}")
     current = root
-    traversed = []
+    traversed: list[int] = []
     for index in block_path:
         api = _child_api(current)
         if api is None:
@@ -356,7 +346,9 @@ def main():
             from paraview import servermanager
             from paraview.simple import Delete, VisItTecplotBinaryReader
             from paraview.vtk.numpy_interface import dataset_adapter
-            from vtkmodules.vtkCommonDataModel import vtkCompositeDataSet
+            from vtkmodules.vtkCommonDataModel import (  # type: ignore[import-not-found]
+                vtkCompositeDataSet,
+            )
         except Exception as error:
             _send_error(stream, error)
             return 1
