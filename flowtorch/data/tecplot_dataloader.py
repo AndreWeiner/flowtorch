@@ -14,7 +14,7 @@ import struct
 import subprocess
 import sys
 from threading import Lock, Thread
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Literal, Union
 
 # third party packages
 import numpy as np
@@ -238,7 +238,9 @@ class TecplotDataloader(Dataloader):
 
     ParaView and its bundled Python packages remain in a separate process.
     Arrays are transferred through a binary socket protocol without temporary
-    files. One level of blocks/zones is expected under the root block.
+    files. Nested composite datasets are supported; unique leaf names are
+    exposed as zones, while duplicate leaf names are disambiguated by their
+    full composite paths.
 
     Examples
 
@@ -278,7 +280,8 @@ class TecplotDataloader(Dataloader):
         self._dtype = dtype
         self._client = _PvpythonClient(_resolve_pvpython(pvpython))
         self._zone_names: List[str] | None = None
-        self._field_names: Dict[str, List[str]] | None = None
+        self._zone_paths: Dict[str, List[int]] = {}
+        self._field_names: Dict[tuple[str, str], Dict[str, List[str]]] = {}
         self._zone = self.zone_names[0]
 
     @classmethod
@@ -302,11 +305,11 @@ class TecplotDataloader(Dataloader):
         :rtype: TecplotDataloader
         """
         path = check_and_standardize_path(path)
-        file_paths = glob(join(path, f"{base_name}i=*t=*"))
+        file_paths = glob(join(path, f"{base_name}i=*t=*{suffix}"))
         discovered_names = [file_path.split(sep)[-1] for file_path in file_paths]
-        write_times = [
-            name.split("t=")[-1].split(suffix)[0] for name in discovered_names
-        ]
+        write_times = [name.split("t=")[-1] for name in discovered_names]
+        if suffix:
+            write_times = [time[: -len(suffix)] for time in write_times]
         sorted_names = sorted(
             zip(write_times, discovered_names), key=lambda item: float(item[0])
         )
@@ -335,49 +338,89 @@ class TecplotDataloader(Dataloader):
             **parameters,
         )
 
-    def _load_single_snapshot(self, field_name: str, time: str) -> pt.Tensor:
+    @staticmethod
+    def _validate_association(association: str) -> Literal["point", "cell"]:
+        """Validate and normalize a VTK array association."""
+        if association not in ("point", "cell"):
+            raise ValueError(
+                f"Unknown field association {association!r}; expected 'point' or 'cell'"
+            )
+        return association
+
+    def _load_single_snapshot(
+        self, field_name: str, time: str, association: str = "point"
+    ) -> pt.Tensor:
         """Load a single field from one snapshot."""
-        field_names = self.field_names[self.write_times[0]]
+        association = self._validate_association(association)
+        field_names = self.field_names_for(association)[self.write_times[0]]
         if field_name not in field_names:
             raise ValueError(
-                f"Unknown field {field_name!r}. Available fields are {field_names}"
+                f"Unknown field {field_name!r} in {association} data for zone "
+                f"{self.zone!r}. Available fields are {field_names}"
             )
         array = self._request_for_time(
             "field",
             time,
             field_name=field_name,
-            field_names=field_names,
-            zone_index=self.zone_names.index(self.zone),
+            association=association,
+            block_path=self._zone_paths[self.zone],
         )
         return pt.from_numpy(array)
 
-    def _load_multiple_snapshots(self, field_name: str, times: List[str]) -> pt.Tensor:
+    def _load_multiple_snapshots(
+        self, field_name: str, times: List[str], association: str = "point"
+    ) -> pt.Tensor:
         """Load one field from multiple snapshots."""
         return _preallocate_time_series(
-            lambda time: self._load_single_snapshot(field_name, time), times
+            lambda time: self._load_single_snapshot(field_name, time, association),
+            times,
         )
 
     def load_snapshot(
-        self, field_name: Union[List[str], str], time: Union[List[str], str]
+        self,
+        field_name: Union[List[str], str],
+        time: Union[List[str], str],
+        association: str = "point",
     ) -> Union[List[pt.Tensor], pt.Tensor]:
-        """Load snapshots for one or more fields and write times."""
+        """Load snapshots for one or more fields and write times.
+
+        :param field_name: one field name or a list of field names
+        :param time: one write time or a list of write times
+        :param association: VTK array association, either ``"point"`` (the
+            backward-compatible default) or ``"cell"``
+        """
         check_list_or_str(field_name, "field_name")
         check_list_or_str(time, "time")
+        association = self._validate_association(association)
         if isinstance(field_name, list):
             if isinstance(time, list):
                 return [
-                    self._load_multiple_snapshots(name, time) for name in field_name
+                    self._load_multiple_snapshots(name, time, association)
+                    for name in field_name
                 ]
-            return [self._load_single_snapshot(name, time) for name in field_name]
+            return [
+                self._load_single_snapshot(name, time, association)
+                for name in field_name
+            ]
         if isinstance(time, list):
-            return self._load_multiple_snapshots(field_name, time)
-        return self._load_single_snapshot(field_name, time)
+            return self._load_multiple_snapshots(field_name, time, association)
+        return self._load_single_snapshot(field_name, time, association)
 
     @property
     def zone_names(self) -> List[str]:
-        """Names of available blocks/zones."""
+        """Names of available leaf blocks/zones.
+
+        Unique leaf names are kept short. If a leaf name occurs more than
+        once, its full composite path is returned instead.
+        """
         if self._zone_names is None:
-            self._zone_names = self._request_for_time("zone_names", self.write_times[0])
+            zones = self._request_for_time("zone_names", self.write_times[0])
+            if not zones:
+                raise ParaViewProcessError(
+                    "The Tecplot reader did not expose any leaf blocks/zones"
+                )
+            self._zone_names = [zone["name"] for zone in zones]
+            self._zone_paths = {zone["name"]: zone["path"] for zone in zones}
         return self._zone_names
 
     @property
@@ -402,11 +445,27 @@ class TecplotDataloader(Dataloader):
 
     @property
     def field_names(self) -> Dict[str, List[str]]:
-        """Field names available in the first snapshot."""
-        if self._field_names is None:
+        """Point-data field names in the selected zone's first snapshot."""
+        return self.field_names_for("point")
+
+    def field_names_for(self, association: str = "point") -> Dict[str, List[str]]:
+        """Return fields for one association in the currently selected zone.
+
+        :param association: VTK array association, ``"point"`` or ``"cell"``
+        """
+        association = self._validate_association(association)
+        cache_key = (self.zone, association)
+        if cache_key not in self._field_names:
             time = self.write_times[0]
-            self._field_names = {time: self._request_for_time("field_names", time)}
-        return self._field_names
+            self._field_names[cache_key] = {
+                time: self._request_for_time(
+                    "field_names",
+                    time,
+                    association=association,
+                    block_path=self._zone_paths[self.zone],
+                )
+            }
+        return self._field_names[cache_key]
 
     @property
     def vertices(self) -> pt.Tensor:
@@ -414,7 +473,7 @@ class TecplotDataloader(Dataloader):
         array = self._request_for_time(
             "vertices",
             self.write_times[0],
-            zone_index=self.zone_names.index(self.zone),
+            block_path=self._zone_paths[self.zone],
         )
         return pt.from_numpy(array)
 
