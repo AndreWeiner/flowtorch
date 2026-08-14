@@ -24,15 +24,22 @@ class _FakeClient:
 
     def request(self, operation, **parameters):
         if operation == "zone_names":
-            return ["lower", "upper"]
+            return [
+                {"name": "lower", "full_name": "root/lower", "path": [0, 0]},
+                {"name": "upper", "full_name": "root/upper", "path": [0, 1]},
+            ]
         if operation == "field_names":
+            if parameters["association"] == "cell":
+                return ["cell_volume"]
+            if parameters["block_path"] == [0, 1]:
+                return ["density", "temperature"]
             return ["density", "pressure"]
         if operation == "vertices":
-            zone = parameters["zone_index"]
+            zone = parameters["block_path"][-1]
             return np.arange(12, dtype=np.float64).reshape(4, 3) + zone
         if operation == "field":
             offset = float(parameters["file_path"].split("t=")[-1].split(".plt")[0])
-            zone = parameters["zone_index"]
+            zone = parameters["block_path"][-1]
             return np.arange(4, dtype=np.float64) + offset + zone
         raise AssertionError(f"unexpected operation: {operation}")
 
@@ -87,6 +94,27 @@ def test_from_tau_uses_configured_pvpython_without_paraview(tmp_path, monkeypatc
 
         loader.zone = "upper"
         assert pt.equal(loader.vertices, pt.from_numpy(np.arange(12).reshape(4, 3) + 1))
+        assert loader.field_names == {"1.0": ["density", "temperature"]}
+        assert loader.field_names_for("cell") == {"1.0": ["cell_volume"]}
+        assert loader.load_snapshot("cell_volume", "1.0", association="cell").shape == (
+            4,
+        )
+
+
+def test_from_tau_filters_extensionless_files_with_same_timestamp(
+    tmp_path, monkeypatch
+):
+    extensionless = tmp_path / "surface_i=1_t=1.0"
+    requested = tmp_path / "surface_i=1_t=1.0.plt"
+    extensionless.touch()
+    requested.touch()
+    monkeypatch.setattr(tecplot_module, "_resolve_pvpython", lambda value: str(value))
+    monkeypatch.setattr(tecplot_module, "_PvpythonClient", _FakeClient)
+
+    with TecplotDataloader.from_tau(
+        str(tmp_path), "surface_", suffix=".plt", pvpython="pvpython"
+    ) as loader:
+        assert loader._file_names == {"1.0": requested.name}
 
 
 def test_unknown_field_is_rejected_before_worker_request(tmp_path, monkeypatch):
@@ -99,3 +127,15 @@ def test_unknown_field_is_rejected_before_worker_request(tmp_path, monkeypatch):
     ) as loader:
         with pytest.raises(ValueError, match="Unknown field"):
             loader.load_snapshot("temperature", "1.0")
+
+
+def test_invalid_field_association_is_rejected(tmp_path, monkeypatch):
+    (tmp_path / "surface_i=1_t=1.0.plt").touch()
+    monkeypatch.setattr(tecplot_module, "_resolve_pvpython", lambda value: str(value))
+    monkeypatch.setattr(tecplot_module, "_PvpythonClient", _FakeClient)
+
+    with TecplotDataloader.from_tau(
+        str(tmp_path), "surface_", pvpython="pvpython"
+    ) as loader:
+        with pytest.raises(ValueError, match="expected 'point' or 'cell'"):
+            loader.load_snapshot("density", "1.0", association="field")
