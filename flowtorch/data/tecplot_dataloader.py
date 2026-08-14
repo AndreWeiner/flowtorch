@@ -14,7 +14,7 @@ import struct
 import subprocess
 import sys
 from threading import Lock, Thread
-from typing import Any, Dict, List, Literal, Union
+from typing import Any, cast, Dict, List, Literal, Union
 
 # third party packages
 import numpy as np
@@ -345,7 +345,7 @@ class TecplotDataloader(Dataloader):
             raise ValueError(
                 f"Unknown field association {association!r}; expected 'point' or 'cell'"
             )
-        return association
+        return cast(Literal["point", "cell"], association)
 
     def _load_single_snapshot(
         self, field_name: str, time: str, association: str = "point"
