@@ -17,6 +17,7 @@ from .periodogram import AMPS
 __all__ = [
     "AMPS",
     "AMSPOD",
+    "curvilinear_surface_phase_velocity",
     "DFT",
     "DMD",
     "HODMD",
@@ -40,4 +41,9 @@ def __getattr__(name: str):
 
         globals()[name] = PSPExplorer
         return PSPExplorer
+    if name == "curvilinear_surface_phase_velocity":
+        from .propagation import curvilinear_surface_phase_velocity
+
+        globals()[name] = curvilinear_surface_phase_velocity
+        return curvilinear_surface_phase_velocity
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
