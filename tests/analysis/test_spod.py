@@ -196,6 +196,34 @@ def test_AMSPOD_top_modes_log_segments():
     pt.testing.assert_close(spod.top_modes(2, eig_idx=1), pt.tensor([1, 5]))
     pt.testing.assert_close(spod.top_modes(2, eig_idx="sum"), pt.tensor([2, 5]))
     pt.testing.assert_close(spod.top_modes(2, f_min=2.1, f_max=15.0), pt.tensor([3, 4]))
+    pt.testing.assert_close(spod.top_modes(2, spacing="log"), spod.top_modes(2))
+
+
+def test_AMSPOD_top_modes_linear_segments_include_zero():
+    spod = AMSPOD.__new__(AMSPOD)
+    spod._frequency = pt.tensor([0.0, 1.0, 2.0, 8.0, 9.0, 10.0])
+    spod._eigvals = pt.tensor([[10.0], [1.0], [5.0], [6.0], [2.0], [7.0]])
+    spod._complex = True
+    spod._adaptive = False
+
+    pt.testing.assert_close(spod.top_modes(2, spacing="linear"), pt.tensor([0, 5]))
+    pt.testing.assert_close(spod.top_modes(2, spacing="log"), pt.tensor([2, 5]))
+
+
+def test_AMSPOD_top_modes_linear_negative_frequencies():
+    spod = AMSPOD.__new__(AMSPOD)
+    spod._frequency = pt.tensor([-10.0, -5.0, 0.0, 5.0, 10.0])
+    spod._eigvals = pt.tensor([[1.0], [8.0], [9.0], [7.0], [6.0]])
+    spod._complex = True
+    spod._adaptive = False
+
+    pt.testing.assert_close(spod.top_modes(2, spacing="linear"), pt.tensor([1, 2]))
+    pt.testing.assert_close(
+        spod.top_modes(2, f_min=-5.0, f_max=10.0, spacing="linear"),
+        pt.tensor([1, 2]),
+    )
+    with raises(ValueError, match="spacing"):
+        _ = spod.top_modes(2, spacing="invalid")
 
 
 def test_AMSPOD_top_modes_negative_frequencies():

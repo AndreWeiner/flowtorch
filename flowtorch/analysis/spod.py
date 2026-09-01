@@ -19,7 +19,7 @@ lightweight derived class wrapping around the `AMSPOD`, termed `PAMSPOD`.
 import logging
 import gc
 import warnings
-from typing import Any, Union, Tuple
+from typing import Any, Literal, Union, Tuple
 from math import sqrt
 from collections import defaultdict
 
@@ -713,12 +713,16 @@ class AMSPOD(object):
         eig_idx: Union[int, str] = 0,
         f_min: float = -float("inf"),
         f_max: float = float("inf"),
+        spacing: Literal["log", "linear"] = "log",
     ) -> pt.Tensor:
-        """Get the indices of the dominant modes in log-spaced frequency segments.
+        """Get the indices of dominant modes in frequency segments.
 
-        Negative frequencies are supported by using a signed logarithmic
-        coordinate; the zero-frequency bin is omitted because it cannot be
-        represented on a logarithmic scale.
+        Segments can be equally spaced on a logarithmic or linear frequency
+        coordinate. Negative frequencies are supported for both choices. Log
+        spacing uses a signed logarithmic coordinate and omits the
+        zero-frequency bin because it has no logarithmic representation.
+        Linear spacing includes the zero-frequency bin when it is within the
+        requested frequency range.
 
         :param n: number of segments into which to divide the frequency range;
             defaults to 10
@@ -735,12 +739,19 @@ class AMSPOD(object):
         :param f_max: consider only modes with a frequency smaller than f_max;
             defaults to inf
         :type f_max: float, optional
+        :param spacing: distribute segment boundaries logarithmically or
+            linearly in frequency; defaults to ``"log"``
+        :type spacing: Literal["log", "linear"], optional
+        :raises ValueError: if ``spacing`` is neither ``"log"`` nor
+            ``"linear"``
         :return: frequency-bin index corresponding to the largest eigenvalue in
-            each non-empty log-spaced segment
+            each non-empty frequency segment
         :rtype: pt.Tensor
         """
         if n < 1:
             raise ValueError("n must be at least 1")
+        if spacing not in ("log", "linear"):
+            raise ValueError("spacing must be 'log' or 'linear'")
         if eig_idx != "sum":
             if not isinstance(eig_idx, int):
                 raise ValueError("eig_idx must be an integer or 'sum'")
@@ -762,7 +773,8 @@ class AMSPOD(object):
                 )
 
         modes_in_range = pt.logical_and(self.frequency >= f_min, self.frequency < f_max)
-        modes_in_range = pt.logical_and(modes_in_range, self.frequency != 0.0)
+        if spacing == "log":
+            modes_in_range = pt.logical_and(modes_in_range, self.frequency != 0.0)
         mode_indices = pt.arange(modes_in_range.shape[0], dtype=pt.int64)[
             modes_in_range
         ]
@@ -770,16 +782,18 @@ class AMSPOD(object):
             return mode_indices
 
         freq = self.frequency[mode_indices]
-        if bool((freq > 0.0).all()):
-            log_freq = pt.log10(freq)
+        if spacing == "linear":
+            segment_coordinate = freq
+        elif bool((freq > 0.0).all()):
+            segment_coordinate = pt.log10(freq)
         elif bool((freq < 0.0).all()):
-            log_freq = -pt.log10(freq.abs())
+            segment_coordinate = -pt.log10(freq.abs())
         else:
             f_ref = freq.abs().min()
-            log_freq = freq.sign() * pt.log10(freq.abs() / f_ref + 1.0)
+            segment_coordinate = freq.sign() * pt.log10(freq.abs() / f_ref + 1.0)
         edges = pt.linspace(
-            log_freq.min().item(),
-            log_freq.max().item(),
+            segment_coordinate.min().item(),
+            segment_coordinate.max().item(),
             n + 1,
             dtype=freq.dtype,
             device=freq.device,
@@ -790,11 +804,13 @@ class AMSPOD(object):
         for i in range(n):
             if i == n - 1:
                 in_segment = pt.logical_and(
-                    log_freq >= edges[i], log_freq <= edges[i + 1]
+                    segment_coordinate >= edges[i],
+                    segment_coordinate <= edges[i + 1],
                 )
             else:
                 in_segment = pt.logical_and(
-                    log_freq >= edges[i], log_freq < edges[i + 1]
+                    segment_coordinate >= edges[i],
+                    segment_coordinate < edges[i + 1],
                 )
             segment_indices = mode_indices[in_segment]
             if segment_indices.numel() > 0:
