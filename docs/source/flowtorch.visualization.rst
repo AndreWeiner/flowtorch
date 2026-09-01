@@ -33,6 +33,14 @@ flowtorch.visualization.spectra
    :undoc-members:
    :show-inheritance:
 
+flowtorch.visualization.similarities
+------------------------------------
+
+.. automodule:: flowtorch.visualization.similarities
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 flowtorch.visualization.coefficients
 ------------------------------------
 

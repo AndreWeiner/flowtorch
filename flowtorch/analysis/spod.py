@@ -57,6 +57,59 @@ def _prepare_weights(w: pt.Tensor, nx: int) -> pt.Tensor:
     return w
 
 
+def mode_similarity(first_modes: pt.Tensor, second_modes: pt.Tensor) -> pt.Tensor:
+    r"""Compute normalized similarities between two sets of modes.
+
+    Modes are arranged columnwise, with tensors of shape ``(n_state, n_modes)``.
+    The returned matrix contains the absolute normalized inner products
+
+    .. math::
+
+        \rho_{ij} = \frac{|\phi_i^*\psi_j|}
+        {\|\phi_i\|_2\|\psi_j\|_2},
+
+    and therefore has shape ``(n_first_modes, n_second_modes)``. The absolute
+    value makes the result invariant to the sign or complex phase of either
+    mode. To compute similarities in a weighted inner product, multiply both
+    mode sets by the square root of the weights before calling this function.
+
+    Similarities involving zero-norm or non-finite modes are returned as NAN.
+
+    :param first_modes: first columnwise set of modes
+    :type first_modes: pt.Tensor
+    :param second_modes: second columnwise set of modes
+    :type second_modes: pt.Tensor
+    :raises ValueError: if either input is not two-dimensional, the state
+        dimensions differ, or the tensors are on different devices
+    :return: pairwise normalized mode similarities
+    :rtype: pt.Tensor
+    """
+    if first_modes.ndim != 2 or second_modes.ndim != 2:
+        raise ValueError("mode sets must be two-dimensional tensors")
+    if not (first_modes.is_floating_point() or pt.is_complex(first_modes)):
+        raise ValueError("mode sets must have a floating-point or complex dtype")
+    if not (second_modes.is_floating_point() or pt.is_complex(second_modes)):
+        raise ValueError("mode sets must have a floating-point or complex dtype")
+    if first_modes.shape[0] != second_modes.shape[0]:
+        raise ValueError("mode sets must have the same state dimension")
+    if first_modes.device != second_modes.device:
+        raise ValueError("mode sets must be on the same device")
+
+    dtype = pt.promote_types(first_modes.dtype, second_modes.dtype)
+    first = first_modes.to(dtype=dtype)
+    second = second_modes.to(dtype=dtype)
+    products = first.conj().T @ second
+    denominator = pt.outer(
+        pt.linalg.vector_norm(first, dim=0),
+        pt.linalg.vector_norm(second, dim=0),
+    )
+    finite = pt.logical_and(pt.isfinite(products.abs()), pt.isfinite(denominator))
+    valid = pt.logical_and(finite, denominator > 0.0)
+    similarity = products.abs() / denominator
+    similarity = similarity.clamp(0.0, 1.0)
+    return pt.where(valid, similarity, pt.full_like(similarity, float("nan")))
+
+
 def _calc_mode_similarity(first: pt.Tensor, second: pt.Tensor) -> float:
     """Compute normalized similarity between two 1D tensors.
 
@@ -68,7 +121,7 @@ def _calc_mode_similarity(first: pt.Tensor, second: pt.Tensor) -> float:
         by the product of their norms
     :rtype: float
     """
-    return (pt.vdot(first, second) / first.norm() / second.norm()).abs().item()
+    return mode_similarity(first.unsqueeze(-1), second.unsqueeze(-1))[0, 0].item()
 
 
 def _free_memory(device: str):
@@ -553,6 +606,102 @@ class AMSPOD(object):
         return plot_adaptive_residual(
             self.frequency,
             residual,
+            reference_timescale=reference_timescale,
+            ax=ax,
+            **kwargs,
+        )
+
+    def mode_similarity(
+        self, first_mode_idx: int = 0, second_mode_idx: int = 0
+    ) -> pt.Tensor:
+        r"""Compare two SPOD mode branches across all frequency bins.
+
+        Entry ``(i, j)`` of the returned tensor is the normalized, absolute
+        weighted inner product between ``first_mode_idx`` at frequency bin
+        ``i`` and ``second_mode_idx`` at frequency bin ``j``. Consequently,
+        the result has shape ``(n_frequency, n_frequency)``. For equal mode
+        indices it is symmetric, with a unit diagonal wherever the mode is
+        available.
+
+        AMSPOD modes are compared in the spatial inner product supplied at
+        construction. PAMSPOD inherits this implementation and compares its
+        reduced modes directly, which is equivalent to the weighted
+        full-space product within the retained POD subspace.
+
+        Similarities involving a mode unavailable at an adaptive frequency
+        bin are returned as NAN.
+
+        :param first_mode_idx: mode index used along the first matrix axis,
+            defaults to 0
+        :type first_mode_idx: int, optional
+        :param second_mode_idx: mode index used along the second matrix axis,
+            defaults to 0
+        :type second_mode_idx: int, optional
+        :raises ValueError: if either mode index is invalid or was not retained
+        :return: frequency-by-frequency mode similarity matrix
+        :rtype: pt.Tensor
+        """
+        n_modes = self._modes.shape[-1]
+        for name, index in (
+            ("first_mode_idx", first_mode_idx),
+            ("second_mode_idx", second_mode_idx),
+        ):
+            if not isinstance(index, int) or isinstance(index, bool):
+                raise ValueError(f"{name} must be an integer")
+            if index < 0 or index >= n_modes:
+                raise ValueError(f"{name} must be in the range [0, {n_modes - 1:d}]")
+
+        first_modes = self._modes[:, :, first_mode_idx].T
+        second_modes = self._modes[:, :, second_mode_idx].T
+        weight = self._weight.to(device=first_modes.device, dtype=first_modes.dtype)
+        similarities = mode_similarity(first_modes * weight, second_modes * weight)
+
+        if self._adaptive:
+            n_tapers = self._log["n_tapers"].to(similarities.device)
+            first_available = n_tapers > first_mode_idx
+            second_available = n_tapers > second_mode_idx
+            available = pt.logical_and(
+                first_available.unsqueeze(-1), second_available.unsqueeze(0)
+            )
+            similarities = similarities.masked_fill(~available, float("nan"))
+        return similarities
+
+    def show_mode_similarity(
+        self,
+        first_mode_idx: int = 0,
+        second_mode_idx: int = 0,
+        reference_timescale: Union[float, None] = None,
+        ax: Any = None,
+        **kwargs: Any,
+    ):
+        r"""Plot mode similarity across the SPOD frequency spectrum.
+
+        Symmetric matrices are shown as their lower triangle including the
+        diagonal by default. Plot behavior can be changed with the
+        ``triangle`` argument accepted by
+        :func:`flowtorch.visualization.plot_mode_similarity`.
+
+        :param first_mode_idx: mode index used along the horizontal axis,
+            defaults to 0
+        :type first_mode_idx: int, optional
+        :param second_mode_idx: mode index used along the vertical axis,
+            defaults to 0
+        :type second_mode_idx: int, optional
+        :param reference_timescale: reference time used to plot Strouhal number
+        :type reference_timescale: float, optional
+        :param ax: existing Matplotlib axes
+        :type ax: matplotlib.axes.Axes, optional
+        :param kwargs: additional arguments for ``plot_mode_similarity``
+        :return: modifiable Matplotlib figure and axes
+        :rtype: Tuple[matplotlib.figure.Figure, matplotlib.axes.Axes]
+        """
+        from flowtorch.visualization import plot_mode_similarity
+
+        similarities = self.mode_similarity(first_mode_idx, second_mode_idx)
+        return plot_mode_similarity(
+            self.frequency,
+            self.frequency,
+            similarities,
             reference_timescale=reference_timescale,
             ax=ax,
             **kwargs,
