@@ -44,6 +44,7 @@ _EXPORTS: Dict[str, Tuple[str, str]] = {
     "mask_psp_interactive": ("selection_tools", "mask_psp_interactive"),
     "mask_sphere": ("selection_tools", "mask_sphere"),
     "iqr_outlier_replacement": ("outlier_tools", "iqr_outlier_replacement"),
+    "replace_temporal_outliers": ("outlier_tools", "replace_temporal_outliers"),
     "replace_spatial_outliers": ("outlier_tools", "replace_spatial_outliers"),
 }
 
