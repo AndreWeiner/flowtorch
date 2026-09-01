@@ -28,14 +28,14 @@ import torch as pt
 from numpy import pi
 
 # flowTorch packages
-from .svd import SVD
+from .svd import SVD, _prepare_weight
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 
-def _prepare_weights(w: pt.Tensor, nx: int) -> pt.Tensor:
-    """Prepare state vector weights.
+def _prepare_sqrt_weight(w: pt.Tensor, nx: int) -> pt.Tensor:
+    """Prepare square-root factors from raw state-vector weights.
 
     :param w: weights for the entire state vector or one variable within the state vector
     :type w: pt.Tensor
@@ -45,16 +45,9 @@ def _prepare_weights(w: pt.Tensor, nx: int) -> pt.Tensor:
     :return: weight vector ready for columnwise multiplication with the data matrix
     :rtype: pt.Tensor
     """
-    w = w.sqrt().unsqueeze(-1)
-    nxw = w.shape[0]
-    if nxw != nx:
-        if nx % nxw == 0:
-            w = w.repeat((nx // nxw, 1))
-        else:
-            raise ValueError(
-                f"The size of the weight vector ({nxw:d}) does not match the size of the state ({nx:d})."
-            )
-    return w
+    _, sqrt_weight = _prepare_weight(w, nx, w.device, w.real.dtype)
+    assert sqrt_weight is not None
+    return sqrt_weight
 
 
 def mode_similarity(first_modes: pt.Tensor, second_modes: pt.Tensor) -> pt.Tensor:
@@ -199,10 +192,10 @@ class AMSPOD(object):
         self._max_tapers = max(2, min(max_tapers, self._nx, self._nt))
         self._tol = tolerance
         if weight is None:
-            self._weight = pt.ones(self._nx).unsqueeze(-1)
+            self._sqrt_weight = pt.ones(self._nx).unsqueeze(-1)
         else:
-            self._weight = _prepare_weights(weight, self._nx)
-        self._weight = self._weight.type(self._dm.dtype)
+            self._sqrt_weight = _prepare_sqrt_weight(weight, self._nx)
+        self._sqrt_weight = self._sqrt_weight.type(self._dm.dtype)
         self._subtract_mean = subtract_mean
         self._n_keep = keep_n_modes
         self._device = device
@@ -232,7 +225,7 @@ class AMSPOD(object):
         if self._subtract_mean:
             logger.info("computing and subtracting temporal mean")
             Q_var -= Q_var.mean(dim=1).unsqueeze(-1)
-        Q_var *= self._weight
+        Q_var *= self._sqrt_weight
         f = (
             pt.fft.fftfreq(self._nfft, self._dt)
             if pt.is_complex(self._dm)
@@ -256,7 +249,7 @@ class AMSPOD(object):
                     f"using {int(n_win[i])} tapers for bin {i:d} (f={f[i].item():1.4f}Hz)"
                 )
             m, ev = self._spod_at_freq(Q_hat, i, int(n_win[i]))
-            m = m / self._weight.type(m.dtype).to(self._device)
+            m = m / self._sqrt_weight.type(m.dtype).to(self._device)
             modes[i] = m[:, : min(n_keep, int(n_win[i]))].cpu()
             evals[i, : int(n_win[i])] = (
                 ev.cpu() * 2 * self._nfft / (self._dt * self._nt)
@@ -653,8 +646,12 @@ class AMSPOD(object):
 
         first_modes = self._modes[:, :, first_mode_idx].T
         second_modes = self._modes[:, :, second_mode_idx].T
-        weight = self._weight.to(device=first_modes.device, dtype=first_modes.dtype)
-        similarities = mode_similarity(first_modes * weight, second_modes * weight)
+        sqrt_weight = self._sqrt_weight.to(
+            device=first_modes.device, dtype=first_modes.dtype
+        )
+        similarities = mode_similarity(
+            first_modes * sqrt_weight, second_modes * sqrt_weight
+        )
 
         if self._adaptive:
             n_tapers = self._log["n_tapers"].to(similarities.device)
@@ -870,17 +867,17 @@ class AMSPOD(object):
             snapshots -= snapshots.mean(dim=1).unsqueeze(-1)
 
         if self._complex:
-            weight = self._weight.type(basis.dtype)
-            basis_weighted = basis * weight
-            snapshots_weighted = snapshots.type(basis.dtype) * weight
+            sqrt_weight = self._sqrt_weight.type(basis.dtype)
+            basis_weighted = basis * sqrt_weight
+            snapshots_weighted = snapshots.type(basis.dtype) * sqrt_weight
             gram = basis_weighted.conj().T @ basis_weighted
             rhs = basis_weighted.conj().T @ snapshots_weighted
             coefficients = pt.linalg.pinv(gram) @ rhs
         else:
             basis_real = pt.cat((basis.real, -basis.imag), dim=1)
-            weight = self._weight.type(basis_real.dtype)
-            basis_weighted = basis_real * weight
-            snapshots_weighted = snapshots.type(basis_real.dtype) * weight
+            sqrt_weight = self._sqrt_weight.type(basis_real.dtype)
+            basis_weighted = basis_real * sqrt_weight
+            snapshots_weighted = snapshots.type(basis_real.dtype) * sqrt_weight
             gram = basis_weighted.T @ basis_weighted
             rhs = basis_weighted.T @ snapshots_weighted
             coefficients_real = pt.linalg.pinv(gram) @ rhs
@@ -1090,18 +1087,15 @@ class PAMSPOD(AMSPOD):
         :type rank: int, optional
         """
         self._dm_org = data_matrix
-        if weight is not None:
-            logger.info("weighting snapshots with provided weight vector")
-            self._weight_org = _prepare_weights(weight, self._dm_org.shape[0])
-            self._dm_org *= self._weight_org
+        data_matrix_svd = data_matrix
         if subtract_mean:
             logger.info("subtracting temporal mean from original data matrix")
-            self._mean_org = self._dm_org.mean(dim=-1)
-            self._dm_org -= self._mean_org.unsqueeze(-1)
+            self._mean_org = data_matrix.mean(dim=-1)
+            data_matrix_svd = data_matrix - self._mean_org.unsqueeze(-1)
         if rank is None:
-            rank = min(self._dm_org.shape)
+            rank = min(data_matrix_svd.shape)
         logger.info("computing SVD of original data matrix")
-        self._svd = SVD(self._dm_org, rank)
+        self._svd = SVD(data_matrix_svd, rank, weight=weight)
         super(PAMSPOD, self).__init__(
             (self._svd.V * self._svd.s).T,
             dt=dt,
@@ -1118,21 +1112,13 @@ class PAMSPOD(AMSPOD):
 
     @property
     def modes(self) -> pt.Tensor:
-        """Project modes back to original space and undo weighting.
+        """Project modes back to the original physical space.
 
         :return: SPOD modes in full state space
         :rtype: pt.Tensor
         """
         m = super().modes
-        if hasattr(self, "_weight_org"):
-            return pt.einsum(
-                "m,mr,nrk->nmk",
-                1.0 / self._weight_org.squeeze().type(m.dtype),
-                self._svd.U.type(m.dtype),
-                m,
-            )
-        else:
-            return pt.einsum("mr,nrk->nmk", self._svd.U.type(m.dtype), m)
+        return pt.einsum("mr,nrk->nmk", self._svd.U.type(m.dtype), m)
 
     @property
     def svd(self) -> SVD:
@@ -1154,10 +1140,7 @@ class PAMSPOD(AMSPOD):
         :rtype: pt.Tensor
         """
         mode = super().modes[f_idx, :, mode_idx]
-        if hasattr(self, "_weight_org"):
-            return ((self.svd.U / self._weight_org).type(mode.dtype) * mode).sum(dim=1)
-        else:
-            return (self.svd.U.type(mode.dtype) * mode).sum(dim=1)
+        return (self.svd.U.type(mode.dtype) * mode).sum(dim=1)
 
     def mode_reconstruction(
         self,
@@ -1185,10 +1168,7 @@ class PAMSPOD(AMSPOD):
         :rtype: pt.Tensor
         """
         rec = super().mode_reconstruction(f_idx, eig_idx, dt, N)
-        if hasattr(self, "_weight_org"):
-            return (self.svd.U / self._weight_org).type(rec.dtype) @ rec
-        else:
-            return self.svd.U.type(rec.dtype) @ rec
+        return self.svd.U.type(rec.dtype) @ rec
 
     def partial_reconstruction(
         self,
@@ -1209,13 +1189,7 @@ class PAMSPOD(AMSPOD):
         rec = super().partial_reconstruction(
             f_min, f_max, n_modes, start_idx, n_snapshots, add_mean=False
         )
-        if hasattr(self, "_weight_org"):
-            rec = (self.svd.U / self._weight_org).type(rec.dtype) @ rec
-        else:
-            rec = self.svd.U.type(rec.dtype) @ rec
+        rec = self.svd.U.type(rec.dtype) @ rec
         if add_mean and hasattr(self, "_mean_org"):
-            mean = self._mean_org
-            if hasattr(self, "_weight_org"):
-                mean = mean / self._weight_org.squeeze()
-            rec += mean.unsqueeze(-1)
+            rec += self._mean_org.unsqueeze(-1)
         return rec

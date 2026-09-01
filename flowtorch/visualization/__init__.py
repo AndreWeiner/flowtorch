@@ -21,6 +21,14 @@ _EXPORTS: Dict[str, Tuple[str, str]] = {
     "plot_spod_mode_2d": ("modes", "plot_spod_mode_2d"),
     "plot_spod_modes_2d": ("modes", "plot_spod_modes_2d"),
     "plot_mode_similarity": ("similarities", "plot_mode_similarity"),
+    "plot_pod_subspace_data_dependency": (
+        "similarities",
+        "plot_pod_subspace_data_dependency",
+    ),
+    "plot_pod_subspace_data_dependency_ranks": (
+        "similarities",
+        "plot_pod_subspace_data_dependency_ranks",
+    ),
     "plot_spod_spectra": ("spectra", "plot_spod_spectra"),
     "plot_spod_spectrum": ("spectra", "plot_spod_spectrum"),
 }

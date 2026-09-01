@@ -6,25 +6,25 @@ import torch as pt
 from flowtorch.analysis.spod import (
     AMSPOD,
     PAMSPOD,
-    _prepare_weights,
+    _prepare_sqrt_weight,
     _calc_mode_similarity,
     _free_memory,
     mode_similarity,
 )
 
 
-def test_prepare_weights():
+def test_prepare_sqrt_weight():
     w = pt.tensor([1, 2, 3])
     # default behavior
-    w_out = _prepare_weights(w, len(w))
+    w_out = _prepare_sqrt_weight(w, len(w))
     assert w_out.shape == (len(w), 1)
     # multiple stacked fields
-    w_out = _prepare_weights(w, 2 * len(w))
+    w_out = _prepare_sqrt_weight(w, 2 * len(w))
     assert w_out.shape == (2 * len(w), 1)
     pt.testing.assert_close(w_out.squeeze(), pt.tensor([1, 2, 3, 1, 2, 3]).sqrt())
     # invalid combination of weights and desired length
     with raises(ValueError):
-        _ = _prepare_weights(w, 5)
+        _ = _prepare_sqrt_weight(w, 5)
 
 
 def test_calc_mode_similarity():
@@ -269,7 +269,7 @@ def test_AMSPOD_mode_similarity_uses_spatial_weight():
             [[1.0 + 0.0j], [-1.0 + 0.0j]],
         ]
     )
-    spod._weight = pt.tensor([1.0, 2.0]).unsqueeze(-1)
+    spod._sqrt_weight = pt.tensor([1.0, 2.0]).unsqueeze(-1)
     spod._adaptive = False
 
     similarity = spod.mode_similarity()
@@ -280,7 +280,7 @@ def test_AMSPOD_mode_similarity_uses_spatial_weight():
 def test_AMSPOD_mode_similarity_between_branches():
     spod = AMSPOD.__new__(AMSPOD)
     spod._modes = pt.rand((4, 3, 2), dtype=pt.complex64)
-    spod._weight = pt.ones((3, 1))
+    spod._sqrt_weight = pt.ones((3, 1))
     spod._adaptive = False
 
     first_second = spod.mode_similarity(0, 1)
@@ -299,7 +299,7 @@ def test_AMSPOD_mode_similarity_between_branches():
 def test_AMSPOD_mode_similarity_masks_unavailable_adaptive_modes():
     spod = AMSPOD.__new__(AMSPOD)
     spod._modes = pt.rand((3, 4, 3), dtype=pt.complex64)
-    spod._weight = pt.ones((4, 1))
+    spod._sqrt_weight = pt.ones((4, 1))
     spod._adaptive = True
     spod._log = {"n_tapers": pt.tensor([2, 3, 2])}
 
@@ -326,10 +326,10 @@ def test_AMSPOD_temporal_coefficients():
     assert coeffs.dtype == pt.complex64
     modes = spod.modes[:, :, :1].permute(1, 0, 2).reshape(M, -1)
     modes_real = pt.cat((modes.real, -modes.imag), dim=1)
-    weight = spod._weight.type(modes_real.dtype)
-    modes_weighted = modes_real * weight
+    sqrt_weight = spod._sqrt_weight.type(modes_real.dtype)
+    modes_weighted = modes_real * sqrt_weight
     snapshots = dm - dm.mean(dim=1).unsqueeze(-1)
-    snapshots_weighted = snapshots.type(modes_real.dtype) * weight
+    snapshots_weighted = snapshots.type(modes_real.dtype) * sqrt_weight
     gram = modes_weighted.T @ modes_weighted
     rhs = modes_weighted.T @ snapshots_weighted
     expected_real = pt.linalg.pinv(gram) @ rhs
@@ -359,10 +359,10 @@ def test_AMSPOD_temporal_coefficients_complex_data():
     assert coeffs.shape == (N, 1, N)
     assert coeffs.dtype == pt.complex64
     modes = spod.modes[:, :, :1].permute(1, 0, 2).reshape(M, -1)
-    weight = spod._weight.type(modes.dtype)
-    modes_weighted = modes * weight
+    sqrt_weight = spod._sqrt_weight.type(modes.dtype)
+    modes_weighted = modes * sqrt_weight
     snapshots = dm - dm.mean(dim=1).unsqueeze(-1)
-    snapshots_weighted = snapshots.type(modes.dtype) * weight
+    snapshots_weighted = snapshots.type(modes.dtype) * sqrt_weight
     gram = modes_weighted.conj().T @ modes_weighted
     rhs = modes_weighted.conj().T @ snapshots_weighted
     expected = (pt.linalg.pinv(gram) @ rhs).reshape(N, 1, N)
@@ -467,8 +467,20 @@ def test_PAMSPOD():
     M, N = 30, 20
     n_freq = N // 2 + 1
     dm = pt.rand((M, N), dtype=pt.float32)
-    w = pt.rand(M, dtype=pt.float32)
+    dm_original = dm.clone()
+    w = pt.rand(M, dtype=pt.float32) + 0.1
     spod = PAMSPOD(dm, 1.0, weight=w, max_tapers=5, keep_n_modes=3)
+    pt.testing.assert_close(dm, dm_original)
+    assert spod.svd.weight is not None
+    pt.testing.assert_close(spod.svd.weight, w)
+    weighted_gram = spod.svd.U.T @ (w.unsqueeze(-1) * spod.svd.U)
+    pt.testing.assert_close(weighted_gram, pt.eye(N), atol=1.0e-4, rtol=1.0e-4)
+    pt.testing.assert_close(
+        spod.svd.reconstruct(),
+        dm_original - dm_original.mean(dim=-1, keepdim=True),
+        atol=1.0e-4,
+        rtol=1.0e-4,
+    )
     assert spod.svd.rank == N
     assert spod._dm.shape == (N, N)
     assert spod.modes.shape == (n_freq, M, 3)

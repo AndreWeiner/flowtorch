@@ -70,10 +70,19 @@ def test_element_areas_to_node_weights_averages_adjacent_elements():
     assert pt.equal(weights, expected)
 
 
-def test_element_areas_to_node_weights_default_transformation():
+def test_element_areas_to_node_weights_default_raw_transformation():
     areas = pt.tensor([[1.0, 4.0]])
 
     weights = element_areas_to_node_weights(areas)
+
+    expected_areas = pt.tensor([[1.0, 2.5, 4.0], [1.0, 2.5, 4.0]])
+    assert pt.allclose(weights, expected_areas / 4.0)
+
+
+def test_element_areas_to_node_weights_can_return_square_root_factors():
+    areas = pt.tensor([[1.0, 4.0]])
+
+    weights = element_areas_to_node_weights(areas, square_root=True)
 
     expected_areas = pt.tensor([[1.0, 2.5, 4.0], [1.0, 2.5, 4.0]])
     assert pt.allclose(weights, pt.sqrt(expected_areas) / 2.0)
