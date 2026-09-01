@@ -9,8 +9,68 @@ import torch as pt
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
-from flowtorch.analysis import AMSPOD
-from flowtorch.visualization import plot_mode_similarity
+from flowtorch.analysis import AMSPOD, PODSubspaceDependencyResult
+from flowtorch.visualization import (
+    plot_mode_similarity,
+    plot_pod_subspace_data_dependency,
+    plot_pod_subspace_data_dependency_ranks,
+)
+
+
+def _pod_dependency_result():
+    return PODSubspaceDependencyResult(
+        similarity=pt.tensor(
+            [
+                [[0.7, 0.6], [0.5, 0.4]],
+                [[1.0, 1.0], [0.9, 0.8]],
+            ]
+        ),
+        ranks=pt.tensor([1, 3]),
+        sequence_fractions=pt.tensor([0.5, 1.0]),
+        snapshot_strides=pt.tensor([1, 2]),
+        n_snapshots=pt.tensor([[50, 25], [100, 50]]),
+        optimal_ranks=pt.tensor([[2, 2], [3, 2]]),
+        reference_optimal_rank=3,
+    )
+
+
+def test_plot_pod_subspace_data_dependency():
+    result = _pod_dependency_result()
+
+    figure, axes = plot_pod_subspace_data_dependency(result, rank=3, annotate=True)
+
+    plotted = axes.images[0].get_array()
+    assert np.allclose(plotted, result.similarity[:, :, 1].T.numpy())
+    assert axes.get_xlabel() == r"sequence length $[\%]$"
+    assert axes.get_ylabel() == "snapshot stride"
+    assert len(axes.texts) == 4
+    assert len(figure.axes) == 2
+    assert figure.axes[1].get_ylabel() == r"$S_{3}$"
+    plt.close(figure)
+
+
+def test_plot_pod_subspace_data_dependency_rank_curves():
+    result = _pod_dependency_result()
+
+    figure, axes = plot_pod_subspace_data_dependency_ranks(
+        result, sequence_fraction=1.0
+    )
+
+    assert len(axes.lines) == 2
+    assert np.array_equal(axes.lines[0].get_xdata(), result.ranks.numpy())
+    assert np.allclose(axes.lines[1].get_ydata(), result.similarity[1, 1].numpy())
+    assert axes.get_ylim() == pytest.approx((0.0, 1.02))
+    assert axes.get_legend() is not None
+    plt.close(figure)
+
+
+def test_plot_pod_subspace_data_dependency_validates_selection():
+    result = _pod_dependency_result()
+
+    with pytest.raises(ValueError, match="not present"):
+        plot_pod_subspace_data_dependency(result, rank=2)
+    with pytest.raises(ValueError, match="not present"):
+        plot_pod_subspace_data_dependency_ranks(result, sequence_fraction=0.6)
 
 
 def test_plot_mode_similarity_masks_upper_triangle_automatically():
@@ -100,7 +160,7 @@ def test_AMSPOD_show_mode_similarity():
     spod = AMSPOD.__new__(AMSPOD)
     spod._frequency = pt.tensor([0.0, 1.0, 2.0])
     spod._modes = pt.rand((3, 4, 1), dtype=pt.complex64)
-    spod._weight = pt.ones((4, 1))
+    spod._sqrt_weight = pt.ones((4, 1))
     spod._adaptive = False
 
     figure, axes = spod.show_mode_similarity()

@@ -47,20 +47,23 @@ def grid_element_areas(
 
 def element_areas_to_node_weights(
     element_areas: pt.Tensor,
-    square_root: bool = True,
+    square_root: bool = False,
     normalize: bool = True,
 ) -> pt.Tensor:
     """Convert structured-grid element areas to node weights.
 
     Each node receives the arithmetic mean of its adjacent element areas.
     Corner, edge, and interior nodes therefore average one, two, and four
-    elements, respectively. By default, the square root is taken to produce
-    weights suitable for weighted inner products, and the weights are
-    normalized by their maximum value.
+    elements, respectively. By default, raw diagonal inner-product weights are
+    returned and normalized by their maximum value. These can be passed
+    directly to analysis classes such as :class:`flowtorch.analysis.SVD` and
+    :class:`flowtorch.analysis.AMSPOD`, which apply the square root internally.
+    Set ``square_root=True`` only when manually weighting data or modes.
 
     :param element_areas: non-negative areas with shape ``(nx - 1, ny - 1)``
     :type element_areas: pt.Tensor
-    :param square_root: take the square root of the nodal areas
+    :param square_root: return multiplicative square-root factors instead of
+        raw inner-product weights, defaults to ``False``
     :type square_root: bool, optional
     :param normalize: normalize weights by their maximum value
     :type normalize: bool, optional

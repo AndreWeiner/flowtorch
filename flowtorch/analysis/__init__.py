@@ -6,7 +6,12 @@ from .hodmd import HODMD
 from .optdmd import OptDMD
 from .hooptdmd import HOOptDMD
 from .mssa import MSSA, PMSSA
-from .svd import SVD
+from .svd import (
+    PODSubspaceDependencyResult,
+    SVD,
+    pod_subspace_data_dependency,
+    subspace_similarity,
+)
 
 # from .linear_control import LinearControlModel
 from .linear_model import LinearModel
@@ -29,8 +34,11 @@ __all__ = [
     "PAMSPOD",
     "PDFT",
     "PMSSA",
+    "pod_subspace_data_dependency",
+    "PODSubspaceDependencyResult",
     "PSPExplorer",
     "SVD",
+    "subspace_similarity",
 ]
 
 
