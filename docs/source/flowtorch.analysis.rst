@@ -97,6 +97,14 @@ flowtorch.analysis.spod
    :undoc-members:
    :show-inheritance:
 
+flowtorch.analysis.propagation
+------------------------------
+
+.. automodule:: flowtorch.analysis.propagation
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 flowtorch.analysis.utils
 ------------------------
 
