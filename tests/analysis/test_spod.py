@@ -9,6 +9,7 @@ from flowtorch.analysis.spod import (
     _prepare_weights,
     _calc_mode_similarity,
     _free_memory,
+    mode_similarity,
 )
 
 
@@ -35,6 +36,39 @@ def test_calc_mode_similarity():
     m3 = -(m[0] * m[0].conj() + m[1] * m[1].conj()) / m[2].conj()
     m_orth = pt.tensor([m[0], m[1], m3])
     assert _calc_mode_similarity(m, m_orth) < 1.0e-5
+
+
+def test_mode_similarity_sets():
+    first = pt.eye(2, dtype=pt.complex64)
+    phase = pt.exp(1j * pt.tensor(0.7))
+    second = pt.stack(
+        (phase * first[:, 0], (first[:, 0] + first[:, 1]) / pt.sqrt(pt.tensor(2.0))),
+        dim=1,
+    )
+
+    similarity = mode_similarity(first, second)
+
+    expected = pt.tensor(
+        [[1.0, 1.0 / pt.sqrt(pt.tensor(2.0))], [0.0, 1.0 / pt.sqrt(pt.tensor(2.0))]]
+    )
+    pt.testing.assert_close(similarity, expected)
+    assert similarity.shape == (2, 2)
+    assert similarity.dtype == pt.float32
+
+
+def test_mode_similarity_invalid_modes():
+    modes = pt.eye(2)
+    modes_with_zero = pt.cat((modes, pt.zeros((2, 1))), dim=1)
+    similarity = mode_similarity(modes_with_zero, modes_with_zero)
+    assert bool(pt.isnan(similarity[2]).all())
+    assert bool(pt.isnan(similarity[:, 2]).all())
+
+    with raises(ValueError, match="two-dimensional"):
+        _ = mode_similarity(modes[:, 0], modes)
+    with raises(ValueError, match="state dimension"):
+        _ = mode_similarity(modes, pt.ones((3, 1)))
+    with raises(ValueError, match="floating-point or complex"):
+        _ = mode_similarity(pt.eye(2, dtype=pt.int64), modes)
 
 
 def test_free_memory():
@@ -197,6 +231,54 @@ def test_AMSPOD_top_modes_adaptive_eig_idx_limit():
     with pytest.warns(UserWarning, match="using eig_idx=1"):
         top_modes = spod.top_modes(2, eig_idx=3)
     pt.testing.assert_close(top_modes, pt.tensor([1, 5]))
+
+
+def test_AMSPOD_mode_similarity_uses_spatial_weight():
+    spod = AMSPOD.__new__(AMSPOD)
+    spod._modes = pt.tensor(
+        [
+            [[1.0 + 0.0j], [1.0 + 0.0j]],
+            [[1.0 + 0.0j], [-1.0 + 0.0j]],
+        ]
+    )
+    spod._weight = pt.tensor([1.0, 2.0]).unsqueeze(-1)
+    spod._adaptive = False
+
+    similarity = spod.mode_similarity()
+
+    pt.testing.assert_close(similarity, pt.tensor([[1.0, 0.6], [0.6, 1.0]]))
+
+
+def test_AMSPOD_mode_similarity_between_branches():
+    spod = AMSPOD.__new__(AMSPOD)
+    spod._modes = pt.rand((4, 3, 2), dtype=pt.complex64)
+    spod._weight = pt.ones((3, 1))
+    spod._adaptive = False
+
+    first_second = spod.mode_similarity(0, 1)
+    second_first = spod.mode_similarity(1, 0)
+
+    assert first_second.shape == (4, 4)
+    pt.testing.assert_close(first_second, second_first.T)
+    with raises(ValueError, match="first_mode_idx"):
+        _ = spod.mode_similarity(-1, 0)
+    with raises(ValueError, match="second_mode_idx"):
+        _ = spod.mode_similarity(0, 2)
+    with raises(ValueError, match="must be an integer"):
+        _ = spod.mode_similarity(True, 0)
+
+
+def test_AMSPOD_mode_similarity_masks_unavailable_adaptive_modes():
+    spod = AMSPOD.__new__(AMSPOD)
+    spod._modes = pt.rand((3, 4, 3), dtype=pt.complex64)
+    spod._weight = pt.ones((4, 1))
+    spod._adaptive = True
+    spod._log = {"n_tapers": pt.tensor([2, 3, 2])}
+
+    similarity = spod.mode_similarity(2, 0)
+
+    assert bool(pt.isnan(similarity[[0, 2]]).all())
+    assert bool(pt.isfinite(similarity[1]).all())
 
 
 def test_AMSPOD_temporal_coefficients():
@@ -374,3 +456,6 @@ def test_PAMSPOD():
     assert r.dtype == dm.dtype
     m = spod.get_mode(5, 0)
     assert m.shape == (M,)
+    reduced_modes = spod._modes[:, :, 0].T
+    expected_similarity = mode_similarity(reduced_modes, reduced_modes)
+    pt.testing.assert_close(spod.mode_similarity(), expected_similarity)

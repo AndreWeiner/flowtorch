@@ -11,7 +11,7 @@ from .svd import SVD
 # from .linear_control import LinearControlModel
 from .linear_model import LinearModel
 from .dft import DFT, PDFT
-from .spod import AMSPOD, PAMSPOD
+from .spod import AMSPOD, PAMSPOD, mode_similarity
 from .periodogram import AMPS
 
 __all__ = [
@@ -23,6 +23,7 @@ __all__ = [
     "HOOptDMD",
     "LinearModel",
     "MSSA",
+    "mode_similarity",
     "OptDMD",
     "PAMSPOD",
     "PDFT",
