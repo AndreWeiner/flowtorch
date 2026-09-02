@@ -10,6 +10,7 @@ from flowtorch.analysis.statistics import (
     linear_trend,
     moment_data_dependency,
     spatial_statistics,
+    spatiotemporal_histogram,
     statistical_moments,
 )
 
@@ -281,6 +282,156 @@ def test_spatial_statistics_validates_callable_batches():
 
     with pytest.raises(ValueError, match="spatial dimensions"):
         spatial_statistics(source, n_snapshots=4, batch_size=2)
+
+
+def test_spatiotemporal_histogram_uses_50_bins_by_default():
+    result = spatiotemporal_histogram(pt.arange(12.0).reshape(3, 4), batch_size=2)
+
+    assert result.histogram.shape == (50,)
+    assert result.bin_edges.shape == (51,)
+    pt.testing.assert_close(result.histogram.sum(), pt.tensor(12.0))
+
+
+def test_spatiotemporal_histogram_accumulates_spatial_weights_across_batches():
+    data = pt.tensor([[0.0, 1.0, 2.0], [1.0, 2.0, 3.0]], dtype=pt.float64)
+
+    result = spatiotemporal_histogram(
+        data,
+        bins=(0.0, 1.0, 2.0, 3.0),
+        batch_size=2,
+        spatial_weight=pt.tensor([1.0, 2.0], dtype=pt.float64),
+    )
+
+    pt.testing.assert_close(result.histogram, data.new_tensor([1.0, 3.0, 5.0]))
+    pt.testing.assert_close(result.bin_edges, data.new_tensor([0.0, 1.0, 2.0, 3.0]))
+
+
+def test_spatiotemporal_histogram_discovers_exact_range_in_two_passes():
+    data = pt.arange(5.0).reshape(1, 5)
+    calls = []
+
+    def source(start, stop):
+        calls.append((start, stop))
+        return data[:, start:stop]
+
+    result = spatiotemporal_histogram(source, n_snapshots=5, bins=2, batch_size=2)
+
+    assert calls == [(0, 2), (2, 4), (4, 5)] * 2
+    pt.testing.assert_close(result.bin_edges, data.new_tensor([0.0, 2.0, 4.0]))
+    pt.testing.assert_close(result.histogram, data.new_tensor([2.0, 3.0]))
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"bins": (0.0, 2.0, 4.0)},
+        {"bins": 2, "value_range": (0.0, 4.0)},
+    ],
+)
+def test_spatiotemporal_histogram_known_edges_load_once(kwargs):
+    data = pt.arange(5.0).reshape(1, 5)
+    calls = []
+
+    def source(start, stop):
+        calls.append((start, stop))
+        return data[:, start:stop]
+
+    result = spatiotemporal_histogram(source, n_snapshots=5, batch_size=2, **kwargs)
+
+    assert calls == [(0, 2), (2, 4), (4, 5)]
+    pt.testing.assert_close(result.histogram, data.new_tensor([2.0, 3.0]))
+
+
+def test_spatiotemporal_histogram_excludes_zero_weight_from_automatic_range():
+    data = pt.tensor([[-100.0, 100.0], [0.0, 2.0]], dtype=pt.float64)
+
+    result = spatiotemporal_histogram(
+        data, bins=2, spatial_weight=data.new_tensor([0.0, 3.0])
+    )
+
+    pt.testing.assert_close(result.bin_edges, data.new_tensor([0.0, 1.0, 2.0]))
+    pt.testing.assert_close(result.histogram, data.new_tensor([3.0, 3.0]))
+
+
+def test_spatiotemporal_histogram_expands_constant_automatic_range():
+    data = pt.full((2, 3), 4.0)
+
+    result = spatiotemporal_histogram(data, bins=2)
+
+    pt.testing.assert_close(result.bin_edges, data.new_tensor([3.5, 4.0, 4.5]))
+    pt.testing.assert_close(result.histogram, data.new_tensor([0.0, 6.0]))
+
+
+def test_spatiotemporal_histogram_density_integrates_to_one():
+    data = pt.tensor([[0.25, 1.0, 3.0]], dtype=pt.float64)
+
+    result = spatiotemporal_histogram(data, bins=(0.0, 0.5, 2.0, 4.0), density=True)
+
+    widths = result.bin_edges[1:] - result.bin_edges[:-1]
+    pt.testing.assert_close((result.histogram * widths).sum(), data.new_tensor(1.0))
+    pt.testing.assert_close(
+        result.histogram, data.new_tensor([2.0 / 3.0, 2.0 / 9.0, 1.0 / 6.0])
+    )
+
+
+def test_spatiotemporal_histogram_supports_nonfinal_snapshot_dimension():
+    data = pt.tensor([[0.0, 1.0], [2.0, 3.0], [4.0, 5.0]])
+
+    result = spatiotemporal_histogram(
+        data, bins=(0.0, 2.0, 4.0, 5.0), snapshot_dim=0, batch_size=2
+    )
+
+    pt.testing.assert_close(result.histogram, data.new_tensor([2.0, 2.0, 2.0]))
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"bins": 0}, "positive integer"),
+        ({"bins": (0.0,)}, "at least two"),
+        ({"bins": (0.0, 1.0, 1.0)}, "strictly increasing"),
+        ({"bins": (0.0, float("inf"))}, "finite real"),
+        ({"bins": 2, "value_range": (1.0, 1.0)}, "smaller"),
+        (
+            {"bins": (0.0, 1.0), "value_range": (0.0, 1.0)},
+            "cannot be used",
+        ),
+        ({"density": 1}, "boolean"),
+    ],
+)
+def test_spatiotemporal_histogram_validates_controls(kwargs, message):
+    with pytest.raises(ValueError, match=message):
+        spatiotemporal_histogram(pt.rand((2, 3)), **kwargs)
+
+
+def test_spatiotemporal_histogram_rejects_empty_density_mass():
+    with pytest.raises(ValueError, match="no values"):
+        spatiotemporal_histogram(
+            pt.arange(4.0).reshape(2, 2),
+            bins=2,
+            value_range=(10.0, 20.0),
+            density=True,
+        )
+
+
+def test_spatiotemporal_histogram_validates_callable_batches():
+    def source(start, stop):
+        spatial_size = 2 if start == 0 else 3
+        return pt.ones((spatial_size, stop - start))
+
+    with pytest.raises(ValueError, match="spatial dimensions"):
+        spatiotemporal_histogram(
+            source,
+            n_snapshots=4,
+            bins=2,
+            value_range=(0.0, 1.0),
+            batch_size=2,
+        )
+
+
+def test_spatiotemporal_histogram_rejects_nonfinite_snapshots():
+    with pytest.raises(ValueError, match="finite values"):
+        spatiotemporal_histogram(pt.tensor([[0.0, float("nan")]]), bins=2)
 
 
 def test_linear_trend_matches_exact_fit_with_irregular_times():
