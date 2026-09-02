@@ -9,6 +9,7 @@ from typing import Dict, Tuple
 
 _EXPORTS: Dict[str, Tuple[str, str]] = {
     "FOAMDataloader": ("foam_dataloader", "FOAMDataloader"),
+    "FOAMNumpyDataloader": ("foam_numpy_dataloader", "FOAMNumpyDataloader"),
     "FOAMCase": ("foam_dataloader", "FOAMCase"),
     "FOAMMesh": ("foam_dataloader", "FOAMMesh"),
     "HDF5Dataloader": ("hdf5_file", "HDF5Dataloader"),
