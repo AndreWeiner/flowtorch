@@ -18,6 +18,17 @@ from .linear_model import LinearModel
 from .dft import DFT, PDFT
 from .spod import AMSPOD, PAMSPOD, mode_similarity
 from .periodogram import AMPS
+from .statistics import (
+    LinearTrendResult,
+    MOMENT_NAMES,
+    MomentDependencyResult,
+    MomentFields,
+    RunningMoments,
+    detect_linear_trend,
+    linear_trend,
+    moment_data_dependency,
+    statistical_moments,
+)
 
 __all__ = [
     "AMPS",
@@ -28,8 +39,13 @@ __all__ = [
     "HODMD",
     "HOOptDMD",
     "LinearModel",
+    "LinearTrendResult",
+    "MOMENT_NAMES",
     "MSSA",
     "mode_similarity",
+    "moment_data_dependency",
+    "MomentDependencyResult",
+    "MomentFields",
     "OptDMD",
     "PAMSPOD",
     "PDFT",
@@ -37,8 +53,12 @@ __all__ = [
     "pod_subspace_data_dependency",
     "PODSubspaceDependencyResult",
     "PSPExplorer",
+    "RunningMoments",
     "SVD",
+    "statistical_moments",
     "subspace_similarity",
+    "detect_linear_trend",
+    "linear_trend",
 ]
 
 

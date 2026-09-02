@@ -105,6 +105,14 @@ flowtorch.analysis.propagation
    :undoc-members:
    :show-inheritance:
 
+flowtorch.analysis.statistics
+-----------------------------
+
+.. automodule:: flowtorch.analysis.statistics
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 flowtorch.analysis.utils
 ------------------------
 
