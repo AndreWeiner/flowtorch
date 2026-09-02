@@ -20,6 +20,7 @@ from .spod import AMSPOD, PAMSPOD, mode_similarity
 from .periodogram import AMPS
 from .statistics import (
     DEFAULT_QUANTILES,
+    HistogramResult,
     LinearTrendResult,
     MOMENT_NAMES,
     MomentDependencyResult,
@@ -30,6 +31,7 @@ from .statistics import (
     linear_trend,
     moment_data_dependency,
     spatial_statistics,
+    spatiotemporal_histogram,
     statistical_moments,
 )
 
@@ -42,6 +44,7 @@ __all__ = [
     "DMD",
     "HODMD",
     "HOOptDMD",
+    "HistogramResult",
     "LinearModel",
     "LinearTrendResult",
     "MOMENT_NAMES",
@@ -61,6 +64,7 @@ __all__ = [
     "SVD",
     "spatial_statistics",
     "SpatialStatisticsResult",
+    "spatiotemporal_histogram",
     "statistical_moments",
     "subspace_similarity",
     "detect_linear_trend",

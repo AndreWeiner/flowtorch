@@ -61,6 +61,13 @@ class SpatialStatisticsResult(NamedTuple):
     quantile_levels: pt.Tensor
 
 
+class HistogramResult(NamedTuple):
+    """Spatiotemporal histogram values and bin edges."""
+
+    histogram: pt.Tensor
+    bin_edges: pt.Tensor
+
+
 def _normalize_snapshot_dim(snapshot_dim: int, ndim: int) -> int:
     if not isinstance(snapshot_dim, Integral) or isinstance(snapshot_dim, bool):
         raise ValueError("snapshot_dim must be an integer")
@@ -546,6 +553,235 @@ def spatial_statistics(
         quantiles=pt.cat(quantile_batches, dim=1),
         quantile_levels=levels,
     )
+
+
+def _prepare_histogram_bins(
+    bins: Union[int, Sequence[float], pt.Tensor],
+) -> Union[int, list[float]]:
+    """Validate a bin count or explicit bin edges."""
+    if isinstance(bins, Integral) and not isinstance(bins, bool):
+        if int(bins) < 1:
+            raise ValueError("bins must be a positive integer")
+        return int(bins)
+    if isinstance(bins, pt.Tensor):
+        if bins.ndim != 1:
+            raise ValueError("bin edges must be one-dimensional")
+        values = bins.detach().cpu().tolist()
+    elif isinstance(bins, Sequence):
+        values = list(bins)
+    else:
+        raise ValueError("bins must be a positive integer or bin edges")
+    if len(values) < 2:
+        raise ValueError("bin edges must contain at least two values")
+    if any(
+        not isinstance(value, Real)
+        or isinstance(value, bool)
+        or not isfinite(float(value))
+        for value in values
+    ):
+        raise ValueError("bin edges must contain only finite real values")
+    normalized = [float(value) for value in values]
+    if any(first >= second for first, second in zip(normalized, normalized[1:])):
+        raise ValueError("bin edges must be strictly increasing")
+    return normalized
+
+
+def _prepare_histogram_range(
+    value_range: Optional[Sequence[float]],
+) -> Optional[tuple[float, float]]:
+    """Validate an optional histogram value range."""
+    if value_range is None:
+        return None
+    try:
+        values = list(value_range)
+    except TypeError as error:
+        raise ValueError("value_range must contain a minimum and maximum") from error
+    if len(values) != 2:
+        raise ValueError("value_range must contain a minimum and maximum")
+    if any(
+        not isinstance(value, Real)
+        or isinstance(value, bool)
+        or not isfinite(float(value))
+        for value in values
+    ):
+        raise ValueError("value_range values must be finite real numbers")
+    minimum, maximum = (float(value) for value in values)
+    if minimum >= maximum:
+        raise ValueError("value_range minimum must be smaller than maximum")
+    return minimum, maximum
+
+
+def spatiotemporal_histogram(
+    source: SnapshotSource,
+    n_snapshots: Optional[int] = None,
+    bins: Union[int, Sequence[float], pt.Tensor] = 50,
+    value_range: Optional[Sequence[float]] = None,
+    batch_size: int = 32,
+    snapshot_dim: int = -1,
+    spatial_weight: Optional[pt.Tensor] = None,
+    density: bool = False,
+) -> HistogramResult:
+    r"""Compute a histogram reduced across space and time in batches.
+
+    Every snapshot has equal temporal weight. If ``spatial_weight`` is given,
+    the weight of each spatial location is applied once per snapshot and
+    locations with zero weight are excluded. Counts are returned by default.
+    With ``density=True``, bin values are normalized so that
+
+    .. math::
+
+        \sum_i h_i \Delta x_i = 1.
+
+    Integer bins with no ``value_range`` require two batched passes over the
+    source: one to discover the exact global range and one to accumulate the
+    histogram. Explicit edges or a value range require only one pass. Bins are
+    left-inclusive and right-exclusive, except for the final bin, which also
+    includes its upper edge.
+
+    :param source: snapshot tensor or indexed batch callable
+    :type source: Union[pt.Tensor, Callable[[int, int], pt.Tensor]]
+    :param n_snapshots: total count required for a callable source
+    :type n_snapshots: int, optional
+    :param bins: positive bin count or strictly increasing edges, defaults to 50
+    :type bins: Union[int, Sequence[float], pt.Tensor], optional
+    :param value_range: minimum and maximum for integer bins
+    :type value_range: Sequence[float], optional
+    :param batch_size: maximum snapshots loaded together, defaults to 32
+    :type batch_size: int, optional
+    :param snapshot_dim: dimension containing snapshots, defaults to ``-1``
+    :type snapshot_dim: int, optional
+    :param spatial_weight: non-negative spatial weights
+    :type spatial_weight: pt.Tensor, optional
+    :param density: normalize by total weight and bin width, defaults to False
+    :type density: bool, optional
+    :return: histogram values and bin edges
+    :rtype: HistogramResult
+    """
+    size = _validate_batch_size(batch_size)
+    n_total = _source_size(source, n_snapshots, snapshot_dim)
+    prepared_bins = _prepare_histogram_bins(bins)
+    prepared_range = _prepare_histogram_range(value_range)
+    if not isinstance(prepared_bins, int) and prepared_range is not None:
+        raise ValueError("value_range cannot be used with explicit bin edges")
+    if not isinstance(density, bool):
+        raise ValueError("density must be a boolean")
+
+    expected_shape: Optional[pt.Size] = None
+    expected_device: Optional[pt.device] = None
+    expected_dtype: Optional[pt.dtype] = None
+    positive_weight: Optional[pt.Tensor] = None
+    flat_weight: Optional[pt.Tensor] = None
+
+    def load_flat_batch(start: int, stop: int) -> pt.Tensor:
+        nonlocal expected_shape, expected_device, expected_dtype
+        nonlocal positive_weight, flat_weight
+        batch = _load_batch(source, start, stop, snapshot_dim)
+        snapshots = _move_snapshots_last(batch, snapshot_dim)
+        spatial_shape = snapshots.shape[:-1]
+        if snapshots[..., 0].numel() < 1:
+            raise ValueError("snapshots must contain at least one spatial value")
+        if expected_shape is None:
+            expected_shape = spatial_shape
+            expected_device = snapshots.device
+            expected_dtype = snapshots.dtype
+            weight = _prepare_spatial_weight(spatial_weight, snapshots[..., 0])
+            if weight is None:
+                weight = snapshots.new_ones(spatial_shape)
+            positive_weight = weight.reshape(-1) > 0.0
+            flat_weight = weight.reshape(-1)[positive_weight]
+        else:
+            if spatial_shape != expected_shape:
+                raise ValueError("all batches must have matching spatial dimensions")
+            if snapshots.device != expected_device:
+                raise ValueError("all batches must be on the same device")
+            if snapshots.dtype != expected_dtype:
+                raise ValueError("all batches must have the same dtype")
+        assert positive_weight is not None
+        return snapshots.reshape(-1, snapshots.shape[-1])[positive_weight]
+
+    if isinstance(prepared_bins, int) and prepared_range is None:
+        range_minimum: Optional[pt.Tensor] = None
+        range_maximum: Optional[pt.Tensor] = None
+        for start in range(0, n_total, size):
+            stop = min(start + size, n_total)
+            flat = load_flat_batch(start, stop)
+            batch_minimum = flat.min()
+            batch_maximum = flat.max()
+            range_minimum = (
+                batch_minimum
+                if range_minimum is None
+                else pt.minimum(range_minimum, batch_minimum)
+            )
+            range_maximum = (
+                batch_maximum
+                if range_maximum is None
+                else pt.maximum(range_maximum, batch_maximum)
+            )
+        assert range_minimum is not None
+        assert range_maximum is not None
+        if bool(range_minimum == range_maximum):
+            range_minimum = range_minimum - 0.5
+            range_maximum = range_maximum + 0.5
+        edges = pt.linspace(
+            range_minimum,
+            range_maximum,
+            prepared_bins + 1,
+            device=range_minimum.device,
+            dtype=range_minimum.dtype,
+        )
+    else:
+        first_stop = min(size, n_total)
+        first_flat = load_flat_batch(0, first_stop)
+        assert expected_device is not None
+        assert expected_dtype is not None
+        if isinstance(prepared_bins, int):
+            assert prepared_range is not None
+            edges = pt.linspace(
+                prepared_range[0],
+                prepared_range[1],
+                prepared_bins + 1,
+                device=expected_device,
+                dtype=expected_dtype,
+            )
+        else:
+            edges = pt.tensor(
+                prepared_bins, device=expected_device, dtype=expected_dtype
+            )
+
+    if not bool((edges[1:] > edges[:-1]).all()):
+        raise ValueError("bin edges must remain strictly increasing in source dtype")
+
+    histogram = edges.new_zeros(edges.numel() - 1)
+
+    def accumulate(flat: pt.Tensor) -> None:
+        assert flat_weight is not None
+        values = flat.reshape(-1)
+        weights = flat_weight.unsqueeze(-1).expand_as(flat).reshape(-1)
+        inside = (values >= edges[0]) & (values <= edges[-1])
+        selected_values = values[inside]
+        selected_weights = weights[inside]
+        indices = pt.bucketize(selected_values, edges, right=True) - 1
+        indices = indices.clamp_max(histogram.numel() - 1)
+        histogram.scatter_add_(0, indices, selected_weights)
+
+    if isinstance(prepared_bins, int) and prepared_range is None:
+        for start in range(0, n_total, size):
+            stop = min(start + size, n_total)
+            accumulate(load_flat_batch(start, stop))
+    else:
+        accumulate(first_flat)
+        for start in range(first_stop, n_total, size):
+            stop = min(start + size, n_total)
+            accumulate(load_flat_batch(start, stop))
+
+    if density:
+        total_weight = histogram.sum()
+        if not bool(total_weight > 0.0):
+            raise ValueError(
+                "density is undefined when no values fall inside the range"
+            )
+        histogram = histogram / (total_weight * (edges[1:] - edges[:-1]))
+    return HistogramResult(histogram=histogram, bin_edges=edges)
 
 
 def _spatial_reduce(
