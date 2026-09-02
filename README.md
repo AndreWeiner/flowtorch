@@ -65,7 +65,7 @@ Currently, the following sub-packages are under active development. Note that so
 - mixed-precision operations (single/double); switching to single precision makes your life significantly easier when dealing with large datasets
 - user-friendly Python library that integrates easily with popular tools and libraries like *Jupyterlab*, *Matplotlib*, *Pandas*, or *Numpy*
 - a rich tutorial collection to help you get started
-- interfaces to common data formats like [OpenFOAM](https://www.openfoam.com/), [VTK](https://vtk.org/) (for Flexi and SU2), [TAU](https://www.dlr.de/en/as/research-and-transfer/software-solutions/aerodynamics/software-tau), [iPSP](https://www.dlr.de/en/as/about-us/departments/experimental-methods/pressure-sensitive-paint-psp), CSV (for DaVis PIV data and raw OpenFOAM output)
+- interfaces to common data formats like [OpenFOAM](https://www.openfoam.com/), batched NumPy output from the [`foamToNumpy`](https://github.com/tanujravi/numpyToFoam) function object, [VTK](https://vtk.org/) (for Flexi and SU2), [TAU](https://www.dlr.de/en/as/research-and-transfer/software-solutions/aerodynamics/software-tau), [iPSP](https://www.dlr.de/en/as/about-us/departments/experimental-methods/pressure-sensitive-paint-psp), and CSV (for DaVis PIV data and raw OpenFOAM output)
 
 *flowTorch* can also be used easily in combination with existing Python packages for analysis and reduced-order modeling thanks to the interoperability between PyTorch and NumPy. Great examples are (by no means a comprehensive list):
 

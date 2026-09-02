@@ -114,8 +114,27 @@ class FOAMNumpyDataloader(Dataloader):
 
     Examples
     --------
+    Configure the function object to write time and geometry metadata:
+
+    .. code-block:: text
+
+        numpyExport
+        {
+            type                foamToNumpy;
+            libs                (numpyFunctionObjects);
+            fields              (p U);
+            writeTimes          true;
+            writeCellCentres    true;
+            writeCellVolumes    true;
+        }
+
+    Load all automatically merged restart segments, except any explicitly
+    ignored segments:
+
     >>> from flowtorch.data import FOAMNumpyDataloader
-    >>> loader = FOAMNumpyDataloader("postProcessing/numpyExport")
+    >>> loader = FOAMNumpyDataloader(
+    ...     "postProcessing/numpyExport", ignore_segments=["0.5_1"]
+    ... )
     >>> pressure = loader.load_snapshot("p", loader.write_times)
 
     :param path: function-object output directory or one segment directory
