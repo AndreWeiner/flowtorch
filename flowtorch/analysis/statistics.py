@@ -8,6 +8,7 @@ import torch as pt
 
 SnapshotSource = Union[pt.Tensor, Callable[[int, int], pt.Tensor]]
 MOMENT_NAMES = ("mean", "variance", "skewness", "kurtosis")
+DEFAULT_QUANTILES = (0.05, 0.10, 0.25, 0.50, 0.75, 0.95)
 
 
 class MomentFields(NamedTuple):
@@ -43,6 +44,21 @@ class LinearTrendResult(NamedTuple):
     r_squared: pt.Tensor
     normalized_change: pt.Tensor
     n_snapshots: int
+
+
+class SpatialStatisticsResult(NamedTuple):
+    """Spatially reduced statistics for every snapshot.
+
+    ``minimum``, ``maximum``, and ``mean`` have shape ``(n_snapshots,)``.
+    ``quantiles`` has shape ``(n_quantiles, n_snapshots)`` and follows the
+    probabilities stored in ``quantile_levels``.
+    """
+
+    minimum: pt.Tensor
+    maximum: pt.Tensor
+    mean: pt.Tensor
+    quantiles: pt.Tensor
+    quantile_levels: pt.Tensor
 
 
 def _normalize_snapshot_dim(snapshot_dim: int, ndim: int) -> int:
@@ -365,6 +381,171 @@ def _prepare_spatial_weight(
     if not bool((expanded > 0.0).any()):
         raise ValueError("spatial_weight must contain at least one positive value")
     return expanded
+
+
+def _prepare_quantiles(quantiles: Sequence[float]) -> list[float]:
+    """Validate spatial quantile probabilities."""
+    if isinstance(quantiles, pt.Tensor):
+        if quantiles.ndim != 1:
+            raise ValueError("quantiles must be one-dimensional")
+        values = quantiles.detach().cpu().tolist()
+    else:
+        values = list(quantiles)
+    if len(values) == 0:
+        raise ValueError("quantiles must contain at least one probability")
+    if any(
+        not isinstance(value, Real)
+        or isinstance(value, bool)
+        or not isfinite(float(value))
+        or float(value) < 0.0
+        or float(value) > 1.0
+        for value in values
+    ):
+        raise ValueError("quantiles must lie in the interval [0, 1]")
+    normalized = [float(value) for value in values]
+    if any(first >= second for first, second in zip(normalized, normalized[1:])):
+        raise ValueError("quantiles must be strictly increasing")
+    return normalized
+
+
+def _weighted_quantiles(
+    values: pt.Tensor,
+    weight: pt.Tensor,
+    quantiles: pt.Tensor,
+) -> pt.Tensor:
+    """Compute linearly interpolated weighted quantiles for a batch."""
+    sorted_values, indices = values.sort(dim=0)
+    expanded_weight = weight.unsqueeze(-1).expand_as(values)
+    sorted_weight = expanded_weight.gather(0, indices)
+    total_weight = sorted_weight.sum(dim=0, keepdim=True)
+    positions = (sorted_weight.cumsum(dim=0) - 0.5 * sorted_weight) / total_weight
+
+    if sorted_values.shape[0] == 1:
+        return sorted_values.expand(quantiles.numel(), -1)
+
+    values_by_snapshot = sorted_values.T.contiguous()
+    positions_by_snapshot = positions.T.contiguous()
+    queries = (
+        quantiles.unsqueeze(0).expand(values_by_snapshot.shape[0], -1).contiguous()
+    )
+    upper = pt.searchsorted(positions_by_snapshot, queries)
+    upper = upper.clamp(1, values_by_snapshot.shape[1] - 1)
+    lower = upper - 1
+    lower_position = positions_by_snapshot.gather(1, lower)
+    upper_position = positions_by_snapshot.gather(1, upper)
+    lower_value = values_by_snapshot.gather(1, lower)
+    upper_value = values_by_snapshot.gather(1, upper)
+    fraction = (queries - lower_position) / (upper_position - lower_position)
+    interpolated = lower_value + fraction * (upper_value - lower_value)
+    interpolated = pt.where(
+        queries <= positions_by_snapshot[:, :1],
+        values_by_snapshot[:, :1],
+        interpolated,
+    )
+    interpolated = pt.where(
+        queries >= positions_by_snapshot[:, -1:],
+        values_by_snapshot[:, -1:],
+        interpolated,
+    )
+    return interpolated.T
+
+
+def spatial_statistics(
+    source: SnapshotSource,
+    n_snapshots: Optional[int] = None,
+    quantiles: Sequence[float] = DEFAULT_QUANTILES,
+    batch_size: int = 32,
+    snapshot_dim: int = -1,
+    spatial_weight: Optional[pt.Tensor] = None,
+) -> SpatialStatisticsResult:
+    r"""Compute weighted spatial statistics for every snapshot in batches.
+
+    Quantiles use linear interpolation over weighted sample midpoints
+
+    .. math::
+
+        p_i = \frac{\sum_{j \leq i} w_j - w_i/2}{\sum_j w_j}.
+
+    Values outside the midpoint range are clamped to the spatial minimum or
+    maximum. Locations with zero weight do not contribute to any statistic.
+    A callable source follows the indexed ``source(start, stop)`` contract of
+    :func:`moment_data_dependency`.
+
+    :param source: snapshot tensor or indexed batch callable
+    :type source: Union[pt.Tensor, Callable[[int, int], pt.Tensor]]
+    :param n_snapshots: total count required for a callable source
+    :type n_snapshots: int, optional
+    :param quantiles: increasing probabilities in ``[0, 1]``
+    :type quantiles: Sequence[float], optional
+    :param batch_size: maximum snapshots loaded together, defaults to 32
+    :type batch_size: int, optional
+    :param snapshot_dim: dimension containing snapshots, defaults to ``-1``
+    :type snapshot_dim: int, optional
+    :param spatial_weight: non-negative spatial weights
+    :type spatial_weight: pt.Tensor, optional
+    :return: spatial statistic time series
+    :rtype: SpatialStatisticsResult
+    """
+    size = _validate_batch_size(batch_size)
+    n_total = _source_size(source, n_snapshots, snapshot_dim)
+    quantile_values = _prepare_quantiles(quantiles)
+
+    minimum: list[pt.Tensor] = []
+    maximum: list[pt.Tensor] = []
+    mean: list[pt.Tensor] = []
+    quantile_batches: list[pt.Tensor] = []
+    expected_shape: Optional[pt.Size] = None
+    expected_device: Optional[pt.device] = None
+    expected_dtype: Optional[pt.dtype] = None
+    positive_weight: Optional[pt.Tensor] = None
+    flat_weight: Optional[pt.Tensor] = None
+    levels: Optional[pt.Tensor] = None
+
+    for start in range(0, n_total, size):
+        stop = min(start + size, n_total)
+        batch = _load_batch(source, start, stop, snapshot_dim)
+        snapshots = _move_snapshots_last(batch, snapshot_dim)
+        spatial_shape = snapshots.shape[:-1]
+        spatial_size = snapshots[..., 0].numel()
+        if spatial_size < 1:
+            raise ValueError("snapshots must contain at least one spatial value")
+
+        if expected_shape is None:
+            expected_shape = spatial_shape
+            expected_device = snapshots.device
+            expected_dtype = snapshots.dtype
+            prepared_weight = _prepare_spatial_weight(spatial_weight, snapshots[..., 0])
+            if prepared_weight is None:
+                prepared_weight = snapshots.new_ones(spatial_shape)
+            positive_weight = prepared_weight.reshape(-1) > 0.0
+            flat_weight = prepared_weight.reshape(-1)[positive_weight]
+            levels = snapshots.new_tensor(quantile_values)
+        else:
+            if spatial_shape != expected_shape:
+                raise ValueError("all batches must have matching spatial dimensions")
+            if snapshots.device != expected_device:
+                raise ValueError("all batches must be on the same device")
+            if snapshots.dtype != expected_dtype:
+                raise ValueError("all batches must have the same dtype")
+
+        assert positive_weight is not None
+        assert flat_weight is not None
+        assert levels is not None
+        flat = snapshots.reshape(-1, snapshots.shape[-1])[positive_weight]
+        denominator = flat_weight.sum()
+        minimum.append(flat.min(dim=0).values)
+        maximum.append(flat.max(dim=0).values)
+        mean.append((flat * flat_weight.unsqueeze(-1)).sum(dim=0) / denominator)
+        quantile_batches.append(_weighted_quantiles(flat, flat_weight, levels))
+
+    assert levels is not None
+    return SpatialStatisticsResult(
+        minimum=pt.cat(minimum),
+        maximum=pt.cat(maximum),
+        mean=pt.cat(mean),
+        quantiles=pt.cat(quantile_batches, dim=1),
+        quantile_levels=levels,
+    )
 
 
 def _spatial_reduce(
@@ -733,6 +914,7 @@ def detect_linear_trend(
 
 
 __all__ = [
+    "DEFAULT_QUANTILES",
     "detect_linear_trend",
     "linear_trend",
     "LinearTrendResult",
@@ -741,5 +923,7 @@ __all__ = [
     "MomentDependencyResult",
     "MomentFields",
     "RunningMoments",
+    "spatial_statistics",
+    "SpatialStatisticsResult",
     "statistical_moments",
 ]

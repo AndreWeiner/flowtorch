@@ -19,14 +19,17 @@ from .dft import DFT, PDFT
 from .spod import AMSPOD, PAMSPOD, mode_similarity
 from .periodogram import AMPS
 from .statistics import (
+    DEFAULT_QUANTILES,
     LinearTrendResult,
     MOMENT_NAMES,
     MomentDependencyResult,
     MomentFields,
     RunningMoments,
+    SpatialStatisticsResult,
     detect_linear_trend,
     linear_trend,
     moment_data_dependency,
+    spatial_statistics,
     statistical_moments,
 )
 
@@ -34,6 +37,7 @@ __all__ = [
     "AMPS",
     "AMSPOD",
     "curvilinear_surface_phase_velocity",
+    "DEFAULT_QUANTILES",
     "DFT",
     "DMD",
     "HODMD",
@@ -55,6 +59,8 @@ __all__ = [
     "PSPExplorer",
     "RunningMoments",
     "SVD",
+    "spatial_statistics",
+    "SpatialStatisticsResult",
     "statistical_moments",
     "subspace_similarity",
     "detect_linear_trend",
