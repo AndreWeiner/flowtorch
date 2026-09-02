@@ -17,6 +17,14 @@ flowtorch.data.foam\_dataloader
    :undoc-members:
    :show-inheritance:
 
+flowtorch.data.foam\_numpy\_dataloader
+--------------------------------------
+
+.. automodule:: flowtorch.data.foam_numpy_dataloader
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 
 flowtorch.data.hdf5\_file
 -------------------------
