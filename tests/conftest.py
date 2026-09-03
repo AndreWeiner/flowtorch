@@ -4,5 +4,5 @@
 def pytest_configure(config):
     config.addinivalue_line(
         "markers",
-        "integration: tests that require external datasets or other large fixtures",
+        "integration: tests requiring external data, processes, or devices",
     )
