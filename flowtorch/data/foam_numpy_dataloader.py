@@ -460,6 +460,58 @@ class FOAMNumpyDataloader(Dataloader):
                 offset += processor_size
         return result[..., 0] if len(snapshots) == 1 else result
 
+    def _load_field_slice(
+        self, field: str, snapshots: List[_Snapshot], spatial_slice: slice
+    ) -> pt.Tensor:
+        """Load a contiguous global cell slice from memory-mapped arrays."""
+        for snapshot in snapshots:
+            if field not in snapshot.batch.field_files:
+                raise ValueError(
+                    f"Field {field!r} is not available at time "
+                    f"{_format_time(snapshot.time)!r}"
+                )
+        component_shape = snapshots[0].batch.field_shapes[field]
+        if any(
+            snapshot.batch.field_shapes[field] != component_shape
+            for snapshot in snapshots[1:]
+        ):
+            raise ValueError(f"Component shape changes across snapshots for {field!r}")
+        n_cells = sum(self._processor_sizes)
+        start, stop, step = spatial_slice.indices(n_cells)
+        if step != 1:
+            raise ValueError("spatial_slice must have unit stride")
+        result = pt.empty(
+            (stop - start, *component_shape, len(snapshots)), dtype=self._dtype
+        )
+        grouped: Dict[Path, List[Tuple[int, _Snapshot]]] = {}
+        for output_index, snapshot in enumerate(snapshots):
+            grouped.setdefault(snapshot.batch.path, []).append((output_index, snapshot))
+        for entries in grouped.values():
+            batch = entries[0][1].batch
+            global_offset = 0
+            for processor_size, path in zip(
+                batch.processor_sizes, batch.field_files[field]
+            ):
+                overlap_start = max(start, global_offset)
+                overlap_stop = min(stop, global_offset + processor_size)
+                if overlap_start < overlap_stop:
+                    local_start = overlap_start - global_offset
+                    local_stop = overlap_stop - global_offset
+                    target_start = overlap_start - start
+                    target_stop = overlap_stop - start
+                    array = self._load_array(path, mmap=True)
+                    for output_index, snapshot in entries:
+                        values = np.array(
+                            array[local_start:local_stop, ..., snapshot.index],
+                            copy=True,
+                            order="C",
+                        )
+                        result[target_start:target_stop, ..., output_index].copy_(
+                            pt.as_tensor(values, dtype=self._dtype)
+                        )
+                global_offset += processor_size
+        return result[..., 0] if len(snapshots) == 1 else result
+
     def load_snapshot(
         self, field_name: Union[List[str], str], time: Union[List[str], str]
     ) -> Union[List[pt.Tensor], pt.Tensor]:
@@ -471,6 +523,32 @@ class FOAMNumpyDataloader(Dataloader):
         snapshots = [self._snapshot_at(value) for value in times]
         loaded = [self._load_field(field, snapshots) for field in fields]
         return loaded if isinstance(field_name, list) else loaded[0]
+
+    def load_snapshot_slice(
+        self,
+        field_name: Union[List[str], str],
+        time: Union[List[str], str],
+        spatial_slice: slice,
+    ) -> Union[List[pt.Tensor], pt.Tensor]:
+        """Load a first-axis slice directly from processor NumPy arrays."""
+        check_list_or_str(field_name, "field_name")
+        check_list_or_str(time, "time")
+        fields = field_name if isinstance(field_name, list) else [field_name]
+        times = time if isinstance(time, list) else [time]
+        snapshots = [self._snapshot_at(value) for value in times]
+        loaded = [
+            self._load_field_slice(field, snapshots, spatial_slice) for field in fields
+        ]
+        if isinstance(time, list) and len(time) == 1:
+            loaded = [value.unsqueeze(-1) for value in loaded]
+        return loaded if isinstance(field_name, list) else loaded[0]
+
+    def snapshot_shape(self, field_name: str, time: str) -> tuple[int, ...]:
+        """Return a field shape from batch metadata."""
+        snapshot = self._snapshot_at(time)
+        if field_name not in snapshot.batch.field_shapes:
+            raise ValueError(f"Field {field_name!r} is not available at time {time!r}")
+        return (sum(self._processor_sizes), *snapshot.batch.field_shapes[field_name])
 
     @property
     def write_times(self) -> List[str]:

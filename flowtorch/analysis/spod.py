@@ -19,7 +19,7 @@ lightweight derived class wrapping around the `AMSPOD`, termed `PAMSPOD`.
 import logging
 import gc
 import warnings
-from typing import Any, Literal, Union, Tuple
+from typing import Any, Literal, Optional, Union, Tuple
 from math import sqrt
 from collections import defaultdict
 
@@ -29,6 +29,8 @@ from numpy import pi
 
 # flowTorch packages
 from .svd import SVD, _prepare_weight
+from .state_vector import StateVectorResult, StateVectorSource
+from .statistics import DistributedExecution
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -1033,11 +1035,27 @@ class AMSPOD(object):
 
 
 class PAMSPOD(AMSPOD):
-    """Perform AMSPOD on POD time coefficients."""
+    """Perform AMSPOD on POD time coefficients.
+
+    Tensor inputs retain the original in-memory behavior.  Passing a
+    :class:`~flowtorch.analysis.state_vector.StateVectorSource` uses the same
+    spatially batched and optionally distributed SVD interface::
+
+        spod = PAMSPOD(
+            source,
+            dt=0.001,
+            rank=40,
+            spatial_batch_size=100_000,
+            snapshot_batch_size=16,
+            execution=execution,
+        )
+        for spatial_slice, fields in spod.get_mode(5).iter_chunks(split=True):
+            velocity_mode = fields["U"]
+    """
 
     def __init__(
         self,
-        data_matrix: pt.Tensor,
+        data_matrix: Union[pt.Tensor, StateVectorSource],
         dt: float,
         nfft: Union[int, None] = None,
         adaptive: bool = True,
@@ -1049,6 +1067,9 @@ class PAMSPOD(AMSPOD):
         device: str = "cpu",
         verbose: bool = False,
         rank: Union[int, None] = None,
+        spatial_batch_size: Optional[int] = None,
+        snapshot_batch_size: Optional[int] = None,
+        execution: Optional[DistributedExecution] = None,
     ):
         """Perform POD-projection and compute AMSPOD.
 
@@ -1086,18 +1107,93 @@ class PAMSPOD(AMSPOD):
         :param rank: size of POD basis; if None, the full basis is used; defaults to None
         :type rank: int, optional
         """
-        self._dm_org = data_matrix
-        data_matrix_svd = data_matrix
-        if subtract_mean:
-            logger.info("subtracting temporal mean from original data matrix")
-            self._mean_org = data_matrix.mean(dim=-1)
-            data_matrix_svd = data_matrix - self._mean_org.unsqueeze(-1)
         if rank is None:
-            rank = min(data_matrix_svd.shape)
+            rank = (
+                min(data_matrix.shape)
+                if isinstance(data_matrix, pt.Tensor)
+                else min(data_matrix.layout.state_size, data_matrix.n_snapshots)
+            )
         logger.info("computing SVD of original data matrix")
-        self._svd = SVD(data_matrix_svd, rank, weight=weight)
-        super(PAMSPOD, self).__init__(
-            (self._svd.V * self._svd.s).T,
+        svd = SVD(
+            data_matrix,
+            rank,
+            weight=weight,
+            subtract_mean=subtract_mean,
+            spatial_batch_size=spatial_batch_size,
+            snapshot_batch_size=snapshot_batch_size,
+            execution=execution,
+        )
+        self._initialize_from_svd(
+            svd,
+            dt=dt,
+            nfft=nfft,
+            adaptive=adaptive,
+            max_tapers=max_tapers,
+            tolerance=tolerance,
+            keep_n_modes=keep_n_modes,
+            device=device,
+            verbose=verbose,
+        )
+
+    @classmethod
+    def from_svd(
+        cls,
+        svd: SVD,
+        dt: float,
+        nfft: Union[int, None] = None,
+        adaptive: bool = True,
+        max_tapers: int = 50,
+        tolerance: float = 1.0e-5,
+        keep_n_modes: int = 3,
+        device: str = "cpu",
+        verbose: bool = False,
+    ) -> "PAMSPOD":
+        """Construct PAMSPOD from an existing serial or distributed SVD.
+
+        The SVD's temporal factors, centering, normalization, state layout,
+        and spatial partition are reused without loading physical snapshots.
+
+        This avoids another SVD and does not read the physical snapshots while
+        constructing PAMSPOD::
+
+            svd = SVD(source, rank=20, subtract_mean=True, execution=execution)
+            spod = PAMSPOD.from_svd(svd, dt=0.001, keep_n_modes=3)
+        """
+        if not isinstance(svd, SVD):
+            raise ValueError("svd must be an SVD instance")
+        instance = cls.__new__(cls)
+        instance._initialize_from_svd(
+            svd,
+            dt,
+            nfft,
+            adaptive,
+            max_tapers,
+            tolerance,
+            keep_n_modes,
+            device,
+            verbose,
+        )
+        return instance
+
+    def _initialize_from_svd(
+        self,
+        svd: SVD,
+        dt: float,
+        nfft: Union[int, None],
+        adaptive: bool,
+        max_tapers: int,
+        tolerance: float,
+        keep_n_modes: int,
+        device: str,
+        verbose: bool,
+    ) -> None:
+        self._svd = svd
+        reduced_data = self._svd.s.unsqueeze(-1).type(self._svd.V.dtype) * (
+            self._svd.V.conj().T
+        )
+        AMSPOD.__init__(
+            self,
+            reduced_data,
             dt=dt,
             nfft=nfft,
             adaptive=adaptive,
@@ -1111,14 +1207,30 @@ class PAMSPOD(AMSPOD):
         )
 
     @property
-    def modes(self) -> pt.Tensor:
+    def modes(self) -> Union[pt.Tensor, StateVectorResult]:
         """Project modes back to the original physical space.
 
         :return: SPOD modes in full state space
         :rtype: pt.Tensor
         """
         m = super().modes
-        return pt.einsum("mr,nrk->nmk", self._svd.U.type(m.dtype), m)
+        basis = self._svd.U
+        if isinstance(basis, pt.Tensor):
+            return pt.einsum("mr,nrk->nmk", basis.type(m.dtype), m)
+
+        def produce(spatial_slice: slice) -> pt.Tensor:
+            local_basis = basis.read_chunk(spatial_slice)
+            assert isinstance(local_basis, pt.Tensor)
+            return pt.einsum("xr,frk->xfk", local_basis.type(m.dtype), m)
+
+        return StateVectorResult(
+            basis.layout,
+            basis.local_spatial_slice,
+            (m.shape[0], m.shape[2]),
+            produce,
+            basis.spatial_batch_size,
+            basis.execution,
+        )
 
     @property
     def svd(self) -> SVD:
@@ -1129,7 +1241,9 @@ class PAMSPOD(AMSPOD):
         """
         return self._svd
 
-    def get_mode(self, f_idx: int, mode_idx: int = 0) -> pt.Tensor:
+    def get_mode(
+        self, f_idx: int, mode_idx: int = 0
+    ) -> Union[pt.Tensor, StateVectorResult]:
         """Get mode/eigenvector of prescribed frequency bin and mode index.
 
         :param f_idx: index of the frequency bin
@@ -1140,7 +1254,23 @@ class PAMSPOD(AMSPOD):
         :rtype: pt.Tensor
         """
         mode = super().modes[f_idx, :, mode_idx]
-        return (self.svd.U.type(mode.dtype) * mode).sum(dim=1)
+        basis = self.svd.U
+        if isinstance(basis, pt.Tensor):
+            return (basis.type(mode.dtype) * mode).sum(dim=1)
+
+        def produce(spatial_slice: slice) -> pt.Tensor:
+            local_basis = basis.read_chunk(spatial_slice)
+            assert isinstance(local_basis, pt.Tensor)
+            return local_basis.type(mode.dtype) @ mode
+
+        return StateVectorResult(
+            basis.layout,
+            basis.local_spatial_slice,
+            (),
+            produce,
+            basis.spatial_batch_size,
+            basis.execution,
+        )
 
     def mode_reconstruction(
         self,
@@ -1148,7 +1278,7 @@ class PAMSPOD(AMSPOD):
         eig_idx: int = 0,
         dt: Union[float, None] = None,
         N: Union[int, None] = None,
-    ) -> pt.Tensor:
+    ) -> Union[pt.Tensor, StateVectorResult]:
         """Compute time-domain reconstruction based on a single mode.
 
         This method wraps around the corresponding method of the base class
@@ -1168,7 +1298,23 @@ class PAMSPOD(AMSPOD):
         :rtype: pt.Tensor
         """
         rec = super().mode_reconstruction(f_idx, eig_idx, dt, N)
-        return self.svd.U.type(rec.dtype) @ rec
+        basis = self.svd.U
+        if isinstance(basis, pt.Tensor):
+            return basis.type(rec.dtype) @ rec
+
+        def produce(spatial_slice: slice) -> pt.Tensor:
+            local_basis = basis.read_chunk(spatial_slice)
+            assert isinstance(local_basis, pt.Tensor)
+            return local_basis.type(rec.dtype) @ rec
+
+        return StateVectorResult(
+            basis.layout,
+            basis.local_spatial_slice,
+            (rec.shape[1],),
+            produce,
+            basis.spatial_batch_size,
+            basis.execution,
+        )
 
     def partial_reconstruction(
         self,
@@ -1178,7 +1324,7 @@ class PAMSPOD(AMSPOD):
         start_idx: int = 0,
         n_snapshots: int = 100,
         add_mean: bool = False,
-    ) -> pt.Tensor:
+    ) -> Union[pt.Tensor, StateVectorResult]:
         """Reconstruct snapshots in full space from selected bins and modes.
 
         See :meth:`AMSPOD.partial_reconstruction` for the argument definitions.
@@ -1189,7 +1335,35 @@ class PAMSPOD(AMSPOD):
         rec = super().partial_reconstruction(
             f_min, f_max, n_modes, start_idx, n_snapshots, add_mean=False
         )
-        rec = self.svd.U.type(rec.dtype) @ rec
-        if add_mean and hasattr(self, "_mean_org"):
-            rec += self._mean_org.unsqueeze(-1)
-        return rec
+        basis = self.svd.U
+        mean = self.svd.mean
+        if add_mean and mean is None:
+            raise RuntimeError(
+                "add_mean requires an SVD constructed with subtract_mean=True"
+            )
+        if isinstance(basis, pt.Tensor):
+            result = basis.type(rec.dtype) @ rec
+            if add_mean:
+                assert isinstance(mean, pt.Tensor)
+                result += mean.unsqueeze(-1)
+            return result
+
+        def produce(spatial_slice: slice) -> pt.Tensor:
+            local_basis = basis.read_chunk(spatial_slice)
+            assert isinstance(local_basis, pt.Tensor)
+            result = local_basis.type(rec.dtype) @ rec
+            if add_mean:
+                assert isinstance(mean, StateVectorResult)
+                local_mean = mean.read_chunk(spatial_slice)
+                assert isinstance(local_mean, pt.Tensor)
+                result += local_mean.unsqueeze(-1)
+            return result
+
+        return StateVectorResult(
+            basis.layout,
+            basis.local_spatial_slice,
+            (rec.shape[1],),
+            produce,
+            basis.spatial_batch_size,
+            basis.execution,
+        )

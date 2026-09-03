@@ -140,6 +140,39 @@ def test_load_multiple_times_fields_and_dtype(foam_numpy_output: Path):
     assert pt.equal(velocity[:, 2], pressure + 200.0)
 
 
+def test_load_snapshot_slice_reads_global_processor_interval(
+    foam_numpy_output: Path,
+):
+    loader = FOAMNumpyDataloader(str(foam_numpy_output), dtype=pt.float64)
+
+    pressure, velocity = loader.load_snapshot_slice(
+        ["p", "U"], ["0.4", "0.1"], slice(1, 3)
+    )
+
+    assert pressure.shape == (2, 2)
+    assert velocity.shape == (2, 3, 2)
+    pt.testing.assert_close(
+        pressure,
+        loader.load_snapshot("p", ["0.4", "0.1"])[1:3],
+    )
+    pt.testing.assert_close(
+        velocity,
+        loader.load_snapshot("U", ["0.4", "0.1"])[1:3],
+    )
+    assert loader.snapshot_shape("U", "0.1") == (3, 3)
+
+
+def test_load_snapshot_slice_preserves_explicit_single_time_axis(
+    foam_numpy_output: Path,
+):
+    loader = FOAMNumpyDataloader(str(foam_numpy_output), dtype=pt.float64)
+
+    pressure = loader.load_snapshot_slice("p", ["0.1"], slice(1, 3))
+
+    assert pressure.shape == (2, 1)
+    pt.testing.assert_close(pressure[..., 0], loader.load_snapshot("p", "0.1")[1:3])
+
+
 def test_load_geometry_and_direct_segment_path(foam_numpy_output: Path):
     loader = FOAMNumpyDataloader(str(foam_numpy_output / "0"))
 
