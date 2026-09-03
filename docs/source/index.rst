@@ -9,6 +9,7 @@ the Python :term:`API`.
    :caption: Examples
 
    overview/glossary
+   snapshot_statistics
    notebooks/linear_algebra_basics
    notebooks/svd_ht
    notebooks/ipsp_explorer

@@ -2,13 +2,14 @@
 
 from math import isclose, isfinite
 from numbers import Integral, Real
-from typing import Callable, Literal, NamedTuple, Optional, Sequence, Union
+from typing import Any, Callable, Literal, NamedTuple, Optional, Sequence, Union
 
 import torch as pt
 
 SnapshotSource = Union[pt.Tensor, Callable[[int, int], pt.Tensor]]
 MOMENT_NAMES = ("mean", "variance", "skewness", "kurtosis")
 DEFAULT_QUANTILES = (0.05, 0.10, 0.25, 0.50, 0.75, 0.95)
+STATISTIC_NAMES = ("moments", "dependency", "trend", "spatial", "histogram")
 
 
 class MomentFields(NamedTuple):
@@ -66,6 +67,62 @@ class HistogramResult(NamedTuple):
 
     histogram: pt.Tensor
     bin_edges: pt.Tensor
+
+
+class DistributedExecution(NamedTuple):
+    """Select collective execution for a statistics call.
+
+    The caller must initialize :mod:`torch.distributed` before invoking a
+    collective statistics operation. ``root_rank`` is relative to the selected
+    process group and is the only rank that receives a result. The collective
+    implementation is compatible with Gloo, NCCL, and MPI process groups.
+    """
+
+    process_group: Optional[Any] = None
+    root_rank: int = 0
+
+
+class SnapshotStatisticsResult(NamedTuple):
+    """Results produced by :func:`snapshot_statistics`.
+
+    Fields excluded through ``compute`` are ``None``. Requesting dependency
+    statistics also populates ``moments`` from the dependency's final fields.
+    """
+
+    moments: Optional[MomentFields]
+    moment_dependency: Optional[MomentDependencyResult]
+    trend: Optional[LinearTrendResult]
+    spatial_statistics: Optional[SpatialStatisticsResult]
+    histogram: Optional[HistogramResult]
+
+
+class _MomentState(NamedTuple):
+    n_snapshots: int
+    mean: pt.Tensor
+    m2: pt.Tensor
+    m3: pt.Tensor
+    m4: pt.Tensor
+
+
+class _LinearTrendState(NamedTuple):
+    n_snapshots: int
+    mean_time: pt.Tensor
+    mean_data: pt.Tensor
+    time_variation: pt.Tensor
+    covariation: pt.Tensor
+    data_variation: pt.Tensor
+    minimum_time: pt.Tensor
+    maximum_time: pt.Tensor
+
+
+class _LocalStatisticsResult(NamedTuple):
+    moment_states: Optional[list[Optional[_MomentState]]]
+    trend_state: Optional[_LinearTrendState]
+    spatial_statistics: Optional[SpatialStatisticsResult]
+    histogram: Optional[HistogramResult]
+    range_minimum: Optional[pt.Tensor]
+    range_maximum: Optional[pt.Tensor]
+    reference: Optional[pt.Tensor]
 
 
 def _normalize_snapshot_dim(snapshot_dim: int, ndim: int) -> int:
@@ -150,12 +207,14 @@ def _load_batch(
     return batch
 
 
-def _move_snapshots_last(data: pt.Tensor, snapshot_dim: int) -> pt.Tensor:
+def _move_snapshots_last(
+    data: pt.Tensor, snapshot_dim: int, validate_finite: bool = True
+) -> pt.Tensor:
     if data.ndim < 1:
         raise ValueError("snapshot data must have at least one dimension")
     if not data.is_floating_point() or pt.is_complex(data):
         raise ValueError("snapshot data must have a real floating-point dtype")
-    if not bool(pt.isfinite(data).all()):
+    if validate_finite and not bool(pt.isfinite(data).all()):
         raise ValueError("snapshot data must contain only finite values")
     dim = _normalize_snapshot_dim(snapshot_dim, data.ndim)
     if data.shape[dim] < 1:
@@ -283,52 +342,94 @@ class RunningMoments:
         assert other._m4 is not None
         self._merge_state(other.count, other._mean, other._m2, other._m3, other._m4)
 
-    def finalize(self) -> MomentFields:
-        """Return the four conventional moment fields."""
+    def _state(self) -> _MomentState:
+        """Return a detached copy of the accumulator state."""
         if self._count == 0:
             raise ValueError("at least one snapshot must be accumulated")
         assert self._mean is not None
         assert self._m2 is not None
         assert self._m3 is not None
         assert self._m4 is not None
-        variance = (self._m2 / self._count).clamp_min(0.0)
-        valid = variance > 0.0
-        invalid = pt.full_like(variance, float("nan"))
-        skewness = pt.where(
-            valid, (self._m3 / self._count) / variance.pow(1.5), invalid
+        return _MomentState(
+            self._count,
+            self._mean.clone(),
+            self._m2.clone(),
+            self._m3.clone(),
+            self._m4.clone(),
         )
-        kurtosis = pt.where(
-            valid, (self._m4 / self._count) / variance.square(), invalid
-        )
-        return MomentFields(self._mean.clone(), variance, skewness, kurtosis)
+
+    def finalize(self) -> MomentFields:
+        """Return the four conventional moment fields."""
+        return _finalize_moment_state(self._state())
+
+
+def _finalize_moment_state(state: _MomentState) -> MomentFields:
+    """Convert an accumulated central-moment state to conventional moments."""
+    variance = (state.m2 / state.n_snapshots).clamp_min(0.0)
+    valid = variance > 0.0
+    invalid = pt.full_like(variance, float("nan"))
+    skewness = pt.where(
+        valid, (state.m3 / state.n_snapshots) / variance.pow(1.5), invalid
+    )
+    kurtosis = pt.where(
+        valid, (state.m4 / state.n_snapshots) / variance.square(), invalid
+    )
+    return MomentFields(state.mean.clone(), variance, skewness, kurtosis)
 
 
 def statistical_moments(
-    data: pt.Tensor,
+    data: SnapshotSource,
     snapshot_dim: int = -1,
     batch_size: int = 32,
     accumulator_dtype: Optional[pt.dtype] = None,
-) -> MomentFields:
+    *,
+    n_snapshots: Optional[int] = None,
+    spatial_mask: Optional[pt.Tensor] = None,
+    execution: Optional[DistributedExecution] = None,
+) -> Optional[MomentFields]:
     """Compute mean, variance, skewness, and kurtosis in batches.
 
-    :param data: snapshot sequence
-    :type data: pt.Tensor
+    A spatial mask preserves the field shape and fills excluded locations with
+    ``NaN``. Non-finite snapshot values are permitted only outside the mask.
+
+    A distributed call uses the same interface::
+
+        result = statistical_moments(
+            source,
+            n_snapshots=100_000,
+            execution=DistributedExecution(root_rank=0),
+        )
+        if result is not None:
+            print(result.variance)
+
+    :param data: snapshot tensor or globally indexed batch callable
+    :type data: Union[pt.Tensor, Callable[[int, int], pt.Tensor]]
     :param snapshot_dim: dimension containing snapshots, defaults to ``-1``
     :type snapshot_dim: int, optional
     :param batch_size: maximum snapshots processed together, defaults to 32
     :type batch_size: int, optional
     :param accumulator_dtype: optional floating-point accumulation dtype
     :type accumulator_dtype: pt.dtype, optional
+    :param n_snapshots: global count required for a callable source
+    :type n_snapshots: int, optional
+    :param spatial_mask: boolean mask selecting spatial locations
+    :type spatial_mask: pt.Tensor, optional
+    :param execution: optional collective execution policy
+    :type execution: DistributedExecution, optional
     :return: four spatial moment fields
     :rtype: MomentFields
     """
-    size = _validate_batch_size(batch_size)
-    n_total = _source_size(data, None, snapshot_dim)
-    accumulator = RunningMoments(snapshot_dim, accumulator_dtype)
-    for start in range(0, n_total, size):
-        stop = min(start + size, n_total)
-        accumulator.update(_load_batch(data, start, stop, snapshot_dim))
-    return accumulator.finalize()
+    result = snapshot_statistics(
+        data,
+        n_snapshots,
+        batch_size=batch_size,
+        snapshot_dim=snapshot_dim,
+        accumulator_dtype=accumulator_dtype,
+        spatial_mask=spatial_mask,
+        compute=("moments",),
+        execution=execution,
+    )
+    return None if result is None else result.moments
 
 
 def _prepare_fractions(
@@ -388,6 +489,79 @@ def _prepare_spatial_weight(
     if not bool((expanded > 0.0).any()):
         raise ValueError("spatial_weight must contain at least one positive value")
     return expanded
+
+
+def _prepare_spatial_mask(
+    spatial_mask: Optional[pt.Tensor], field: pt.Tensor
+) -> Optional[pt.Tensor]:
+    """Validate and broadcast a boolean spatial-domain mask."""
+    if spatial_mask is None:
+        return None
+    if not isinstance(spatial_mask, pt.Tensor) or spatial_mask.numel() < 1:
+        raise ValueError("spatial_mask must be a non-empty tensor")
+    if spatial_mask.dtype != pt.bool:
+        raise ValueError("spatial_mask must have boolean dtype")
+    if spatial_mask.device != field.device:
+        raise ValueError("spatial_mask and snapshots must be on the same device")
+    candidate = spatial_mask
+    if candidate.numel() == field.numel() and candidate.shape != field.shape:
+        candidate = candidate.reshape(field.shape)
+    try:
+        expanded = pt.broadcast_to(candidate, field.shape)
+    except RuntimeError as error:
+        raise ValueError(
+            "spatial_mask must match or broadcast to the spatial field shape"
+        ) from error
+    if not bool(expanded.any()):
+        raise ValueError("spatial_mask must select at least one spatial location")
+    return expanded
+
+
+def _prepare_analysis_weight(
+    spatial_weight: Optional[pt.Tensor],
+    spatial_mask: Optional[pt.Tensor],
+    field: pt.Tensor,
+) -> pt.Tensor:
+    """Combine optional integration weights and a spatial mask."""
+    weight = _prepare_spatial_weight(spatial_weight, field)
+    if weight is None:
+        weight = field.new_ones(field.shape)
+    if spatial_mask is not None:
+        weight = pt.where(spatial_mask, weight, pt.zeros_like(weight))
+    if not bool((weight > 0.0).any()):
+        raise ValueError(
+            "spatial_weight must be positive at a location selected by spatial_mask"
+        )
+    return weight
+
+
+def _mask_field(field: pt.Tensor, spatial_mask: Optional[pt.Tensor]) -> pt.Tensor:
+    """Preserve a field shape while marking excluded locations as undefined."""
+    if spatial_mask is None:
+        return field
+    mask = _prepare_spatial_mask(spatial_mask, field)
+    assert mask is not None
+    return pt.where(mask, field, pt.full_like(field, float("nan")))
+
+
+def _mask_moment_fields(
+    fields: MomentFields, spatial_mask: Optional[pt.Tensor]
+) -> MomentFields:
+    """Apply a spatial mask to every conventional moment field."""
+    return MomentFields(*(_mask_field(field, spatial_mask) for field in fields))
+
+
+def _mask_linear_trend(
+    result: LinearTrendResult, spatial_mask: Optional[pt.Tensor]
+) -> LinearTrendResult:
+    """Apply a spatial mask to every field in a trend result."""
+    return LinearTrendResult(
+        _mask_field(result.slope, spatial_mask),
+        _mask_field(result.intercept, spatial_mask),
+        _mask_field(result.r_squared, spatial_mask),
+        _mask_field(result.normalized_change, spatial_mask),
+        result.n_snapshots,
+    )
 
 
 def _prepare_quantiles(quantiles: Sequence[float]) -> list[float]:
@@ -464,7 +638,9 @@ def spatial_statistics(
     batch_size: int = 32,
     snapshot_dim: int = -1,
     spatial_weight: Optional[pt.Tensor] = None,
-) -> SpatialStatisticsResult:
+    spatial_mask: Optional[pt.Tensor] = None,
+    execution: Optional[DistributedExecution] = None,
+) -> Optional[SpatialStatisticsResult]:
     r"""Compute weighted spatial statistics for every snapshot in batches.
 
     Quantiles use linear interpolation over weighted sample midpoints
@@ -474,9 +650,19 @@ def spatial_statistics(
         p_i = \frac{\sum_{j \leq i} w_j - w_i/2}{\sum_j w_j}.
 
     Values outside the midpoint range are clamped to the spatial minimum or
-    maximum. Locations with zero weight do not contribute to any statistic.
+    maximum. Locations with zero weight or a false spatial mask do not
+    contribute to any statistic.
     A callable source follows the indexed ``source(start, stop)`` contract of
     :func:`moment_data_dependency`.
+
+    In a distributed run, the callback remains globally indexed and only the
+    configured root receives the concatenated time series::
+
+        result = spatial_statistics(
+            source,
+            n_snapshots=100_000,
+            execution=DistributedExecution(root_rank=0),
+        )
 
     :param source: snapshot tensor or indexed batch callable
     :type source: Union[pt.Tensor, Callable[[int, int], pt.Tensor]]
@@ -490,69 +676,25 @@ def spatial_statistics(
     :type snapshot_dim: int, optional
     :param spatial_weight: non-negative spatial weights
     :type spatial_weight: pt.Tensor, optional
+    :param spatial_mask: boolean mask selecting spatial locations
+    :type spatial_mask: pt.Tensor, optional
+    :param execution: optional collective execution policy
+    :type execution: DistributedExecution, optional
     :return: spatial statistic time series
     :rtype: SpatialStatisticsResult
     """
-    size = _validate_batch_size(batch_size)
-    n_total = _source_size(source, n_snapshots, snapshot_dim)
-    quantile_values = _prepare_quantiles(quantiles)
-
-    minimum: list[pt.Tensor] = []
-    maximum: list[pt.Tensor] = []
-    mean: list[pt.Tensor] = []
-    quantile_batches: list[pt.Tensor] = []
-    expected_shape: Optional[pt.Size] = None
-    expected_device: Optional[pt.device] = None
-    expected_dtype: Optional[pt.dtype] = None
-    positive_weight: Optional[pt.Tensor] = None
-    flat_weight: Optional[pt.Tensor] = None
-    levels: Optional[pt.Tensor] = None
-
-    for start in range(0, n_total, size):
-        stop = min(start + size, n_total)
-        batch = _load_batch(source, start, stop, snapshot_dim)
-        snapshots = _move_snapshots_last(batch, snapshot_dim)
-        spatial_shape = snapshots.shape[:-1]
-        spatial_size = snapshots[..., 0].numel()
-        if spatial_size < 1:
-            raise ValueError("snapshots must contain at least one spatial value")
-
-        if expected_shape is None:
-            expected_shape = spatial_shape
-            expected_device = snapshots.device
-            expected_dtype = snapshots.dtype
-            prepared_weight = _prepare_spatial_weight(spatial_weight, snapshots[..., 0])
-            if prepared_weight is None:
-                prepared_weight = snapshots.new_ones(spatial_shape)
-            positive_weight = prepared_weight.reshape(-1) > 0.0
-            flat_weight = prepared_weight.reshape(-1)[positive_weight]
-            levels = snapshots.new_tensor(quantile_values)
-        else:
-            if spatial_shape != expected_shape:
-                raise ValueError("all batches must have matching spatial dimensions")
-            if snapshots.device != expected_device:
-                raise ValueError("all batches must be on the same device")
-            if snapshots.dtype != expected_dtype:
-                raise ValueError("all batches must have the same dtype")
-
-        assert positive_weight is not None
-        assert flat_weight is not None
-        assert levels is not None
-        flat = snapshots.reshape(-1, snapshots.shape[-1])[positive_weight]
-        denominator = flat_weight.sum()
-        minimum.append(flat.min(dim=0).values)
-        maximum.append(flat.max(dim=0).values)
-        mean.append((flat * flat_weight.unsqueeze(-1)).sum(dim=0) / denominator)
-        quantile_batches.append(_weighted_quantiles(flat, flat_weight, levels))
-
-    assert levels is not None
-    return SpatialStatisticsResult(
-        minimum=pt.cat(minimum),
-        maximum=pt.cat(maximum),
-        mean=pt.cat(mean),
-        quantiles=pt.cat(quantile_batches, dim=1),
-        quantile_levels=levels,
+    result = snapshot_statistics(
+        source,
+        n_snapshots,
+        quantiles=quantiles,
+        batch_size=batch_size,
+        snapshot_dim=snapshot_dim,
+        spatial_weight=spatial_weight,
+        spatial_mask=spatial_mask,
+        compute=("spatial",),
+        execution=execution,
     )
+    return None if result is None else result.spatial_statistics
 
 
 def _prepare_histogram_bins(
@@ -619,13 +761,16 @@ def spatiotemporal_histogram(
     batch_size: int = 32,
     snapshot_dim: int = -1,
     spatial_weight: Optional[pt.Tensor] = None,
+    spatial_mask: Optional[pt.Tensor] = None,
     density: bool = False,
-) -> HistogramResult:
+    execution: Optional[DistributedExecution] = None,
+) -> Optional[HistogramResult]:
     r"""Compute a histogram reduced across space and time in batches.
 
     Every snapshot has equal temporal weight. If ``spatial_weight`` is given,
-    the weight of each spatial location is applied once per snapshot and
-    locations with zero weight are excluded. Counts are returned by default.
+    the weight of each spatial location is applied once per snapshot.
+    Locations with zero weight or a false spatial mask are excluded. Counts
+    are returned by default.
     With ``density=True``, bin values are normalized so that
 
     .. math::
@@ -637,6 +782,17 @@ def spatiotemporal_histogram(
     histogram. Explicit edges or a value range require only one pass. Bins are
     left-inclusive and right-exclusive, except for the final bin, which also
     includes its upper edge.
+
+    For distributed execution, all ranks call the function and only the root
+    receives the global histogram::
+
+        result = spatiotemporal_histogram(
+            source,
+            n_snapshots=100_000,
+            bins=50,
+            value_range=(-5.0, 5.0),
+            execution=DistributedExecution(root_rank=0),
+        )
 
     :param source: snapshot tensor or indexed batch callable
     :type source: Union[pt.Tensor, Callable[[int, int], pt.Tensor]]
@@ -652,136 +808,29 @@ def spatiotemporal_histogram(
     :type snapshot_dim: int, optional
     :param spatial_weight: non-negative spatial weights
     :type spatial_weight: pt.Tensor, optional
+    :param spatial_mask: boolean mask selecting spatial locations
+    :type spatial_mask: pt.Tensor, optional
     :param density: normalize by total weight and bin width, defaults to False
     :type density: bool, optional
+    :param execution: optional collective execution policy
+    :type execution: DistributedExecution, optional
     :return: histogram values and bin edges
     :rtype: HistogramResult
     """
-    size = _validate_batch_size(batch_size)
-    n_total = _source_size(source, n_snapshots, snapshot_dim)
-    prepared_bins = _prepare_histogram_bins(bins)
-    prepared_range = _prepare_histogram_range(value_range)
-    if not isinstance(prepared_bins, int) and prepared_range is not None:
-        raise ValueError("value_range cannot be used with explicit bin edges")
-    if not isinstance(density, bool):
-        raise ValueError("density must be a boolean")
-
-    expected_shape: Optional[pt.Size] = None
-    expected_device: Optional[pt.device] = None
-    expected_dtype: Optional[pt.dtype] = None
-    positive_weight: Optional[pt.Tensor] = None
-    flat_weight: Optional[pt.Tensor] = None
-
-    def load_flat_batch(start: int, stop: int) -> pt.Tensor:
-        nonlocal expected_shape, expected_device, expected_dtype
-        nonlocal positive_weight, flat_weight
-        batch = _load_batch(source, start, stop, snapshot_dim)
-        snapshots = _move_snapshots_last(batch, snapshot_dim)
-        spatial_shape = snapshots.shape[:-1]
-        if snapshots[..., 0].numel() < 1:
-            raise ValueError("snapshots must contain at least one spatial value")
-        if expected_shape is None:
-            expected_shape = spatial_shape
-            expected_device = snapshots.device
-            expected_dtype = snapshots.dtype
-            weight = _prepare_spatial_weight(spatial_weight, snapshots[..., 0])
-            if weight is None:
-                weight = snapshots.new_ones(spatial_shape)
-            positive_weight = weight.reshape(-1) > 0.0
-            flat_weight = weight.reshape(-1)[positive_weight]
-        else:
-            if spatial_shape != expected_shape:
-                raise ValueError("all batches must have matching spatial dimensions")
-            if snapshots.device != expected_device:
-                raise ValueError("all batches must be on the same device")
-            if snapshots.dtype != expected_dtype:
-                raise ValueError("all batches must have the same dtype")
-        assert positive_weight is not None
-        return snapshots.reshape(-1, snapshots.shape[-1])[positive_weight]
-
-    if isinstance(prepared_bins, int) and prepared_range is None:
-        range_minimum: Optional[pt.Tensor] = None
-        range_maximum: Optional[pt.Tensor] = None
-        for start in range(0, n_total, size):
-            stop = min(start + size, n_total)
-            flat = load_flat_batch(start, stop)
-            batch_minimum = flat.min()
-            batch_maximum = flat.max()
-            range_minimum = (
-                batch_minimum
-                if range_minimum is None
-                else pt.minimum(range_minimum, batch_minimum)
-            )
-            range_maximum = (
-                batch_maximum
-                if range_maximum is None
-                else pt.maximum(range_maximum, batch_maximum)
-            )
-        assert range_minimum is not None
-        assert range_maximum is not None
-        if bool(range_minimum == range_maximum):
-            range_minimum = range_minimum - 0.5
-            range_maximum = range_maximum + 0.5
-        edges = pt.linspace(
-            range_minimum,
-            range_maximum,
-            prepared_bins + 1,
-            device=range_minimum.device,
-            dtype=range_minimum.dtype,
-        )
-    else:
-        first_stop = min(size, n_total)
-        first_flat = load_flat_batch(0, first_stop)
-        assert expected_device is not None
-        assert expected_dtype is not None
-        if isinstance(prepared_bins, int):
-            assert prepared_range is not None
-            edges = pt.linspace(
-                prepared_range[0],
-                prepared_range[1],
-                prepared_bins + 1,
-                device=expected_device,
-                dtype=expected_dtype,
-            )
-        else:
-            edges = pt.tensor(
-                prepared_bins, device=expected_device, dtype=expected_dtype
-            )
-
-    if not bool((edges[1:] > edges[:-1]).all()):
-        raise ValueError("bin edges must remain strictly increasing in source dtype")
-
-    histogram = edges.new_zeros(edges.numel() - 1)
-
-    def accumulate(flat: pt.Tensor) -> None:
-        assert flat_weight is not None
-        values = flat.reshape(-1)
-        weights = flat_weight.unsqueeze(-1).expand_as(flat).reshape(-1)
-        inside = (values >= edges[0]) & (values <= edges[-1])
-        selected_values = values[inside]
-        selected_weights = weights[inside]
-        indices = pt.bucketize(selected_values, edges, right=True) - 1
-        indices = indices.clamp_max(histogram.numel() - 1)
-        histogram.scatter_add_(0, indices, selected_weights)
-
-    if isinstance(prepared_bins, int) and prepared_range is None:
-        for start in range(0, n_total, size):
-            stop = min(start + size, n_total)
-            accumulate(load_flat_batch(start, stop))
-    else:
-        accumulate(first_flat)
-        for start in range(first_stop, n_total, size):
-            stop = min(start + size, n_total)
-            accumulate(load_flat_batch(start, stop))
-
-    if density:
-        total_weight = histogram.sum()
-        if not bool(total_weight > 0.0):
-            raise ValueError(
-                "density is undefined when no values fall inside the range"
-            )
-        histogram = histogram / (total_weight * (edges[1:] - edges[:-1]))
-    return HistogramResult(histogram=histogram, bin_edges=edges)
+    result = snapshot_statistics(
+        source,
+        n_snapshots,
+        histogram_bins=bins,
+        histogram_range=value_range,
+        batch_size=batch_size,
+        snapshot_dim=snapshot_dim,
+        spatial_weight=spatial_weight,
+        spatial_mask=spatial_mask,
+        density=density,
+        compute=("histogram",),
+        execution=execution,
+    )
+    return None if result is None else result.histogram
 
 
 def _spatial_reduce(
@@ -838,17 +887,29 @@ def moment_data_dependency(
     batch_size: int = 32,
     snapshot_dim: int = -1,
     spatial_weight: Optional[pt.Tensor] = None,
+    spatial_mask: Optional[pt.Tensor] = None,
     spatial_reduction: Literal["mean", "rms"] = "mean",
     keep_intermediate_fields: bool = False,
     accumulator_dtype: Optional[pt.dtype] = None,
-) -> MomentDependencyResult:
+    execution: Optional[DistributedExecution] = None,
+) -> Optional[MomentDependencyResult]:
     r"""Compute fraction-dependent moments in one forward batched pass.
 
     Every checkpoint field is reduced spatially. Weighted spatial L2 norms
     monitor field changes between consecutive fractions. Only the final fields
-    are retained unless ``keep_intermediate_fields`` is enabled. A callable
-    source accepts integer ``start`` and ``stop`` indices and returns the
-    corresponding snapshot batch.
+    are retained unless ``keep_intermediate_fields`` is enabled. Masked field
+    locations remain in the output as ``NaN`` but do not enter any reduction.
+    A callable source accepts integer ``start`` and ``stop`` indices and
+    returns the corresponding snapshot batch.
+
+    Distributed fractions refer to prefixes of the global snapshot sequence::
+
+        result = moment_data_dependency(
+            source,
+            n_snapshots=100_000,
+            fractions=(0.25, 0.5, 0.75, 1.0),
+            execution=DistributedExecution(root_rank=0),
+        )
 
     :param source: snapshot tensor or indexed batch callable
     :type source: Union[pt.Tensor, Callable[[int, int], pt.Tensor]]
@@ -862,79 +923,34 @@ def moment_data_dependency(
     :type snapshot_dim: int, optional
     :param spatial_weight: non-negative spatial integration weights
     :type spatial_weight: pt.Tensor, optional
+    :param spatial_mask: boolean mask selecting spatial locations
+    :type spatial_mask: pt.Tensor, optional
     :param spatial_reduction: weighted ``"mean"`` or ``"rms"``
     :type spatial_reduction: str, optional
     :param keep_intermediate_fields: retain all non-final checkpoint fields
     :type keep_intermediate_fields: bool, optional
     :param accumulator_dtype: optional floating-point accumulation dtype
     :type accumulator_dtype: pt.dtype, optional
+    :param execution: optional collective execution policy
+    :type execution: DistributedExecution, optional
     :return: reduced moments, consecutive difference norms, and fields
     :rtype: MomentDependencyResult
     """
-    size = _validate_batch_size(batch_size)
-    if spatial_reduction not in ("mean", "rms"):
-        raise ValueError("spatial_reduction must be 'mean' or 'rms'")
-    if not isinstance(keep_intermediate_fields, bool):
-        raise ValueError("keep_intermediate_fields must be a boolean")
-    n_total = _source_size(source, n_snapshots, snapshot_dim)
-    fraction_values, checkpoint_counts = _prepare_fractions(fractions, n_total)
-
-    accumulator = RunningMoments(snapshot_dim, accumulator_dtype)
-    previous: Optional[MomentFields] = None
-    retained: list[MomentFields] = []
-    reduced: list[pt.Tensor] = []
-    differences: list[pt.Tensor] = []
-    prepared_weight: Optional[pt.Tensor] = None
-    start = 0
-
-    for checkpoint_index, checkpoint in enumerate(checkpoint_counts):
-        while start < checkpoint:
-            stop = min(start + size, checkpoint)
-            accumulator.update(_load_batch(source, start, stop, snapshot_dim))
-            start = stop
-
-        current = accumulator.finalize()
-        if checkpoint_index == 0:
-            prepared_weight = _prepare_spatial_weight(spatial_weight, current.mean)
-        current_values = tuple(current)
-        reduced.append(
-            pt.stack(
-                [
-                    _spatial_reduce(field, prepared_weight, spatial_reduction)
-                    for field in current_values
-                ]
-            )
-        )
-        if previous is not None:
-            differences.append(
-                pt.stack(
-                    [
-                        _field_difference_norm(first, second, prepared_weight)
-                        for first, second in zip(previous, current)
-                    ]
-                )
-            )
-        if keep_intermediate_fields and checkpoint_index < len(checkpoint_counts) - 1:
-            retained.append(current)
-        previous = current
-
-    assert previous is not None
-    difference_tensor = (
-        pt.stack(differences, dim=0) if differences else previous.mean.new_empty((0, 4))
+    result = snapshot_statistics(
+        source,
+        n_snapshots,
+        fractions=fractions,
+        batch_size=batch_size,
+        snapshot_dim=snapshot_dim,
+        spatial_weight=spatial_weight,
+        spatial_reduction=spatial_reduction,
+        keep_intermediate_fields=keep_intermediate_fields,
+        accumulator_dtype=accumulator_dtype,
+        spatial_mask=spatial_mask,
+        compute=("dependency",),
+        execution=execution,
     )
-    intermediate = (
-        _stack_moment_fields(retained, previous) if keep_intermediate_fields else None
-    )
-    return MomentDependencyResult(
-        fractions=previous.mean.new_tensor(fraction_values),
-        n_snapshots=pt.tensor(
-            checkpoint_counts, dtype=pt.int64, device=previous.mean.device
-        ),
-        reduced_moments=pt.stack(reduced, dim=0),
-        field_difference_norms=difference_tensor,
-        final_fields=previous,
-        intermediate_fields=intermediate,
-    )
+    return None if result is None else result.moment_dependency
 
 
 class _RunningLinearTrend:
@@ -1019,9 +1035,10 @@ class _RunningLinearTrend:
         self.maximum_time = pt.maximum(self.maximum_time, time.max())
         self.count = combined
 
-    def finalize(self) -> LinearTrendResult:
-        if self.count < 2:
-            raise ValueError("at least two snapshots are required for a trend")
+    def _state(self) -> _LinearTrendState:
+        """Return a detached copy of the trend accumulator state."""
+        if self.count == 0:
+            raise ValueError("at least one snapshot must be accumulated")
         assert self.mean_time is not None
         assert self.mean_data is not None
         assert self.time_variation is not None
@@ -1029,30 +1046,50 @@ class _RunningLinearTrend:
         assert self.data_variation is not None
         assert self.minimum_time is not None
         assert self.maximum_time is not None
-        if not bool(self.time_variation > 0.0):
-            raise ValueError("time values must span a non-zero interval")
-
-        slope = self.covariation / self.time_variation
-        intercept = self.mean_data - slope * self.mean_time
-        varying = self.data_variation > 0.0
-        r_squared = pt.where(
-            varying,
-            self.covariation.square() / (self.time_variation * self.data_variation),
-            pt.zeros_like(self.data_variation),
-        ).clamp(0.0, 1.0)
-        standard_deviation = (self.data_variation / self.count).clamp_min(0.0).sqrt()
-        normalized_change = pt.where(
-            standard_deviation > 0.0,
-            slope * (self.maximum_time - self.minimum_time) / standard_deviation,
-            pt.zeros_like(slope),
-        )
-        return LinearTrendResult(
-            slope,
-            intercept,
-            r_squared,
-            normalized_change,
+        return _LinearTrendState(
             self.count,
+            self.mean_time.clone(),
+            self.mean_data.clone(),
+            self.time_variation.clone(),
+            self.covariation.clone(),
+            self.data_variation.clone(),
+            self.minimum_time.clone(),
+            self.maximum_time.clone(),
         )
+
+    def finalize(self) -> LinearTrendResult:
+        return _finalize_linear_trend_state(self._state())
+
+
+def _finalize_linear_trend_state(state: _LinearTrendState) -> LinearTrendResult:
+    if state.n_snapshots < 2:
+        raise ValueError("at least two snapshots are required for a trend")
+    if not bool(state.time_variation > 0.0):
+        raise ValueError("time values must span a non-zero interval")
+
+    slope = state.covariation / state.time_variation
+    intercept = state.mean_data - slope * state.mean_time
+    varying = state.data_variation > 0.0
+    r_squared = pt.where(
+        varying,
+        state.covariation.square() / (state.time_variation * state.data_variation),
+        pt.zeros_like(state.data_variation),
+    ).clamp(0.0, 1.0)
+    standard_deviation = (
+        (state.data_variation / state.n_snapshots).clamp_min(0.0).sqrt()
+    )
+    normalized_change = pt.where(
+        standard_deviation > 0.0,
+        slope * (state.maximum_time - state.minimum_time) / standard_deviation,
+        pt.zeros_like(slope),
+    )
+    return LinearTrendResult(
+        slope,
+        intercept,
+        r_squared,
+        normalized_change,
+        state.n_snapshots,
+    )
 
 
 def linear_trend(
@@ -1062,13 +1099,26 @@ def linear_trend(
     batch_size: int = 32,
     snapshot_dim: int = -1,
     accumulator_dtype: Optional[pt.dtype] = None,
-) -> LinearTrendResult:
+    spatial_mask: Optional[pt.Tensor] = None,
+    execution: Optional[DistributedExecution] = None,
+) -> Optional[LinearTrendResult]:
     """Fit a batched linear temporal trend at every spatial location.
 
     ``normalized_change`` is the fitted change across the complete time span
-    divided by the temporal population standard deviation. A callable source
-    follows the same indexed ``source(start, stop)`` contract as
-    :func:`moment_data_dependency`.
+    divided by the temporal population standard deviation. Masked locations
+    are returned as ``NaN``. A callable source follows the same indexed
+    ``source(start, stop)`` contract as :func:`moment_data_dependency`.
+
+    Global time values are sliced with the distributed snapshot ranges::
+
+        result = linear_trend(
+            source,
+            n_snapshots=100_000,
+            time=time,
+            execution=DistributedExecution(root_rank=0),
+        )
+        if result is not None:
+            mask = detect_linear_trend(result, 1.0)
 
     :param source: snapshot tensor or indexed batch callable
     :type source: Union[pt.Tensor, Callable[[int, int], pt.Tensor]]
@@ -1082,34 +1132,591 @@ def linear_trend(
     :type snapshot_dim: int, optional
     :param accumulator_dtype: optional floating-point accumulation dtype
     :type accumulator_dtype: pt.dtype, optional
+    :param spatial_mask: boolean mask selecting spatial locations
+    :type spatial_mask: pt.Tensor, optional
+    :param execution: optional collective execution policy
+    :type execution: DistributedExecution, optional
     :return: spatial fields describing the linear fit
     :rtype: LinearTrendResult
     """
+    result = snapshot_statistics(
+        source,
+        n_snapshots,
+        time=time,
+        batch_size=batch_size,
+        snapshot_dim=snapshot_dim,
+        accumulator_dtype=accumulator_dtype,
+        spatial_mask=spatial_mask,
+        compute=("trend",),
+        execution=execution,
+    )
+    return None if result is None else result.trend
+
+
+def _prepare_compute(compute: Sequence[str]) -> frozenset[str]:
+    """Validate requested joint statistics."""
+    values = [compute] if isinstance(compute, str) else list(compute)
+    if not values:
+        raise ValueError("compute must request at least one statistic")
+    if len(set(values)) != len(values):
+        raise ValueError("compute must not contain duplicate statistics")
+    invalid = set(values).difference(STATISTIC_NAMES)
+    if invalid:
+        raise ValueError(f"unknown statistics requested: {sorted(invalid)}")
+    return frozenset(values)
+
+
+def _prepare_time_values(
+    time: Optional[Union[pt.Tensor, Sequence[float]]], n_snapshots: int
+) -> pt.Tensor:
+    """Validate or construct global snapshot times."""
+    if time is None:
+        values = pt.arange(n_snapshots, dtype=pt.float64)
+    elif isinstance(time, pt.Tensor):
+        values = time
+    else:
+        values = pt.tensor(list(time), dtype=pt.float64)
+    if values.ndim != 1 or values.numel() != n_snapshots:
+        raise ValueError("time must be one-dimensional and match n_snapshots")
+    if pt.is_complex(values) or values.dtype == pt.bool:
+        raise ValueError("time must have a real numeric dtype")
+    if not bool(pt.isfinite(values).all()):
+        raise ValueError("time must contain only finite values")
+    if not bool((values[1:] > values[:-1]).all()):
+        raise ValueError("time must be strictly increasing")
+    return values
+
+
+def _make_histogram_edges(
+    bins: Union[int, list[float]],
+    value_range: Optional[tuple[float, float]],
+    reference: pt.Tensor,
+    automatic_range: Optional[tuple[pt.Tensor, pt.Tensor]] = None,
+) -> pt.Tensor:
+    """Construct histogram edges using a snapshot field as dtype/device reference."""
+    if isinstance(bins, int):
+        if value_range is not None:
+            lower: Union[float, pt.Tensor] = value_range[0]
+            upper: Union[float, pt.Tensor] = value_range[1]
+        else:
+            if automatic_range is None:
+                raise ValueError("an automatic histogram range is not available")
+            lower, upper = automatic_range
+            if bool(lower == upper):
+                lower = lower - 0.5
+                upper = upper + 0.5
+        edges = pt.linspace(
+            lower,
+            upper,
+            bins + 1,
+            device=reference.device,
+            dtype=reference.dtype,
+        )
+    else:
+        edges = reference.new_tensor(bins)
+    if not bool((edges[1:] > edges[:-1]).all()):
+        raise ValueError("bin edges must remain strictly increasing in source dtype")
+    return edges
+
+
+def _accumulate_histogram(
+    histogram: pt.Tensor,
+    edges: pt.Tensor,
+    flat: pt.Tensor,
+    flat_weight: pt.Tensor,
+) -> None:
+    """Accumulate one flattened snapshot batch into fixed histogram edges."""
+    values = flat.reshape(-1)
+    weights = flat_weight.unsqueeze(-1).expand_as(flat).reshape(-1)
+    inside = (values >= edges[0]) & (values <= edges[-1])
+    selected_values = values[inside]
+    selected_weights = weights[inside]
+    indices = pt.bucketize(selected_values, edges, right=True) - 1
+    indices = indices.clamp_max(histogram.numel() - 1)
+    histogram.scatter_add_(0, indices, selected_weights)
+
+
+def _run_local_statistics(
+    source: SnapshotSource,
+    global_start: int,
+    global_stop: int,
+    batch_size: int,
+    snapshot_dim: int,
+    compute: frozenset[str],
+    checkpoint_counts: Optional[list[int]],
+    time_values: Optional[pt.Tensor],
+    quantile_values: Optional[list[float]],
+    histogram_bins: Optional[Union[int, list[float]]],
+    histogram_range: Optional[tuple[float, float]],
+    spatial_weight: Optional[pt.Tensor],
+    spatial_mask: Optional[pt.Tensor],
+    accumulator_dtype: Optional[pt.dtype],
+) -> _LocalStatisticsResult:
+    """Run enabled collectors over one contiguous global snapshot interval."""
+    local_count = global_stop - global_start
+    needs_moments = bool({"moments", "dependency"}.intersection(compute))
+    moment_accumulator = (
+        RunningMoments(-1, accumulator_dtype) if needs_moments and local_count else None
+    )
+    trend_accumulator = (
+        _RunningLinearTrend(-1, accumulator_dtype)
+        if "trend" in compute and local_count
+        else None
+    )
+    targets = (
+        [min(max(count - global_start, 0), local_count) for count in checkpoint_counts]
+        if checkpoint_counts is not None
+        else ([local_count] if needs_moments else [])
+    )
+    positive_targets = sorted(set(target for target in targets if target > 0))
+    captured_states: dict[int, _MomentState] = {}
+
+    minimum: list[pt.Tensor] = []
+    maximum: list[pt.Tensor] = []
+    means: list[pt.Tensor] = []
+    quantile_batches: list[pt.Tensor] = []
+    levels: Optional[pt.Tensor] = None
+    prepared_mask: Optional[pt.Tensor] = None
+    prepared_weight: Optional[pt.Tensor] = None
+    positive_weight: Optional[pt.Tensor] = None
+    flat_weight: Optional[pt.Tensor] = None
+    edges: Optional[pt.Tensor] = None
+    histogram: Optional[pt.Tensor] = None
+    range_minimum: Optional[pt.Tensor] = None
+    range_maximum: Optional[pt.Tensor] = None
+    reference: Optional[pt.Tensor] = None
+    expected_shape: Optional[pt.Size] = None
+    expected_device: Optional[pt.device] = None
+    expected_dtype: Optional[pt.dtype] = None
+    processed = 0
+
+    for start in range(global_start, global_stop, batch_size):
+        stop = min(start + batch_size, global_stop)
+        snapshots = _move_snapshots_last(
+            _load_batch(source, start, stop, snapshot_dim),
+            snapshot_dim,
+            validate_finite=False,
+        )
+        spatial_shape = snapshots.shape[:-1]
+        if snapshots[..., 0].numel() < 1:
+            raise ValueError("snapshots must contain at least one spatial value")
+        if expected_shape is None:
+            expected_shape = spatial_shape
+            expected_device = snapshots.device
+            expected_dtype = snapshots.dtype
+            reference = snapshots[..., 0].clone()
+            prepared_mask = _prepare_spatial_mask(spatial_mask, snapshots[..., 0])
+            if {"dependency", "spatial", "histogram"}.intersection(compute):
+                prepared_weight = _prepare_analysis_weight(
+                    spatial_weight, prepared_mask, snapshots[..., 0]
+                )
+            if {"spatial", "histogram"}.intersection(compute):
+                assert prepared_weight is not None
+                positive_weight = prepared_weight.reshape(-1) > 0.0
+                flat_weight = prepared_weight.reshape(-1)[positive_weight]
+            if "spatial" in compute:
+                assert quantile_values is not None
+                levels = snapshots.new_tensor(quantile_values)
+            if "histogram" in compute:
+                assert histogram_bins is not None
+                if not isinstance(histogram_bins, int) or histogram_range is not None:
+                    edges = _make_histogram_edges(
+                        histogram_bins, histogram_range, snapshots[..., 0]
+                    )
+                    histogram = edges.new_zeros(edges.numel() - 1)
+        else:
+            if spatial_shape != expected_shape:
+                raise ValueError("all batches must have matching spatial dimensions")
+            if snapshots.device != expected_device:
+                raise ValueError("all batches must be on the same device")
+            if snapshots.dtype != expected_dtype:
+                raise ValueError("all batches must have the same dtype")
+
+        analysis_snapshots = (
+            snapshots
+            if prepared_mask is None
+            else pt.where(
+                prepared_mask.unsqueeze(-1), snapshots, pt.zeros_like(snapshots)
+            )
+        )
+        if not bool(pt.isfinite(analysis_snapshots).all()):
+            raise ValueError(
+                "snapshot data selected by spatial_mask must contain only finite values"
+            )
+
+        batch_count = snapshots.shape[-1]
+        if moment_accumulator is not None:
+            local_stop = processed + batch_count
+            boundaries = [
+                target for target in positive_targets if processed < target < local_stop
+            ] + [local_stop]
+            segment_start = processed
+            for boundary in boundaries:
+                first = segment_start - processed
+                last = boundary - processed
+                moment_accumulator.update(analysis_snapshots[..., first:last])
+                if boundary in positive_targets:
+                    captured_states[boundary] = moment_accumulator._state()
+                segment_start = boundary
+
+        if trend_accumulator is not None:
+            assert time_values is not None
+            trend_accumulator.update(analysis_snapshots, time_values[start:stop])
+
+        if {"spatial", "histogram"}.intersection(compute):
+            assert positive_weight is not None
+            assert flat_weight is not None
+            flat = snapshots.reshape(-1, batch_count)[positive_weight]
+            if "spatial" in compute:
+                assert levels is not None
+                denominator = flat_weight.sum()
+                minimum.append(flat.min(dim=0).values)
+                maximum.append(flat.max(dim=0).values)
+                means.append(
+                    (flat * flat_weight.unsqueeze(-1)).sum(dim=0) / denominator
+                )
+                quantile_batches.append(_weighted_quantiles(flat, flat_weight, levels))
+            if "histogram" in compute:
+                if edges is None:
+                    batch_minimum = flat.min()
+                    batch_maximum = flat.max()
+                    range_minimum = (
+                        batch_minimum
+                        if range_minimum is None
+                        else pt.minimum(range_minimum, batch_minimum)
+                    )
+                    range_maximum = (
+                        batch_maximum
+                        if range_maximum is None
+                        else pt.maximum(range_maximum, batch_maximum)
+                    )
+                else:
+                    assert histogram is not None
+                    _accumulate_histogram(histogram, edges, flat, flat_weight)
+        processed += batch_count
+
+    moment_states: Optional[list[Optional[_MomentState]]] = None
+    if needs_moments:
+        if local_count == 0:
+            moment_states = [None for _ in targets]
+        else:
+            assert moment_accumulator is not None
+            final_state = moment_accumulator._state()
+            captured_states.setdefault(local_count, final_state)
+            moment_states = [
+                None if target == 0 else captured_states[target] for target in targets
+            ]
+
+    spatial_result = None
+    if "spatial" in compute and local_count:
+        assert levels is not None
+        spatial_result = SpatialStatisticsResult(
+            pt.cat(minimum),
+            pt.cat(maximum),
+            pt.cat(means),
+            pt.cat(quantile_batches, dim=1),
+            levels,
+        )
+    histogram_result = (
+        HistogramResult(histogram, edges)
+        if histogram is not None and edges is not None
+        else None
+    )
+    trend_state = trend_accumulator._state() if trend_accumulator is not None else None
+    return _LocalStatisticsResult(
+        moment_states,
+        trend_state,
+        spatial_result,
+        histogram_result,
+        range_minimum,
+        range_maximum,
+        reference,
+    )
+
+
+def _build_dependency_result(
+    fields: list[MomentFields],
+    fraction_values: list[float],
+    checkpoint_counts: list[int],
+    spatial_weight: Optional[pt.Tensor],
+    spatial_mask: Optional[pt.Tensor],
+    spatial_reduction: Literal["mean", "rms"],
+    keep_intermediate_fields: bool,
+) -> MomentDependencyResult:
+    """Build public dependency output from global checkpoint fields."""
+    final = fields[-1]
+    mask = _prepare_spatial_mask(spatial_mask, final.mean)
+    weight = _prepare_analysis_weight(spatial_weight, mask, final.mean)
+    reduced = pt.stack(
+        [
+            pt.stack(
+                [_spatial_reduce(field, weight, spatial_reduction) for field in current]
+            )
+            for current in fields
+        ]
+    )
+    differences = [
+        pt.stack(
+            [
+                _field_difference_norm(first, second, weight)
+                for first, second in zip(previous, current)
+            ]
+        )
+        for previous, current in zip(fields, fields[1:])
+    ]
+    difference_tensor = (
+        pt.stack(differences)
+        if differences
+        else final.mean.new_empty((0, len(MOMENT_NAMES)))
+    )
+    retained = fields[:-1] if keep_intermediate_fields else []
+    intermediate = (
+        _stack_moment_fields(retained, final) if keep_intermediate_fields else None
+    )
+    return MomentDependencyResult(
+        final.mean.new_tensor(fraction_values),
+        pt.tensor(checkpoint_counts, dtype=pt.int64, device=final.mean.device),
+        reduced,
+        difference_tensor,
+        final,
+        intermediate,
+    )
+
+
+def _normalize_histogram(result: HistogramResult, density: bool) -> HistogramResult:
+    """Apply optional probability-density normalization."""
+    if not density:
+        return result
+    total_weight = result.histogram.sum()
+    if not bool(total_weight > 0.0):
+        raise ValueError("density is undefined when no values fall inside the range")
+    widths = result.bin_edges[1:] - result.bin_edges[:-1]
+    return HistogramResult(result.histogram / (total_weight * widths), result.bin_edges)
+
+
+def _serial_snapshot_statistics(
+    source: SnapshotSource,
+    n_snapshots: int,
+    batch_size: int,
+    snapshot_dim: int,
+    compute: frozenset[str],
+    fraction_values: Optional[list[float]],
+    checkpoint_counts: Optional[list[int]],
+    time_values: Optional[pt.Tensor],
+    quantile_values: Optional[list[float]],
+    histogram_bins: Optional[Union[int, list[float]]],
+    histogram_range: Optional[tuple[float, float]],
+    spatial_weight: Optional[pt.Tensor],
+    spatial_mask: Optional[pt.Tensor],
+    spatial_reduction: Literal["mean", "rms"],
+    keep_intermediate_fields: bool,
+    density: bool,
+    accumulator_dtype: Optional[pt.dtype],
+) -> SnapshotStatisticsResult:
+    """Execute a joint statistics request in one process."""
+    local = _run_local_statistics(
+        source,
+        0,
+        n_snapshots,
+        batch_size,
+        snapshot_dim,
+        compute,
+        checkpoint_counts,
+        time_values,
+        quantile_values,
+        histogram_bins,
+        histogram_range,
+        spatial_weight,
+        spatial_mask,
+        accumulator_dtype,
+    )
+    moments = None
+    dependency = None
+    if local.moment_states is not None:
+        fields = [
+            _mask_moment_fields(_finalize_moment_state(state), spatial_mask)
+            for state in local.moment_states
+            if state is not None
+        ]
+        moments = fields[-1]
+        if "dependency" in compute:
+            assert fraction_values is not None
+            assert checkpoint_counts is not None
+            dependency = _build_dependency_result(
+                fields,
+                fraction_values,
+                checkpoint_counts,
+                spatial_weight,
+                spatial_mask,
+                spatial_reduction,
+                keep_intermediate_fields,
+            )
+            moments = dependency.final_fields
+
+    trend = (
+        _finalize_linear_trend_state(local.trend_state)
+        if local.trend_state is not None
+        else None
+    )
+    histogram = local.histogram
+    if "histogram" in compute and histogram is None:
+        assert local.reference is not None
+        assert local.range_minimum is not None
+        assert local.range_maximum is not None
+        assert histogram_bins is not None
+        edges = _make_histogram_edges(
+            histogram_bins,
+            None,
+            local.reference,
+            (local.range_minimum, local.range_maximum),
+        )
+        second = _run_local_statistics(
+            source,
+            0,
+            n_snapshots,
+            batch_size,
+            snapshot_dim,
+            frozenset(("histogram",)),
+            None,
+            None,
+            None,
+            _prepare_histogram_bins(edges),
+            None,
+            spatial_weight,
+            spatial_mask,
+            accumulator_dtype,
+        )
+        histogram = second.histogram
+    if histogram is not None:
+        histogram = _normalize_histogram(histogram, density)
+    if trend is not None:
+        trend = _mask_linear_trend(trend, spatial_mask)
+    return SnapshotStatisticsResult(
+        moments,
+        dependency,
+        trend,
+        local.spatial_statistics,
+        histogram,
+    )
+
+
+def snapshot_statistics(
+    source: SnapshotSource,
+    n_snapshots: Optional[int] = None,
+    *,
+    time: Optional[Union[pt.Tensor, Sequence[float]]] = None,
+    fractions: Sequence[float] = (0.25, 0.5, 0.75, 1.0),
+    quantiles: Sequence[float] = DEFAULT_QUANTILES,
+    histogram_bins: Union[int, Sequence[float], pt.Tensor] = 50,
+    histogram_range: Optional[Sequence[float]] = None,
+    batch_size: int = 32,
+    snapshot_dim: int = -1,
+    spatial_weight: Optional[pt.Tensor] = None,
+    spatial_mask: Optional[pt.Tensor] = None,
+    spatial_reduction: Literal["mean", "rms"] = "mean",
+    keep_intermediate_fields: bool = False,
+    density: bool = False,
+    accumulator_dtype: Optional[pt.dtype] = None,
+    compute: Sequence[str] = STATISTIC_NAMES,
+    execution: Optional[DistributedExecution] = None,
+) -> Optional[SnapshotStatisticsResult]:
+    r"""Compute selected snapshot statistics through a shared batch stream.
+
+    With explicit histogram edges or ``histogram_range``, every enabled
+    statistic consumes the same loaded batch and the source is traversed once.
+    An exact automatically ranged histogram requires one additional pass that
+    updates only histogram counts.
+
+    ``spatial_mask`` restricts every collector to its true locations. Spatial
+    field outputs retain their original shape and contain ``NaN`` outside the
+    mask. Non-finite data outside the mask is ignored.
+
+    Distributed execution partitions globally indexed snapshots among the
+    selected process-group ranks. Only ``execution.root_rank`` returns a
+    result. For example, after initializing :mod:`torch.distributed`::
+
+        execution = DistributedExecution(root_rank=0)
+        result = snapshot_statistics(
+            source,
+            n_snapshots=100_000,
+            batch_size=16,
+            histogram_range=(-5.0, 5.0),
+            execution=execution,
+        )
+        if result is not None:
+            print(result.moments.mean)
+
+    :param source: snapshot tensor or globally indexed batch callable
+    :param n_snapshots: total snapshot count required for a callable source
+    :param time: strictly increasing global snapshot times
+    :param fractions: increasing dependency fractions ending in 1.0
+    :param quantiles: increasing spatial quantile probabilities
+    :param histogram_bins: histogram bin count or explicit edges
+    :param histogram_range: optional range for integer histogram bins
+    :param batch_size: maximum snapshots loaded by each rank at once
+    :param snapshot_dim: dimension containing snapshots
+    :param spatial_weight: non-negative spatial weights
+    :param spatial_mask: boolean mask selecting spatial locations
+    :param spatial_reduction: dependency reduction, ``"mean"`` or ``"rms"``
+    :param keep_intermediate_fields: retain dependency checkpoint fields
+    :param density: normalize histogram counts to a density
+    :param accumulator_dtype: optional moment and trend accumulation dtype
+    :param compute: selected statistics; all are enabled by default
+    :param execution: optional collective execution policy
+    :return: selected results on the serial or distributed root process
+    """
     size = _validate_batch_size(batch_size)
     n_total = _source_size(source, n_snapshots, snapshot_dim)
-    if time is None:
-        time_values = pt.arange(n_total, dtype=pt.float64)
-    elif isinstance(time, pt.Tensor):
-        time_values = time
-    else:
-        time_values = pt.tensor(list(time), dtype=pt.float64)
-    if time_values.ndim != 1 or time_values.numel() != n_total:
-        raise ValueError("time must be one-dimensional and match n_snapshots")
-    if pt.is_complex(time_values) or time_values.dtype == pt.bool:
-        raise ValueError("time must have a real numeric dtype")
-    if not bool(pt.isfinite(time_values).all()):
-        raise ValueError("time must contain only finite values")
-    if not bool((time_values[1:] > time_values[:-1]).all()):
-        raise ValueError("time must be strictly increasing")
+    selected = _prepare_compute(compute)
+    if not isinstance(keep_intermediate_fields, bool):
+        raise ValueError("keep_intermediate_fields must be a boolean")
+    if spatial_reduction not in ("mean", "rms"):
+        raise ValueError("spatial_reduction must be 'mean' or 'rms'")
 
-    accumulator = _RunningLinearTrend(snapshot_dim, accumulator_dtype)
-    for start in range(0, n_total, size):
-        stop = min(start + size, n_total)
-        accumulator.update(
-            _load_batch(source, start, stop, snapshot_dim),
-            time_values[start:stop],
-        )
-    return accumulator.finalize()
+    fraction_values = None
+    checkpoint_counts = None
+    if "dependency" in selected:
+        fraction_values, checkpoint_counts = _prepare_fractions(fractions, n_total)
+    elif "moments" in selected:
+        checkpoint_counts = [n_total]
+    time_values = _prepare_time_values(time, n_total) if "trend" in selected else None
+    quantile_values = _prepare_quantiles(quantiles) if "spatial" in selected else None
+    prepared_bins = None
+    prepared_range = None
+    if "histogram" in selected:
+        prepared_bins = _prepare_histogram_bins(histogram_bins)
+        prepared_range = _prepare_histogram_range(histogram_range)
+        if not isinstance(prepared_bins, int) and prepared_range is not None:
+            raise ValueError("histogram_range cannot be used with explicit bin edges")
+        if not isinstance(density, bool):
+            raise ValueError("density must be a boolean")
+    if execution is not None and not isinstance(execution, DistributedExecution):
+        raise ValueError("execution must be a DistributedExecution instance")
+
+    arguments = (
+        source,
+        n_total,
+        size,
+        snapshot_dim,
+        selected,
+        fraction_values,
+        checkpoint_counts,
+        time_values,
+        quantile_values,
+        prepared_bins,
+        prepared_range,
+        spatial_weight,
+        spatial_mask,
+        spatial_reduction,
+        keep_intermediate_fields,
+        density,
+        accumulator_dtype,
+    )
+    if execution is None:
+        return _serial_snapshot_statistics(*arguments)
+    from ._distributed_statistics import _distributed_snapshot_statistics
+
+    return _distributed_snapshot_statistics(*arguments, execution)
 
 
 def detect_linear_trend(
@@ -1152,6 +1759,8 @@ def detect_linear_trend(
 __all__ = [
     "DEFAULT_QUANTILES",
     "detect_linear_trend",
+    "DistributedExecution",
+    "HistogramResult",
     "linear_trend",
     "LinearTrendResult",
     "MOMENT_NAMES",
@@ -1159,7 +1768,11 @@ __all__ = [
     "MomentDependencyResult",
     "MomentFields",
     "RunningMoments",
+    "snapshot_statistics",
+    "SnapshotStatisticsResult",
     "spatial_statistics",
     "SpatialStatisticsResult",
     "statistical_moments",
+    "STATISTIC_NAMES",
+    "spatiotemporal_histogram",
 ]
