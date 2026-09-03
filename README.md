@@ -18,13 +18,16 @@ The animation shows the shock buffet on a NACA-0012 airfoil at $Re=10^7$, $Ma=0.
 
 The *flowTorch* project was started to make the analysis and modeling of fluid data **easy** and **accessible** to everyone. The library design intends to strike a balance between **usability** and **flexibility**. Instead of a monolithic, black-box analysis tool, the library offers modular components that allow assembling custom analysis and modeling workflows with ease. *flowTorch* helps to fuse data from a wide range of file formats typical for fluid flow data, for example, to compare experimental and simulation data. The available analysis and modeling tools are rigorously tested and demonstrated on a variety of different fluid flow datasets. Moreover, one can significantly accelerate the entire process of accessing, cleaning, analyzing, and modeling fluid flow data by starting with one of the pipelines available in the *flowTorch* [documentation](https://flowtorch.readthedocs.io/en/latest/).
 
-To get a first impression of what working with *flowTorch* looks like, the code snippet below shows part of a pipeline for performing a dynamic mode decomposition (DMD) of a transient *OpenFOAM* simulation.
+To get a first impression of what working with *flowTorch* looks like, the code
+snippet below shows part of a pipeline for performing an adaptive multi-taper
+spectral proper orthogonal decomposition (SPOD) of a transient *OpenFOAM*
+simulation.
 
 ```
 import torch as pt
 from flowtorch import DATASETS
 from flowtorch.data import FOAMDataloader, mask_box
-from flowtorch.analysis.dmd import DMD
+from flowtorch.analysis import AMSPOD
 
 path = DATASETS["of_cylinder2D_binary"]
 loader = FOAMDataloader(path)
@@ -43,10 +46,10 @@ for i, time in enumerate(window_times):
     # load the vorticity vector field, take the z-component [:, 2], and apply the mask
     data_matrix[:, i] = pt.masked_select(loader.load_snapshot("vorticity", time)[:, 2], mask)
 
-# perform DMD
-dmd = DMD(data_matrix, rank=19)
-# analyze dmd.modes or dmd.eigvals
-# ...
+# perform SPOD and plot its eigenvalue spectrum
+dt = float(window_times[1]) - float(window_times[0])
+spod = AMSPOD(data_matrix, dt=dt, keep_n_modes=3)
+figure, axes = spod.show_spectrum()
 ```
 
 Currently, the following sub-packages are under active development. Note that some components are not yet available in the public release because further developments and testing are required:
@@ -54,7 +57,7 @@ Currently, the following sub-packages are under active development. Note that so
 | package | content |
 | :------ | :-------|
 |flowtorch.data | data loading, domain reduction (masked selection), outlier removal/masking |
-| flowtorch.analysis | algorithms for dimensionality reduction and modal analysis (e.g., SVD, DMD, MSSA) |
+| flowtorch.analysis | snapshot statistics and algorithms for dimensionality reduction and modal analysis (e.g., SVD, SPOD, DMD, MSSA) |
 | flowtorch.rom | reduced-order modeling |
 | flowtorch.visualization | convenience functions for comparative plots and animations |
 
@@ -62,6 +65,7 @@ Currently, the following sub-packages are under active development. Note that so
 
 - data accessors return PyTorch tensors, which can be used directly within your favorite machine learning library, e.g., *PyTorch*, *scikit-learn*, or *TensorFlow*
 - most algorithms run on CPU as well as on GPU
+- snapshot statistics support batched, masked, and distributed processing across CPU nodes or GPUs
 - mixed-precision operations (single/double); switching to single precision makes your life significantly easier when dealing with large datasets
 - user-friendly Python library that integrates easily with popular tools and libraries like *Jupyterlab*, *Matplotlib*, *Pandas*, or *Numpy*
 - a rich tutorial collection to help you get started
@@ -100,14 +104,15 @@ Extras can be combined, for example
 The PyPI distribution is named `flowtorch-fluid`, while the Python package and
 imports remain `flowtorch`.
 
-To install the latest development version directly from GitHub, run:
+To install the latest development version from the `develop` branch, run:
 ```
-pip install "flowtorch-fluid[all] @ git+https://github.com/AndreWeiner/flowtorch.git"
+pip install "flowtorch-fluid[all] @ git+https://github.com/AndreWeiner/flowtorch.git@develop"
 ```
 Alternatively, clone the repository:
 ```
 git clone git@github.com:AndreWeiner/flowtorch.git
 cd flowtorch
+git switch develop
 ```
 and install it in editable mode with the desired optional dependencies:
 ```
@@ -116,6 +121,10 @@ pip install -e ".[all]"
 Installing all flowTorch dependencies requires significant disk space. Replace
 `all` with `data`, `rom`, or `psp` when only part of the optional functionality
 is needed.
+
+For an introduction to computing moments, fraction dependencies, trends,
+spatial summaries, and histograms from large snapshot sequences, see the
+[snapshot-statistics guide](https://flowtorch.readthedocs.io/en/latest/snapshot_statistics.html).
 
 To get an overview of what *flowTorch* can do for you, have a look at the [online documentation](https://flowtorch.readthedocs.io/en/latest/). The examples presented in the online documentation are also contained in this repository. In fact, the documentation is a static version of several [Jupyter notebooks](https://jupyter.org/) with end-to-end analyses. If you are interested in an interactive version of one particular example, navigate to `./docs/source/notebooks` and run `jupyter lab`. Note that to execute some of the notebooks, the **corresponding datasets are required**. The datasets can be downloaded [here](https://datashare.tu-dresden.de/s/rekLnoqzRCp9zk9) (~2.6GB). If the data are only required for unit testing, a reduced dataset may be downloaded [here](https://datashare.tu-dresden.de/s/dr7gBPSdeyXQrgd) (~411MB). Download the data into a directory of your choice and navigate into that directory. To extract the archive, run:
 ```
