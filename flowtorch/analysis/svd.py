@@ -4,19 +4,71 @@
 import logging
 from math import isfinite, sqrt
 from numbers import Integral, Real
-from typing import NamedTuple, Sequence, Tuple, Union
+from os import PathLike
+from typing import Any, NamedTuple, Optional, Sequence, Tuple, Union
 
 # third party packages
 import torch as pt
+import torch.distributed as dist
 
 # flowtorch packages
 from flowtorch.utils import format_byte_size
+from .state_vector import (
+    CompositeStateVectorSource,
+    StateVectorResult,
+    StateVectorSource,
+)
+from .statistics import DistributedExecution
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 
-MODES = ("auto", "svd", "evd")
+MODES = ("auto", "svd", "evd", "tsqr")
+SVD_CHECKPOINT_VERSION = 1
+
+
+def _partition_spatial_axis(size: int, rank: int, world_size: int) -> tuple[int, int]:
+    """Return a balanced contiguous first-axis partition."""
+    common, remainder = divmod(size, world_size)
+    start = rank * common + min(rank, remainder)
+    stop = start + common + (1 if rank < remainder else 0)
+    return start, stop
+
+
+def _iter_slices(start: int, stop: int, batch_size: int):
+    for current in range(start, stop, batch_size):
+        yield slice(current, min(current + batch_size, stop))
+
+
+def _merge_triangular(first: Optional[pt.Tensor], second: pt.Tensor) -> pt.Tensor:
+    """Merge two TSQR triangular factors."""
+    if first is None:
+        return pt.linalg.qr(second, mode="r").R
+    return pt.linalg.qr(pt.cat((first, second), dim=0), mode="r").R
+
+
+def _reduce_triangular(
+    local: pt.Tensor,
+    execution: Optional[DistributedExecution],
+) -> pt.Tensor:
+    """Merge rank-local factors identically on every rank.
+
+    The factors are only snapshot-by-snapshot in size.  Using ``all_gather``
+    keeps this collective portable across Gloo, MPI, and NCCL while the tall
+    spatial factors remain distributed and out of core.
+    """
+    if execution is None:
+        return local
+    group = execution.process_group
+    world_size = dist.get_world_size(group)
+    gathered = [pt.empty_like(local) for _ in range(world_size)]
+    dist.all_gather(gathered, local, group=group)
+    factor = None
+    for current in gathered:
+        factor = _merge_triangular(factor, current)
+    assert factor is not None
+    return factor
 
 
 class PODSubspaceDependencyResult(NamedTuple):
@@ -392,15 +444,41 @@ class SVD(object):
     >>> svd.s_cum
     tensor([ 99.9687,  99.9996,  99.9999, 100.0000, 100.0000])
     >>> svd.U.shape
-    torch.Size([100, 5])
+    torch.Size([400, 5])
+
+    A :class:`~flowtorch.analysis.state_vector.StateVectorSource` selects the
+    out-of-core TSQR path.  The same call is spatially distributed when an
+    initialized :class:`~flowtorch.analysis.statistics.DistributedExecution`
+    is supplied::
+
+        source = DataloaderStateVectorSource(
+            loader,
+            (FieldSpec("U", (3,)), FieldSpec("p")),
+            normalization={"U": u_ref, "p": p_ref},
+        )
+        svd = SVD(
+            source,
+            rank=20,
+            subtract_mean=True,
+            spatial_batch_size=100_000,
+            snapshot_batch_size=16,
+            execution=execution,  # omit for shared-memory execution
+        )
+        for spatial_slice, fields in svd.U.iter_chunks(split=True):
+            consume(fields["U"], fields["p"])
     """
 
     def __init__(
         self,
-        data_matrix: pt.Tensor,
+        data_matrix: Union[pt.Tensor, StateVectorSource],
         rank: Union[int, None] = None,
         mode: str = "auto",
         weight: Union[pt.Tensor, None] = None,
+        *,
+        subtract_mean: bool = False,
+        spatial_batch_size: Optional[int] = None,
+        snapshot_batch_size: Optional[int] = None,
+        execution: Optional[DistributedExecution] = None,
     ):
         r"""Compute a truncated, optionally weighted SVD of a data matrix.
 
@@ -410,9 +488,10 @@ class SVD(object):
         Euclidean-orthonormal weighted-coordinate representation. Consequently,
         :meth:`reconstruct` always returns data in the original coordinates.
 
-        :param data_matrix: data matrix of shape M x N, typically with M being the
-            number of spatial points and N being the number of time steps
-        :type data_matrix: pt.Tensor
+        :param data_matrix: data matrix of shape M x N or a lazy state-vector
+            source. Lazy sources use out-of-core TSQR and partition the first
+            spatial dimension when ``execution`` is supplied.
+        :type data_matrix: Union[pt.Tensor, StateVectorSource]
         :param rank: rank at which to truncate the SVD; if no rank is given, the 'optimal'
             rank is determined via singular value hard thresholding; defaults to None
         :type rank: Union[int, None], optional
@@ -425,11 +504,43 @@ class SVD(object):
         :param weight: positive diagonal inner-product weight; a shorter vector
             is repeated when its length divides the state dimension
         :type weight: pt.Tensor, optional
+        :param subtract_mean: subtract and retain the temporal mean, defaults to
+            False
+        :param spatial_batch_size: maximum number of first-axis spatial values
+            loaded per rank and batch for a lazy source
+        :param snapshot_batch_size: maximum number of snapshots requested from
+            a lazy source at once
+        :param execution: distributed execution configuration. Every rank must
+            construct the same source; the spatial dimension is partitioned,
+            while time is retained on every rank.
         :raises ValueError:
             - if the data matrix does not have exactly two dimensions
             - if an invalid compute mode is specified
             - if the weight is invalid or incompatible with the state dimension
         """
+        if isinstance(data_matrix, StateVectorSource):
+            self._init_source(
+                data_matrix,
+                rank,
+                mode,
+                weight,
+                subtract_mean,
+                spatial_batch_size,
+                snapshot_batch_size,
+                execution,
+            )
+            return
+        if execution is not None:
+            raise ValueError(
+                "distributed SVD requires a StateVectorSource on every rank"
+            )
+        input_mean = data_matrix.mean(dim=1) if subtract_mean else None
+        if input_mean is not None:
+            data_matrix = data_matrix - input_mean.unsqueeze(-1)
+        self._source: Optional[StateVectorSource] = None
+        self._subtract_mean = subtract_mean
+        self._execution: Optional[DistributedExecution] = None
+        self._mean = input_mean
         shape = data_matrix.shape
         if len(shape) != 2:
             raise ValueError(
@@ -470,6 +581,219 @@ class SVD(object):
         self._U = U.contiguous()
         self._s = s[: self.rank].clone()
         self._V = V[:, : self.rank].contiguous()
+
+    @staticmethod
+    def _validate_batch_size(value: Optional[int], default: int, name: str) -> int:
+        selected = default if value is None else value
+        if (
+            not isinstance(selected, Integral)
+            or isinstance(selected, bool)
+            or selected < 1
+        ):
+            raise ValueError(f"{name} must be a positive integer")
+        return int(selected)
+
+    def _init_source(
+        self,
+        source: StateVectorSource,
+        rank: Optional[int],
+        mode: str,
+        weight: Optional[pt.Tensor],
+        subtract_mean: bool,
+        spatial_batch_size: Optional[int],
+        snapshot_batch_size: Optional[int],
+        execution: Optional[DistributedExecution],
+    ) -> None:
+        """Compute an out-of-core tall-skinny SVD."""
+        if mode not in ("auto", "tsqr"):
+            raise ValueError("StateVectorSource inputs require mode 'auto' or 'tsqr'")
+        if not isinstance(subtract_mean, bool):
+            raise ValueError("subtract_mean must be a boolean")
+        if execution is not None:
+            if not isinstance(execution, DistributedExecution):
+                raise ValueError("execution must be a DistributedExecution instance")
+            if not dist.is_available() or not dist.is_initialized():
+                raise RuntimeError("torch.distributed must be initialized")
+            group = execution.process_group
+            process_rank = dist.get_rank(group)
+            world_size = dist.get_world_size(group)
+            if execution.root_rank < 0 or execution.root_rank >= world_size:
+                raise ValueError("root_rank must identify a rank in the process group")
+        else:
+            process_rank = 0
+            world_size = 1
+        if world_size > source.spatial_shape[0]:
+            raise ValueError(
+                "the process group cannot contain more ranks than first-axis spatial values"
+            )
+        if weight is not None:
+            if tuple(weight.shape) != source.spatial_shape:
+                raise ValueError(
+                    "a source-backed weight must match the source spatial shape"
+                )
+            if weight.device.type != "cpu":
+                raise ValueError("source-backed global weights must be stored on CPU")
+        self._source = source
+        self._source_weight = weight
+        self._subtract_mean = subtract_mean
+        self._execution = execution
+        self._rows = source.layout.state_size
+        self._cols = source.n_snapshots
+        self._mode = "tsqr"
+        self._spatial_batch_size = self._validate_batch_size(
+            spatial_batch_size, min(1024, source.spatial_shape[0]), "spatial_batch_size"
+        )
+        self._snapshot_batch_size = self._validate_batch_size(
+            snapshot_batch_size, min(16, source.n_snapshots), "snapshot_batch_size"
+        )
+        start, stop = _partition_spatial_axis(
+            source.spatial_shape[0], process_rank, world_size
+        )
+        self._local_spatial_slice = slice(start, stop)
+        source.fit_normalization(
+            self._local_spatial_slice,
+            self._spatial_batch_size,
+            self._snapshot_batch_size,
+            execution,
+        )
+        self._fit_source_factors(rank)
+
+    def _source_block(
+        self,
+        source: StateVectorSource,
+        spatial_slice: slice,
+        *,
+        subtract_mean: Optional[bool] = None,
+    ) -> tuple[pt.Tensor, Optional[pt.Tensor]]:
+        """Load all temporal columns for one spatial chunk."""
+        pieces = []
+        for snapshot_slice in _iter_slices(
+            0, source.n_snapshots, self._snapshot_batch_size
+        ):
+            pieces.append(source.read(spatial_slice, snapshot_slice))
+        block = pt.cat(pieces, dim=1)
+        center = self._subtract_mean if subtract_mean is None else subtract_mean
+        mean = block.mean(dim=1) if center else None
+        if mean is not None:
+            block = block - mean.unsqueeze(-1)
+        return block, mean
+
+    def _weight_block(
+        self, source: StateVectorSource, spatial_slice: slice, reference: pt.Tensor
+    ) -> Optional[pt.Tensor]:
+        weight = source.read_weight(spatial_slice)
+        if weight is not None and self._source_weight is not None:
+            raise ValueError("weight is defined by both the source and SVD")
+        if weight is None and self._source_weight is not None:
+            weight = self._source_weight[spatial_slice].to(reference.device)
+        if weight is None:
+            return None
+        start, stop, _ = spatial_slice.indices(source.spatial_shape[0])
+        expected = (stop - start, *source.spatial_shape[1:])
+        if tuple(weight.shape) != expected:
+            raise ValueError(
+                f"spatial weight has shape {tuple(weight.shape)}; expected {expected}"
+            )
+        if pt.is_complex(weight) or weight.dtype == pt.bool:
+            raise ValueError("weight must have a real numeric dtype")
+        if not bool(pt.isfinite(weight).all()) or bool((weight <= 0.0).any()):
+            raise ValueError("weight values must be finite and positive")
+        repeats = sum(field.n_components for field in source.layout.fields)
+        return (
+            weight.reshape(-1)
+            .repeat(repeats)
+            .to(device=reference.device, dtype=reference.real.dtype)
+        )
+
+    def _weighted_block(
+        self, source: StateVectorSource, spatial_slice: slice, block: pt.Tensor
+    ) -> pt.Tensor:
+        weight = self._weight_block(source, spatial_slice, block)
+        return block if weight is None else block * weight.sqrt().unsqueeze(-1)
+
+    def _local_triangular_factor(
+        self,
+        source: StateVectorSource,
+        columns: int,
+        block_transform=None,
+    ) -> pt.Tensor:
+        """Accumulate one rank-local TSQR factor from spatial chunks."""
+        local_start, local_stop, _ = self._local_spatial_slice.indices(
+            source.spatial_shape[0]
+        )
+        triangular = None
+        reference = None
+        for spatial_slice in _iter_slices(
+            local_start, local_stop, self._spatial_batch_size
+        ):
+            block, _ = self._source_block(source, spatial_slice)
+            if block_transform is not None:
+                block = block_transform(spatial_slice, block)
+            block = self._weighted_block(source, spatial_slice, block)
+            reference = block
+            triangular = _merge_triangular(triangular, block)
+        if reference is None or triangular is None:
+            raise RuntimeError("the local spatial partition is empty")
+        padded = reference.new_zeros((columns, columns))
+        padded[: triangular.shape[0]] = triangular
+        return padded
+
+    def _fit_source_factors(self, requested_rank: Optional[int]) -> None:
+        assert self._source is not None
+        local = self._local_triangular_factor(self._source, self._cols)
+        triangular = _reduce_triangular(local, self._execution)
+        root = (
+            self._execution is None
+            or dist.get_rank(self._execution.process_group) == self._execution.root_rank
+        )
+        if root:
+            _, singular_values, right_h = pt.linalg.svd(triangular, full_matrices=False)
+            right = right_h.conj().T
+        else:
+            singular_values = triangular.real.new_empty(self._cols)
+            right = triangular.new_empty((self._cols, self._cols))
+        if self._execution is not None:
+            group = self._execution.process_group
+            global_ranks: list[Any] = [None] * dist.get_world_size(group)
+            dist.all_gather_object(global_ranks, dist.get_rank(), group=group)
+            root_global = global_ranks[self._execution.root_rank]
+            dist.broadcast(singular_values, src=root_global, group=group)
+            dist.broadcast(right, src=root_global, group=group)
+        self._opt_rank = self._optimal_rank(singular_values)
+        self.rank = self.opt_rank if requested_rank is None else requested_rank
+        self._s_full = singular_values
+        self._s = singular_values[: self.rank].clone().contiguous()
+        self._V = right[:, : self.rank].contiguous()
+        self._weight = None
+        self._sqrt_weight = None
+        self._mean = self._mean_result() if self._subtract_mean else None
+        logger.info(
+            f"Truncating TSQR SVD at index {self.rank}/{min(self._cols, self._rows)}"
+        )
+
+    def _left_chunk(self, spatial_slice: slice) -> pt.Tensor:
+        assert self._source is not None
+        block, _ = self._source_block(self._source, spatial_slice)
+        denominator = self.s.clamp_min(pt.finfo(self.s.dtype).eps * self.s[0])
+        return (block @ self.V) / denominator
+
+    def _mean_result(self) -> StateVectorResult:
+        assert self._source is not None
+        source = self._source
+
+        def produce(spatial_slice: slice) -> pt.Tensor:
+            _, mean = self._source_block(source, spatial_slice, subtract_mean=True)
+            assert mean is not None
+            return mean
+
+        return StateVectorResult(
+            source.layout,
+            self._local_spatial_slice,
+            (),
+            produce,
+            self._spatial_batch_size,
+            self._execution,
+        )
 
     def _svd(self, X: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor, pt.Tensor]:
         """Compute the economy SVD via the native SVD implementation.
@@ -537,7 +861,7 @@ class SVD(object):
         else:
             return closest
 
-    def reconstruct(self, rank: Union[int, None] = None) -> pt.Tensor:
+    def reconstruct(self, rank: Union[int, None] = None) -> Any:
         """Reconstruct the data matrix for a given rank.
 
         :param rank: rank used to compute a truncated reconstruction
@@ -546,10 +870,24 @@ class SVD(object):
         :rtype: pt.Tensor
         """
         r_rank = self.rank if rank is None else max(min(rank, self.rank), 1)
+        if self._source is not None:
+
+            def produce(spatial_slice: slice) -> pt.Tensor:
+                modes = self._left_chunk(spatial_slice)[:, :r_rank]
+                return (modes * self.s[:r_rank]) @ self.V[:, :r_rank].conj().T
+
+            return StateVectorResult(
+                self._source.layout,
+                self._local_spatial_slice,
+                (self._cols,),
+                produce,
+                self._spatial_batch_size,
+                self._execution,
+            )
         return (self.U[:, :r_rank] * self.s[:r_rank]) @ self.V[:, :r_rank].conj().T
 
     @property
-    def U(self) -> pt.Tensor:
+    def U(self) -> Any:
         r"""Physical left-singular vectors.
 
         For a weighted decomposition, these modes are orthonormal in the
@@ -558,10 +896,19 @@ class SVD(object):
         :return: physical left-singular vectors truncated to specified rank
         :rtype: pt.Tensor
         """
-        return self._U
+        if self._source is None:
+            return self._U
+        return StateVectorResult(
+            self._source.layout,
+            self._local_spatial_slice,
+            (self.rank,),
+            self._left_chunk,
+            self._spatial_batch_size,
+            self._execution,
+        )
 
     @property
-    def U_weighted(self) -> pt.Tensor:
+    def U_weighted(self) -> Union[pt.Tensor, StateVectorResult]:
         r"""Euclidean-orthonormal left-singular vectors.
 
         For a weighted decomposition, this is ``W**0.5 @ U``. Without a
@@ -570,6 +917,22 @@ class SVD(object):
         :return: left-singular vectors in weighted coordinates
         :rtype: pt.Tensor
         """
+        if self._source is not None:
+            source = self._source
+
+            def produce(spatial_slice: slice) -> pt.Tensor:
+                modes = self._left_chunk(spatial_slice)
+                weight = self._weight_block(source, spatial_slice, modes)
+                return modes if weight is None else modes * weight.sqrt().unsqueeze(-1)
+
+            return StateVectorResult(
+                source.layout,
+                self._local_spatial_slice,
+                (self.rank,),
+                produce,
+                self._spatial_batch_size,
+                self._execution,
+            )
         if self._sqrt_weight is None:
             return self._U
         return self._U * self._sqrt_weight
@@ -582,6 +945,11 @@ class SVD(object):
         :rtype: Union[pt.Tensor, None]
         """
         return self._weight
+
+    @property
+    def mean(self) -> Optional[Union[pt.Tensor, StateVectorResult]]:
+        """Temporal mean retained by a centered decomposition."""
+        return self._mean
 
     @property
     def s(self) -> pt.Tensor:
@@ -678,23 +1046,336 @@ class SVD(object):
         :return: cumulative size of truncated U, s, and V tensors in bytes
         :rtype: int
         """
-        memory = (
-            self.U.element_size() * self.U.nelement()
-            + self.s.element_size() * self.s.nelement()
-            + self.V.element_size() * self.V.nelement()
-        )
+        if self._source is None:
+            memory = self._U.element_size() * self._U.nelement()
+        else:
+            memory = 0
+        memory += self.s.element_size() * self.s.nelement()
+        memory += self.V.element_size() * self.V.nelement()
         if self.weight is not None:
             memory += self.weight.element_size() * self.weight.nelement()
         if self._sqrt_weight is not None:
             memory += self._sqrt_weight.element_size() * self._sqrt_weight.nelement()
         return memory
 
+    def update(self, new_source: StateVectorSource) -> "SVD":
+        """Append snapshots from a compatible lazy source.
+
+        Uncentered decompositions use a distributed incremental update. A
+        centered decomposition is recomputed out of core so that changing the
+        global mean is handled exactly.
+
+        The update modifies and returns this object::
+
+            new_source = source.with_times(new_times)
+            svd.update(new_source)
+            updated_singular_values = svd.s
+        """
+        if self._source is None:
+            raise RuntimeError("update requires a source-backed SVD")
+        if not isinstance(new_source, StateVectorSource):
+            raise ValueError("new_source must be a StateVectorSource")
+        if new_source.layout.signature != self._source.layout.signature:
+            raise ValueError("new source layout or normalization is incompatible")
+        if new_source.spatial_shape != self._source.spatial_shape:
+            raise ValueError("new source has an incompatible spatial shape")
+        combined = CompositeStateVectorSource((self._source, new_source))
+        selected_rank = self.rank
+        if self._subtract_mean:
+            self._source = combined
+            self._cols = combined.n_snapshots
+            self._fit_source_factors(selected_rank)
+            return self
+
+        old_source = self._source
+        old_columns = self._cols
+        added_columns = new_source.n_snapshots
+        cross = self.V.new_zeros((self.rank, added_columns))
+        local_start, local_stop, _ = self._local_spatial_slice.indices(
+            old_source.spatial_shape[0]
+        )
+        for spatial_slice in _iter_slices(
+            local_start, local_stop, self._spatial_batch_size
+        ):
+            old_modes = self._left_chunk(spatial_slice)
+            added, _ = self._source_block(
+                new_source, spatial_slice, subtract_mean=False
+            )
+            weight = self._weight_block(old_source, spatial_slice, old_modes)
+            if weight is None:
+                cross += old_modes.conj().T @ added
+            else:
+                cross += old_modes.conj().T @ (added * weight.unsqueeze(-1))
+        if self._execution is not None:
+            dist.all_reduce(
+                cross, op=dist.ReduceOp.SUM, group=self._execution.process_group
+            )
+
+        def residual(spatial_slice: slice, added: pt.Tensor) -> pt.Tensor:
+            return added - self._left_chunk(spatial_slice) @ cross
+
+        local_residual = self._local_triangular_factor(
+            new_source, added_columns, residual
+        )
+        residual_r = _reduce_triangular(local_residual, self._execution)
+        core_size = self.rank + added_columns
+        core = self.V.new_zeros((core_size, core_size))
+        core[: self.rank, : self.rank] = pt.diag(self.s).to(core.dtype)
+        core[: self.rank, self.rank :] = cross
+        core[self.rank :, self.rank :] = residual_r
+        root = (
+            self._execution is None
+            or dist.get_rank(self._execution.process_group) == self._execution.root_rank
+        )
+        if root:
+            _, updated_s, updated_vh = pt.linalg.svd(core, full_matrices=False)
+            updated_v = updated_vh.conj().T
+        else:
+            updated_s = core.real.new_empty(core_size)
+            updated_v = core.new_empty((core_size, core_size))
+        if self._execution is not None:
+            group = self._execution.process_group
+            global_ranks: list[Any] = [None] * dist.get_world_size(group)
+            dist.all_gather_object(global_ranks, dist.get_rank(), group=group)
+            root_global = global_ranks[self._execution.root_rank]
+            dist.broadcast(updated_s, src=root_global, group=group)
+            dist.broadcast(updated_v, src=root_global, group=group)
+        right_basis = self.V.new_zeros((old_columns + added_columns, core_size))
+        right_basis[:old_columns, : self.rank] = self.V
+        right_basis[old_columns:, self.rank :] = pt.eye(
+            added_columns, dtype=self.V.dtype, device=self.V.device
+        )
+        new_rank = min(selected_rank, updated_s.numel())
+        new_v = (right_basis @ updated_v[:, :new_rank]).contiguous()
+        self._source = combined
+        self._cols = combined.n_snapshots
+        self._s_full = updated_s
+        self._opt_rank = self._optimal_rank(updated_s)
+        self._rank = new_rank
+        self._s = updated_s[:new_rank].clone().contiguous()
+        self._V = new_v
+        self._mean = None
+        return self
+
+    @staticmethod
+    def _layout_metadata(source: StateVectorSource) -> dict[str, Any]:
+        """Convert state-vector metadata to checkpoint-safe built-in values."""
+        return {
+            "spatial_shape": list(source.layout.spatial_shape),
+            "fields": [
+                {
+                    "name": field.name,
+                    "component_shape": list(field.component_shape),
+                    "component_names": list(field.component_names),
+                }
+                for field in source.layout.fields
+            ],
+            "normalization_factors": source.layout.normalization_factors,
+        }
+
+    def save(self, path: Union[str, PathLike[str]]) -> None:
+        """Save a versioned SVD checkpoint.
+
+        Tensor-backed decompositions include the left modes and can be loaded
+        independently.  Source-backed decompositions store only compact
+        factors, layout metadata, and configuration; pass a compatible source
+        to :meth:`load` to restore their lazy modes and reconstructions.
+
+        In distributed execution this method is collective. Only the configured
+        root writes the shared path, then all ranks synchronize::
+
+            svd.save("svd.pt")
+            restored = SVD.load("svd.pt", source=source, execution=execution)
+        """
+        checkpoint: dict[str, Any] = {
+            "format": "flowtorch.svd",
+            "version": SVD_CHECKPOINT_VERSION,
+            "kind": "source" if self._source is not None else "tensor",
+            "rows": self._rows,
+            "cols": self._cols,
+            "rank": self.rank,
+            "opt_rank": self.opt_rank,
+            "mode": self.mode,
+            "subtract_mean": self._subtract_mean,
+            "s": self.s.detach().cpu(),
+            "s_full": self.s_full.detach().cpu(),
+            "V": self.V.detach().cpu(),
+        }
+        if self._source is None:
+            checkpoint.update(
+                {
+                    "U": self._U.detach().cpu(),
+                    "weight": (
+                        None if self._weight is None else self._weight.detach().cpu()
+                    ),
+                    "sqrt_weight": (
+                        None
+                        if self._sqrt_weight is None
+                        else self._sqrt_weight.detach().cpu()
+                    ),
+                    "mean": None if self._mean is None else self._mean.detach().cpu(),
+                }
+            )
+        else:
+            checkpoint.update(
+                {
+                    "layout": self._layout_metadata(self._source),
+                    "spatial_batch_size": self._spatial_batch_size,
+                    "snapshot_batch_size": self._snapshot_batch_size,
+                    "source_weight": (
+                        None
+                        if self._source_weight is None
+                        else self._source_weight.detach().cpu()
+                    ),
+                }
+            )
+        should_write = True
+        if self._execution is not None:
+            should_write = (
+                dist.get_rank(self._execution.process_group)
+                == self._execution.root_rank
+            )
+        if should_write:
+            pt.save(checkpoint, path)
+        if self._execution is not None:
+            dist.barrier(group=self._execution.process_group)
+
+    @classmethod
+    def load(
+        cls,
+        path: Union[str, PathLike[str]],
+        *,
+        source: Optional[StateVectorSource] = None,
+        execution: Optional[DistributedExecution] = None,
+        map_location: Any = "cpu",
+        spatial_batch_size: Optional[int] = None,
+        snapshot_batch_size: Optional[int] = None,
+    ) -> "SVD":
+        """Restore an SVD without recomputing its factors.
+
+        ``source`` is required for a source-backed checkpoint and must have the
+        same fields, component shapes, normalization factors, spatial shape,
+        and snapshot count.  Use ``map_location`` to place compact factors on
+        the device from which the source returns chunks.  The batch-size
+        arguments optionally override their saved values.
+
+        Loading does not read physical snapshots::
+
+            source = DataloaderStateVectorSource(
+                loader,
+                fields,
+                normalization=saved_normalization,
+            )
+            svd = SVD.load("svd.pt", source=source)
+        """
+        try:
+            checkpoint = pt.load(
+                path,
+                map_location=map_location,
+                weights_only=True,
+            )
+        except TypeError:  # PyTorch versions before ``weights_only``
+            checkpoint = pt.load(path, map_location=map_location)
+        if not isinstance(checkpoint, dict):
+            raise ValueError("invalid SVD checkpoint")
+        if checkpoint.get("format") != "flowtorch.svd":
+            raise ValueError("file is not a flowTorch SVD checkpoint")
+        if checkpoint.get("version") != SVD_CHECKPOINT_VERSION:
+            raise ValueError(
+                "unsupported SVD checkpoint version " f"{checkpoint.get('version')!r}"
+            )
+        kind = checkpoint.get("kind")
+        if kind not in ("tensor", "source"):
+            raise ValueError("invalid SVD checkpoint kind")
+        instance = cls.__new__(cls)
+        instance._rows = int(checkpoint["rows"])
+        instance._cols = int(checkpoint["cols"])
+        instance._rank = int(checkpoint["rank"])
+        instance._opt_rank = int(checkpoint["opt_rank"])
+        instance._mode = str(checkpoint["mode"])
+        instance._subtract_mean = bool(checkpoint["subtract_mean"])
+        instance._s = checkpoint["s"]
+        instance._s_full = checkpoint["s_full"]
+        instance._V = checkpoint["V"]
+        if kind == "tensor":
+            if source is not None or execution is not None:
+                raise ValueError(
+                    "source and execution are only valid for source-backed checkpoints"
+                )
+            instance._source = None
+            instance._execution = None
+            instance._U = checkpoint["U"]
+            instance._weight = checkpoint["weight"]
+            instance._sqrt_weight = checkpoint["sqrt_weight"]
+            instance._mean = checkpoint["mean"]
+            return instance
+        if source is None:
+            raise ValueError("source-backed checkpoints require a source")
+        saved_layout = checkpoint.get("layout")
+        if not isinstance(saved_layout, dict):
+            raise ValueError("source-backed checkpoint has invalid layout metadata")
+        saved_normalization = saved_layout.get("normalization_factors")
+        if not isinstance(saved_normalization, dict):
+            raise ValueError(
+                "source-backed checkpoint has invalid normalization metadata"
+            )
+        source.restore_normalization(saved_normalization)
+        if cls._layout_metadata(source) != saved_layout:
+            raise ValueError(
+                "source layout, component metadata, or normalization is incompatible"
+            )
+        if source.n_snapshots != instance._cols:
+            raise ValueError(
+                f"source has {source.n_snapshots} snapshots; expected {instance._cols}"
+            )
+        if execution is not None:
+            if not isinstance(execution, DistributedExecution):
+                raise ValueError("execution must be a DistributedExecution instance")
+            if not dist.is_available() or not dist.is_initialized():
+                raise RuntimeError("torch.distributed must be initialized")
+            group = execution.process_group
+            process_rank = dist.get_rank(group)
+            world_size = dist.get_world_size(group)
+            if execution.root_rank < 0 or execution.root_rank >= world_size:
+                raise ValueError("root_rank must identify a rank in the process group")
+        else:
+            process_rank = 0
+            world_size = 1
+        if world_size > source.spatial_shape[0]:
+            raise ValueError(
+                "the process group cannot contain more ranks than first-axis "
+                "spatial values"
+            )
+        instance._source = source
+        instance._execution = execution
+        instance._source_weight = checkpoint["source_weight"]
+        if instance._source_weight is not None:
+            instance._source_weight = instance._source_weight.cpu()
+        instance._weight = None
+        instance._sqrt_weight = None
+        instance._spatial_batch_size = cls._validate_batch_size(
+            spatial_batch_size,
+            int(checkpoint["spatial_batch_size"]),
+            "spatial_batch_size",
+        )
+        instance._snapshot_batch_size = cls._validate_batch_size(
+            snapshot_batch_size,
+            int(checkpoint["snapshot_batch_size"]),
+            "snapshot_batch_size",
+        )
+        start, stop = _partition_spatial_axis(
+            source.spatial_shape[0], process_rank, world_size
+        )
+        instance._local_spatial_slice = slice(start, stop)
+        instance._mean = instance._mean_result() if instance._subtract_mean else None
+        return instance
+
     def __str__(self) -> str:
         size, unit = format_byte_size(self.required_memory)
         ms = (
             f"SVD of a {self._rows}x{self._cols} data matrix",
             f"Selected/optimal rank: {self.rank}/{self.opt_rank}",
-            f"data type: {self.U.dtype} ({self.U.element_size()}b)",
+            f"data type: {self.V.dtype} ({self.V.element_size()}b)",
             "truncated SVD size: {:1.4f}{:s}".format(size, unit),
         )
         return "\n".join(ms)

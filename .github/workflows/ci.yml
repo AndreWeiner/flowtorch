@@ -99,7 +99,10 @@ jobs:
         run: python -m pip install tox
 
       - name: Run multi-process tests
-        run: tox -e py312 -- tests/analysis/test_distributed_statistics.py
+        run: >-
+          tox -e py312 --
+          tests/analysis/test_distributed_statistics.py
+          tests/analysis/test_distributed_svd.py
 
   type-check:
     name: Type check (optional)

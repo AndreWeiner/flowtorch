@@ -10,6 +10,34 @@ from flowtorch.analysis.svd import (
     pod_subspace_data_dependency,
     subspace_similarity,
 )
+from flowtorch.analysis.state_vector import (
+    FieldSpec,
+    StateVectorLayout,
+    StateVectorSource,
+)
+
+
+class _MatrixSource(StateVectorSource):
+    def __init__(self, data, weight=None):
+        self.data = data
+        self._layout = StateVectorLayout((FieldSpec("q"),), (data.shape[0],))
+        self._weight = weight
+        self.calls = []
+
+    @property
+    def n_snapshots(self):
+        return self.data.shape[1]
+
+    @property
+    def layout(self):
+        return self._layout
+
+    def read(self, spatial_slice, snapshot_slice):
+        self.calls.append((spatial_slice, snapshot_slice))
+        return self.data[spatial_slice, snapshot_slice]
+
+    def read_weight(self, spatial_slice):
+        return None if self._weight is None else self._weight[spatial_slice]
 
 
 def test_subspace_similarity_is_basis_invariant():
@@ -168,6 +196,135 @@ class TestSVD:
             _ = SVD(dm.unsqueeze(-1))
         with pytest.raises(ValueError):
             _ = SVD(dm, mode="abc")
+
+    def test_source_backed_tsqr_reconstructs_out_of_core(self):
+        pt.manual_seed(7)
+        data = pt.rand((41, 6), dtype=pt.float64)
+        source = _MatrixSource(data)
+
+        svd = SVD(
+            source,
+            rank=6,
+            spatial_batch_size=7,
+            snapshot_batch_size=2,
+        )
+
+        assert svd.mode == "tsqr"
+        assert svd.U.global_shape == (41, 6)
+        pt.testing.assert_close(svd.reconstruct().materialize_local(), data)
+        assert all(call[0].stop - call[0].start <= 7 for call in source.calls)
+        assert all(call[1].stop - call[1].start <= 2 for call in source.calls)
+
+    def test_source_backed_centered_weighted_tsqr(self):
+        pt.manual_seed(8)
+        data = pt.rand((37, 5), dtype=pt.float64)
+        weight = pt.linspace(1.0, 2.0, data.shape[0], dtype=pt.float64)
+        source = _MatrixSource(data, weight)
+
+        svd = SVD(source, rank=4, subtract_mean=True, spatial_batch_size=8)
+        modes = svd.U.materialize_local()
+        mean = svd.mean.materialize_local()
+
+        pt.testing.assert_close(mean, data.mean(dim=1))
+        pt.testing.assert_close(
+            modes.conj().T @ (modes * weight.unsqueeze(-1)), pt.eye(4, dtype=data.dtype)
+        )
+        pt.testing.assert_close(
+            svd.reconstruct().materialize_local(),
+            data - data.mean(dim=1, keepdim=True),
+        )
+
+    def test_source_backed_incremental_update_matches_direct_svd(self):
+        pt.manual_seed(9)
+        first = pt.rand((43, 4), dtype=pt.float64)
+        second = pt.rand((43, 3), dtype=pt.float64)
+        svd = SVD(_MatrixSource(first), rank=4, spatial_batch_size=9)
+
+        svd.update(_MatrixSource(second))
+
+        combined = pt.cat((first, second), dim=1)
+        direct = SVD(combined, rank=4, mode="svd")
+        pt.testing.assert_close(svd.s, direct.s)
+        pt.testing.assert_close(
+            subspace_similarity(svd.U.materialize_local(), direct.U, ranks=4),
+            pt.ones(1, dtype=first.dtype),
+        )
+
+    def test_centered_update_recomputes_with_combined_mean(self):
+        pt.manual_seed(10)
+        first = pt.rand((31, 4), dtype=pt.float64)
+        second = 2.0 + pt.rand((31, 2), dtype=pt.float64)
+        svd = SVD(
+            _MatrixSource(first), rank=5, subtract_mean=True, spatial_batch_size=6
+        )
+
+        svd.update(_MatrixSource(second))
+
+        combined = pt.cat((first, second), dim=1)
+        centered = combined - combined.mean(dim=1, keepdim=True)
+        direct = SVD(centered, rank=4, mode="svd")
+        pt.testing.assert_close(
+            svd.reconstruct().materialize_local(),
+            direct.reconstruct(),
+        )
+
+    def test_tensor_checkpoint_round_trip(self, tmp_path):
+        pt.manual_seed(14)
+        data = pt.rand((18, 5), dtype=pt.float64)
+        weight = pt.linspace(1.0, 2.0, data.shape[0], dtype=data.dtype)
+        svd = SVD(
+            data,
+            rank=4,
+            mode="svd",
+            weight=weight,
+            subtract_mean=True,
+        )
+        path = tmp_path / "tensor-svd.pt"
+
+        svd.save(path)
+        restored = SVD.load(path)
+
+        assert restored.rank == svd.rank
+        assert restored.opt_rank == svd.opt_rank
+        assert restored.mode == svd.mode
+        pt.testing.assert_close(restored.U, svd.U)
+        pt.testing.assert_close(restored.s_full, svd.s_full)
+        pt.testing.assert_close(restored.V, svd.V)
+        pt.testing.assert_close(restored.mean, svd.mean)
+        pt.testing.assert_close(restored.reconstruct(), svd.reconstruct())
+
+    def test_source_checkpoint_reconnects_without_reading_data(self, tmp_path):
+        pt.manual_seed(15)
+        data = pt.rand((29, 6), dtype=pt.float64)
+        source = _MatrixSource(data)
+        svd = SVD(
+            source,
+            rank=5,
+            subtract_mean=True,
+            spatial_batch_size=7,
+            snapshot_batch_size=2,
+        )
+        path = tmp_path / "source-svd.pt"
+        svd.save(path)
+        restored_source = _MatrixSource(data)
+
+        restored = SVD.load(path, source=restored_source)
+
+        assert restored_source.calls == []
+        pt.testing.assert_close(restored.s_full, svd.s_full)
+        pt.testing.assert_close(restored.V, svd.V)
+        pt.testing.assert_close(
+            restored.reconstruct().materialize_local(),
+            data - data.mean(dim=1, keepdim=True),
+        )
+
+    def test_source_checkpoint_rejects_incompatible_source(self, tmp_path):
+        svd = SVD(_MatrixSource(pt.rand((12, 4))), rank=3)
+        path = tmp_path / "source-svd.pt"
+        svd.save(path)
+
+        with pytest.raises(ValueError, match="incompatible"):
+            SVD.load(path, source=_MatrixSource(pt.rand((13, 4))))
 
     def test_truncated_factors_use_compact_storage(self):
         M, N, rank = 100, 15, 3

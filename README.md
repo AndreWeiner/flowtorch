@@ -66,6 +66,7 @@ Currently, the following sub-packages are under active development. Note that so
 - data accessors return PyTorch tensors, which can be used directly within your favorite machine learning library, e.g., *PyTorch*, *scikit-learn*, or *TensorFlow*
 - most algorithms run on CPU as well as on GPU
 - snapshot statistics support batched, masked, and distributed processing across CPU nodes or GPUs
+- SVD and PAMSPOD support normalized multi-field state vectors, out-of-core batches, spatial distribution, and lazy physical-field reconstruction
 - mixed-precision operations (single/double); switching to single precision makes your life significantly easier when dealing with large datasets
 - user-friendly Python library that integrates easily with popular tools and libraries like *Jupyterlab*, *Matplotlib*, *Pandas*, or *Numpy*
 - a rich tutorial collection to help you get started
@@ -125,6 +126,8 @@ is needed.
 For an introduction to computing moments, fraction dependencies, trends,
 spatial summaries, and histograms from large snapshot sequences, see the
 [snapshot-statistics guide](https://flowtorch.readthedocs.io/en/latest/snapshot_statistics.html).
+For very tall state matrices, see the
+[out-of-core and distributed SVD/SPOD guide](https://flowtorch.readthedocs.io/en/latest/distributed_svd_spod.html).
 
 To get an overview of what *flowTorch* can do for you, have a look at the [online documentation](https://flowtorch.readthedocs.io/en/latest/). The examples presented in the online documentation are also contained in this repository. In fact, the documentation is a static version of several [Jupyter notebooks](https://jupyter.org/) with end-to-end analyses. If you are interested in an interactive version of one particular example, navigate to `./docs/source/notebooks` and run `jupyter lab`. Note that to execute some of the notebooks, the **corresponding datasets are required**. The datasets can be downloaded [here](https://datashare.tu-dresden.de/s/rekLnoqzRCp9zk9) (~2.6GB). If the data are only required for unit testing, a reduced dataset may be downloaded [here](https://datashare.tu-dresden.de/s/dr7gBPSdeyXQrgd) (~411MB). Download the data into a directory of your choice and navigate into that directory. To extract the archive, run:
 ```

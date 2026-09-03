@@ -56,6 +56,40 @@ class Dataloader(ABC):
         """
         pass
 
+    def load_snapshot_slice(
+        self,
+        field_name: Union[List[str], str],
+        time: Union[List[str], str],
+        spatial_slice: slice,
+    ) -> Union[List[Tensor], Tensor]:
+        """Load a slice along the first spatial dimension.
+
+        The default implementation preserves compatibility with existing
+        loaders by loading the requested snapshots first and slicing them in
+        memory. Array-backed loaders may override this method to avoid reading
+        values outside ``spatial_slice``.
+
+        :param field_name: name of one or more fields
+        :param time: one or more snapshot times
+        :param spatial_slice: slice along the first tensor dimension
+        :return: sliced field tensor or list of tensors
+        """
+        loaded = self.load_snapshot(field_name, time)
+        if isinstance(loaded, list):
+            return [field[spatial_slice] for field in loaded]
+        return loaded[spatial_slice]
+
+    def snapshot_shape(self, field_name: str, time: str) -> Sequence[int]:
+        """Return the shape of one field snapshot.
+
+        Loaders with inexpensive metadata access should override this fallback,
+        which reads one snapshot.
+        """
+        loaded = self.load_snapshot(field_name, time)
+        if isinstance(loaded, list):
+            raise RuntimeError("a single field must return one tensor")
+        return tuple(loaded.shape)
+
     @property
     @abstractmethod
     def write_times(self) -> List[str]:

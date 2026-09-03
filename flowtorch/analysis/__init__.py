@@ -18,6 +18,13 @@ from .linear_model import LinearModel
 from .dft import DFT, PDFT
 from .spod import AMSPOD, PAMSPOD, mode_similarity
 from .periodogram import AMPS
+from .state_vector import (
+    DataloaderStateVectorSource,
+    FieldSpec,
+    StateVectorLayout,
+    StateVectorResult,
+    StateVectorSource,
+)
 from .statistics import (
     DEFAULT_QUANTILES,
     STATISTIC_NAMES,
@@ -47,6 +54,8 @@ __all__ = [
     "DistributedExecution",
     "DFT",
     "DMD",
+    "DataloaderStateVectorSource",
+    "FieldSpec",
     "HODMD",
     "HOOptDMD",
     "HistogramResult",
@@ -74,6 +83,9 @@ __all__ = [
     "spatiotemporal_histogram",
     "statistical_moments",
     "STATISTIC_NAMES",
+    "StateVectorLayout",
+    "StateVectorResult",
+    "StateVectorSource",
     "subspace_similarity",
     "detect_linear_trend",
     "linear_trend",
