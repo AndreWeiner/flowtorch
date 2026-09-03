@@ -9,6 +9,14 @@ flowtorch.analysis.svd
    :undoc-members:
    :show-inheritance:
 
+flowtorch.analysis.state\_vector
+---------------------------------
+
+.. automodule:: flowtorch.analysis.state_vector
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 flowtorch.analysis.dft
 ----------------------
 
@@ -101,6 +109,14 @@ flowtorch.analysis.propagation
 ------------------------------
 
 .. automodule:: flowtorch.analysis.propagation
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+flowtorch.analysis.statistics
+-----------------------------
+
+.. automodule:: flowtorch.analysis.statistics
    :members:
    :undoc-members:
    :show-inheritance:

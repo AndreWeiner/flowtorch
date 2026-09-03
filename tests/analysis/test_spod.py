@@ -3,6 +3,7 @@
 import pytest
 from pytest import raises
 import torch as pt
+from flowtorch.analysis import SVD
 from flowtorch.analysis.spod import (
     AMSPOD,
     PAMSPOD,
@@ -11,6 +12,30 @@ from flowtorch.analysis.spod import (
     _free_memory,
     mode_similarity,
 )
+from flowtorch.analysis.state_vector import (
+    FieldSpec,
+    StateVectorLayout,
+    StateVectorSource,
+)
+
+
+class _SPODSource(StateVectorSource):
+    def __init__(self, data):
+        self.data = data
+        self.calls = []
+        self._layout = StateVectorLayout((FieldSpec("q"),), (data.shape[0],))
+
+    @property
+    def n_snapshots(self):
+        return self.data.shape[1]
+
+    @property
+    def layout(self):
+        return self._layout
+
+    def read(self, spatial_slice, snapshot_slice):
+        self.calls.append((spatial_slice, snapshot_slice))
+        return self.data[spatial_slice, snapshot_slice]
 
 
 def test_prepare_sqrt_weight():
@@ -499,3 +524,56 @@ def test_PAMSPOD():
     reduced_modes = spod._modes[:, :, 0].T
     expected_similarity = mode_similarity(reduced_modes, reduced_modes)
     pt.testing.assert_close(spod.mode_similarity(), expected_similarity)
+
+
+def test_PAMSPOD_from_existing_svd_reuses_temporal_factors():
+    pt.manual_seed(13)
+    data = pt.rand((31, 8), dtype=pt.float64)
+    source = _SPODSource(data)
+    svd = SVD(
+        source,
+        rank=5,
+        subtract_mean=True,
+        spatial_batch_size=6,
+        snapshot_batch_size=3,
+    )
+    source.calls.clear()
+
+    spod = PAMSPOD.from_svd(
+        svd,
+        dt=0.2,
+        adaptive=False,
+        max_tapers=3,
+        keep_n_modes=2,
+    )
+
+    assert source.calls == []
+    assert spod.svd is svd
+    assert spod.eigvals.shape == (5, 3)
+    mode = spod.get_mode(2).materialize_local()
+    assert mode.shape == (31,)
+    assert source.calls
+
+
+def test_source_PAMSPOD_returns_lazy_split_reconstruction():
+    pt.manual_seed(14)
+    data = pt.rand((29, 8), dtype=pt.float64)
+    source = _SPODSource(data)
+    spod = PAMSPOD(
+        source,
+        dt=0.1,
+        rank=5,
+        adaptive=False,
+        max_tapers=3,
+        keep_n_modes=2,
+        spatial_batch_size=7,
+        snapshot_batch_size=2,
+    )
+
+    reconstruction = spod.partial_reconstruction(
+        1, 3, n_modes=1, n_snapshots=4, add_mean=True
+    )
+    fields = reconstruction.materialize_local(split=True)
+
+    assert fields["q"].shape == (29, 4)
+    assert bool(pt.isfinite(fields["q"]).all())

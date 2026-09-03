@@ -110,6 +110,18 @@ class HDF5Dataloader(Dataloader):
             dtype=self._dtype,
         ).squeeze()
 
+    def _load_single_snapshot_slice(
+        self, field_name: str, time: str, spatial_slice: slice
+    ) -> pt.Tensor:
+        """Load a first-axis slice directly from an HDF5 dataset."""
+        values = pt.tensor(
+            self._file[f"{VAR_GROUP}/{time}/{field_name}"][spatial_slice],
+            dtype=self._dtype,
+        )
+        return (
+            values.squeeze(-1) if values.ndim > 1 and values.shape[-1] == 1 else values
+        )
+
     def load_snapshot(
         self, field_name: Union[List[str], str], time: Union[List[str], str]
     ) -> Union[List[pt.Tensor], pt.Tensor]:
@@ -136,6 +148,37 @@ class HDF5Dataloader(Dataloader):
                 )
             else:
                 return self._load_single_snapshot(field_name, time)
+
+    def load_snapshot_slice(
+        self,
+        field_name: Union[List[str], str],
+        time: Union[List[str], str],
+        spatial_slice: slice,
+    ) -> Union[List[pt.Tensor], pt.Tensor]:
+        """Load one or more fields using direct first-axis HDF5 slicing."""
+        check_list_or_str(field_name, "field_name")
+        check_list_or_str(time, "time")
+        fields = field_name if isinstance(field_name, list) else [field_name]
+        times = time if isinstance(time, list) else [time]
+        loaded = [
+            _preallocate_time_series(
+                partial(
+                    self._load_single_snapshot_slice,
+                    name,
+                    spatial_slice=spatial_slice,
+                ),
+                times,
+            )
+            for name in fields
+        ]
+        if not isinstance(time, list):
+            loaded = [value[..., 0] for value in loaded]
+        return loaded if isinstance(field_name, list) else loaded[0]
+
+    def snapshot_shape(self, field_name: str, time: str) -> tuple[int, ...]:
+        """Return a variable dataset shape without loading it."""
+        shape = tuple(self._file[f"{VAR_GROUP}/{time}/{field_name}"].shape)
+        return shape[:-1] if len(shape) > 1 and shape[-1] == 1 else shape
 
     @property
     def write_times(self) -> List[str]:
