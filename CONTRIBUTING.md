@@ -10,6 +10,13 @@ It is always useful to open a new issue as a first step. The issue helps the dev
 
 The typical workflow of forking and branching is very well described in the [GitHub documentation](https://docs.github.com/en/get-started/quickstart/fork-a-repo).
 
+The `develop` branch is the integration branch for ongoing development. Create
+feature, bug-fix, and documentation branches from `develop`, and target
+`develop` with the corresponding pull requests. The `main` branch represents
+released versions and normally receives release merges from `develop`. A
+critical hotfix may instead start from and target `main`; merge the hotfix back
+into `develop` afterwards.
+
 ## 2. Ensure code quality
 
 *flowTorch* uses the [PyTorch library](https://pytorch.org/docs/stable/index.html) as backend for array-like data structures (tensors) and operations thereon. When implementing new features, try to rely as much as possible on the functionality offered by PyTorch instead of using NumPy, SciPy or similar libraries.
@@ -60,11 +67,11 @@ If new features are added, accompanying unit tests should be provided. We use [P
 
 To complete your contribution, push your branch and create a new [pull
 request](https://docs.github.com/en/github/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request)
-against the `main` branch of the *flowTorch* repository. Automated checks will
-verify formatting, linting, and the dataset-free test suite. The type-checking
-job is currently optional and does not block merging. If datasets are required,
-please provide a download link so that the integration tests or examples can be
-executed.
+against the `develop` branch of the *flowTorch* repository. Automated checks
+will verify formatting, linting, and the dataset-free test suite. The
+type-checking job is currently optional and does not block merging. If datasets
+are required, please provide a download link so that the integration tests or
+examples can be executed.
 
 ## Example contribution workflow
 
@@ -81,11 +88,11 @@ cd flowtorch
 git remote add upstream https://github.com/AndreWeiner/flowtorch.git
 ```
 
-Update your local `main` branch and create a feature branch from it:
+Update your local `develop` branch and create a feature branch from it:
 
 ```bash
-git switch main
-git pull --ff-only upstream main
+git switch develop
+git pull --ff-only upstream develop
 git switch -c feature/improve-svd-api
 ```
 
@@ -120,13 +127,13 @@ Push the feature branch to your fork:
 git push -u origin feature/improve-svd-api
 ```
 
-Finally, create a pull request targeting the upstream `main` branch. This can
+Finally, create a pull request targeting the upstream `develop` branch. This can
 be done in the GitHub web interface or with the GitHub CLI:
 
 ```bash
 gh pr create \
   --repo AndreWeiner/flowtorch \
-  --base main \
+  --base develop \
   --head <your-github-username>:feature/improve-svd-api \
   --title "Add improved SVD API" \
   --body "Implements the proposed SVD API improvement and adds tests."
