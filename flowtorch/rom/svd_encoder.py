@@ -1,124 +1,120 @@
-"""Encoder based on the singular value decomposition (SVD)."""
+"""Thin encoder and decoder views of :class:`flowtorch.analysis.SVD`."""
 
-# third party packages
+from __future__ import annotations
+
+from typing import Optional, Sequence, Union
+
 import torch as pt
 
-# flowtorch packages
-from flowtorch import DEFAULT_DTYPE
-from flowtorch.analysis import SVD
-from .base import Encoder
-from .utils import log_time
+from flowtorch.analysis import DistributedExecution, SVD
+from flowtorch.analysis.state_vector import (
+    CompositeStateVectorSource,
+    StateVectorSource,
+)
+
+from .base import Decoder, Encoder, StateData, StateResult
+
+
+def _as_states(states: Union[StateData, Sequence[StateData]]) -> list[StateData]:
+    if isinstance(states, (pt.Tensor, StateVectorSource)):
+        return [states]
+    result = list(states)
+    if not result:
+        raise ValueError("at least one state data set is required")
+    return result
+
+
+def fit_svd(
+    states: Union[StateData, Sequence[StateData]],
+    rank: Optional[int],
+    *,
+    subtract_mean: bool,
+    mode: str = "auto",
+    weight: Optional[pt.Tensor] = None,
+    spatial_batch_size: Optional[int] = None,
+    snapshot_batch_size: Optional[int] = None,
+    execution: Optional[DistributedExecution] = None,
+) -> tuple[SVD, tuple[int, ...]]:
+    """Fit one SVD to tensor- or source-backed snapshot collections."""
+    data = _as_states(states)
+    tensor_backed = all(isinstance(value, pt.Tensor) for value in data)
+    source_backed = all(isinstance(value, StateVectorSource) for value in data)
+    if not tensor_backed and not source_backed:
+        raise ValueError("state data sets must be all tensors or all sources")
+    if tensor_backed:
+        tensors = [value for value in data if isinstance(value, pt.Tensor)]
+        if any(value.ndim != 2 for value in tensors):
+            raise ValueError("state tensors must have shape (state, snapshots)")
+        if any(value.shape[0] != tensors[0].shape[0] for value in tensors[1:]):
+            raise ValueError("state tensors must have the same state dimension")
+        if any(value.dtype != tensors[0].dtype for value in tensors[1:]):
+            raise ValueError("state tensors must have the same dtype")
+        if any(value.device != tensors[0].device for value in tensors[1:]):
+            raise ValueError("state tensors must be on the same device")
+        matrix: StateData = pt.cat(tensors, dim=1)
+        lengths = tuple(value.shape[1] for value in tensors)
+    else:
+        sources = [value for value in data if isinstance(value, StateVectorSource)]
+        matrix = (
+            sources[0] if len(sources) == 1 else CompositeStateVectorSource(sources)
+        )
+        lengths = tuple(value.n_snapshots for value in sources)
+    svd = SVD(
+        matrix,
+        rank=rank,
+        mode=mode,
+        weight=weight,
+        subtract_mean=subtract_mean,
+        spatial_batch_size=spatial_batch_size,
+        snapshot_batch_size=snapshot_batch_size,
+        execution=execution,
+    )
+    return svd, lengths
+
+
+def training_coefficients(svd: SVD) -> pt.Tensor:
+    """Return the retained coefficients of the SVD training snapshots."""
+    return svd.s.unsqueeze(-1) * svd.V.conj().T
 
 
 class SVDEncoder(Encoder):
-    """SVD-based dimensionality reduction for ROM.
+    """Non-owning ROM encoder that delegates directly to a fitted SVD."""
 
-    Examples
-
-    >>> from flowtorch import DATASETS
-    >>> from flowtorch.data import FOAMDataloader
-    >>> from flowtorch.rom import SVDEncoder
-    >>> loader = FOAMDataloader(DATASETS["of_cylinder2D_binary"])
-    >>> data = loader.load_snapshot("p", loader.write_times[1:11])
-    >>> data.shape
-    torch.Size([13678, 10])
-    >>> encoder = SVDEncoder(rank=10)
-    >>> info = encoder.train(data)
-    >>> reduced_state = encoder.encode(data)
-    >>> reduced_state.shape
-    torch.Size([10, 10])
-    >>> full_state = encoder.decode(reduced_state)
-    >>> full_state.shape
-    torch.Size([13678, 10])
-
-    """
-
-    def __init__(self, rank: int | None = None):
-        """Derived class constructor.
-
-        :param rank: rank to truncate the SVD
-        :type rank: int, optional
-        """
-        super(SVDEncoder, self).__init__()
-        self._rank: int | None = rank
-        self._modes: pt.Tensor | None = None
-        self._state_size: int | None = None
-
-    @log_time
-    def train(self, data: pt.Tensor) -> dict:
-        """Compute the POD modes of a given data matrix.
-
-        :param data: data matrix containing a sequence of snapshots,
-            where each snapshot corresponds to a column vector of the
-            data matrix
-        :type data: pt.Tensor
-        :return: empty dictionary since there is no real training process
-        :rtype: dict
-        """
-        svd = SVD(data, self._rank)
-        modes = svd.U.clone()
-        self._modes = modes
-        self._state_size = modes.shape[0]
-        self._rank = svd.rank
-        del svd
-        self.trained = True
-        return dict()
-
-    def encode(self, full_state: pt.Tensor) -> pt.Tensor:
-        """Project one or multiple state vectors onto the POD modes.
-
-        This function computes the scalar projections of one or more
-        state vectors onto each POD mode. The result is vector (single state)
-        or a matrix (sequence of states) of scalar projections, in which the
-        row index corresponds to the associated POD mode and the column index
-        corresponds to the associated snapshot in the sequence.
-
-
-        :param full_state: full state vector or sequence of state vectors
-        :type full_state: pt.Tensor
-        :raises ValueError: if the full state shape does not match the trained encoder
-        :return: reduced state vector or sequence of reduced state vectors
-        :rtype: pt.Tensor
-        """
-        if self._modes is None:
-            raise Exception("Encoding not possible: the encoder has not been trained")
-        self._check_state_shape(full_state.shape)
-        return self._modes.conj().T @ full_state
-
-    def decode(self, reduced_state: pt.Tensor) -> pt.Tensor:
-        """Compute the full projection onto the POD modes.
-
-        :param reduced_state: 1D or 2D tensor, in which each column
-            holds the mode coefficients of a given state; if the input
-            has two dimensions, the second dimension is considered as the
-            batch dimension
-        :type reduced_state: pt.Tensor
-        :return: full state vector in the subspace spanned by the POD modes
-        :rtype: pt.Tensor
-        """
-        if self._modes is None:
-            raise Exception("Decoding not possible: the encoder has not been trained")
-        self._check_reduced_state_size(reduced_state.shape)
-        return self._modes @ reduced_state
+    def __init__(self) -> None:
+        super().__init__()
+        object.__setattr__(self, "_svd", None)
 
     @property
-    def state_shape(self) -> pt.Size:
-        """Get the size of the full state.
+    def svd(self) -> SVD:
+        if self._svd is None:
+            raise RuntimeError("the SVD encoder has not been fitted")
+        return self._svd
 
-        :return: size of the full state
-        :rtype: pt.Size
-        """
-        if self._state_size is None:
-            raise RuntimeError("The encoder has not been trained")
-        return pt.Size((self._state_size,))
+    def set_svd(self, svd: SVD) -> None:
+        object.__setattr__(self, "_svd", svd)
+
+    def forward(self, state: StateData) -> pt.Tensor:
+        return self.svd.encode(state)
+
+
+class SVDDecoder(Decoder):
+    """Non-owning ROM decoder that delegates directly to a fitted SVD."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        object.__setattr__(self, "_svd", None)
 
     @property
-    def reduced_state_size(self) -> int:
-        """Get the size of the reduced state.
+    def svd(self) -> SVD:
+        if self._svd is None:
+            raise RuntimeError("the SVD decoder has not been fitted")
+        return self._svd
 
-        :return: size of the reduced state.
-        :rtype: int
-        """
-        if self._rank is None:
-            raise RuntimeError("The encoder has not been trained")
-        return self._rank
+    def set_svd(self, svd: SVD) -> None:
+        object.__setattr__(self, "_svd", svd)
+
+    def forward(self, state: pt.Tensor) -> StateResult:
+        return self.svd.decode(state)
+
+
+__all__ = ["SVDDecoder", "SVDEncoder", "fit_svd", "training_coefficients"]

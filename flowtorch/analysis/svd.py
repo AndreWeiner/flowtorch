@@ -886,6 +886,115 @@ class SVD(object):
             )
         return (self.U[:, :r_rank] * self.s[:r_rank]) @ self.V[:, :r_rank].conj().T
 
+    def encode(self, state: Union[pt.Tensor, StateVectorSource]) -> pt.Tensor:
+        r"""Project one or more physical states onto the retained POD modes.
+
+        Centering and the weighted inner product used to compute the SVD are
+        applied consistently.  Source-backed projections are reduced across
+        the configured process group, so every rank receives the same modal
+        coefficients.
+        """
+        if self._source is None:
+            if not isinstance(state, pt.Tensor):
+                raise ValueError("a tensor-backed SVD expects tensor states")
+            if state.ndim not in (1, 2) or state.shape[0] != self._rows:
+                raise ValueError("state has an incompatible shape")
+            centered = state
+            trailing = (1,) if state.ndim == 2 else ()
+            if self.mean is not None:
+                assert isinstance(self.mean, pt.Tensor)
+                centered = state - self.mean.reshape(-1, *trailing)
+            if self.weight is not None:
+                centered = centered * self.weight.reshape(-1, *trailing)
+            assert isinstance(self.U, pt.Tensor)
+            return self.U.conj().T @ centered
+
+        if not isinstance(state, StateVectorSource):
+            raise ValueError("a source-backed SVD expects a StateVectorSource")
+        if state.layout.signature != self._source.layout.signature:
+            raise ValueError("state source layout is incompatible with the SVD")
+        modes = self.U
+        assert isinstance(modes, StateVectorResult)
+        coefficient: Optional[pt.Tensor] = None
+        for spatial_slice, mode_chunk in modes.iter_chunks():
+            assert isinstance(mode_chunk, pt.Tensor)
+            data_chunk = state.read(spatial_slice, slice(0, state.n_snapshots))
+            if self.mean is not None:
+                assert isinstance(self.mean, StateVectorResult)
+                data_chunk = data_chunk - self.mean.read_chunk(spatial_slice).unsqueeze(
+                    -1
+                )
+            weight = self._weight_block(self._source, spatial_slice, mode_chunk)
+            if weight is not None:
+                data_chunk = data_chunk * weight.unsqueeze(-1)
+            local = mode_chunk.conj().T @ data_chunk
+            coefficient = local if coefficient is None else coefficient + local
+        if coefficient is None:
+            raise RuntimeError("the local SVD partition is empty")
+        if self._execution is not None:
+            dist.all_reduce(coefficient, group=self._execution.process_group)
+        return coefficient.squeeze(-1) if state.n_snapshots == 1 else coefficient
+
+    def decode(self, coefficients: pt.Tensor) -> Union[pt.Tensor, StateVectorResult]:
+        r"""Expand arbitrary POD coefficients into the physical state space."""
+        if coefficients.ndim < 1 or coefficients.shape[0] != self.rank:
+            raise ValueError("coefficients have an incompatible shape")
+        trailing = coefficients.shape[1:]
+        flattened = coefficients.reshape(self.rank, -1)
+        if self._source is None:
+            assert isinstance(self.U, pt.Tensor)
+            result = (self.U @ flattened).reshape(self._rows, *trailing)
+            if self.mean is not None:
+                assert isinstance(self.mean, pt.Tensor)
+                result = result + self.mean.reshape(-1, *((1,) * len(trailing)))
+            return result
+
+        modes = self.U
+        assert isinstance(modes, StateVectorResult)
+        source = self._source
+
+        def produce(spatial_slice: slice) -> pt.Tensor:
+            value = (modes.read_chunk(spatial_slice) @ flattened).reshape(-1, *trailing)
+            if self.mean is not None:
+                assert isinstance(self.mean, StateVectorResult)
+                value = value + self.mean.read_chunk(spatial_slice).reshape(
+                    -1, *((1,) * len(trailing))
+                )
+            return value
+
+        return StateVectorResult(
+            source.layout,
+            modes.local_spatial_slice,
+            trailing,
+            produce,
+            modes.spatial_batch_size,
+            self._execution,
+        )
+
+    def _apply_tensor_transform(self, transform) -> "SVD":
+        """Apply a device/dtype transform to a tensor-backed decomposition.
+
+        This mirrors the tensor handling used by ``torch.nn.Module._apply``
+        without making an analytical SVD a trainable module.
+        """
+        if self._source is not None:
+            raise RuntimeError(
+                "device and dtype transforms are not supported for source-backed SVDs"
+            )
+        for name in (
+            "_U",
+            "_s",
+            "_s_full",
+            "_V",
+            "_mean",
+            "_weight",
+            "_sqrt_weight",
+        ):
+            value = getattr(self, name)
+            if value is not None:
+                setattr(self, name, transform(value))
+        return self
+
     @property
     def U(self) -> Any:
         r"""Physical left-singular vectors.

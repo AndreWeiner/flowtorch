@@ -45,7 +45,7 @@ flowtoch-mask-psp = "flowtorch.data.psp_mask_cli:main"
 
 [project.optional-dependencies]
 data = ["h5py", "netCDF4", "pandas", "Pillow", "vtk"]
-rom = ["scikit-learn"]
+rom = []
 psp = ["h5py", "plotly"]
 all = [
     "h5py",
@@ -54,7 +54,6 @@ all = [
     "pandas",
     "Pillow",
     "plotly",
-    "scikit-learn",
     "vtk",
 ]
 

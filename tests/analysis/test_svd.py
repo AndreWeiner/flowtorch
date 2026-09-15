@@ -234,6 +234,33 @@ class TestSVD:
             data - data.mean(dim=1, keepdim=True),
         )
 
+    def test_encode_and_decode_use_centering_and_weighted_inner_product(self):
+        pt.manual_seed(16)
+        data = pt.rand((7, 5), dtype=pt.float64)
+        weight = pt.linspace(1.0, 2.0, data.shape[0], dtype=data.dtype)
+        svd = SVD(
+            data,
+            rank=5,
+            mode="svd",
+            weight=weight,
+            subtract_mean=True,
+        )
+
+        pt.testing.assert_close(svd.decode(svd.encode(data)), data)
+        coefficients = pt.rand((5, 2, 3), dtype=data.dtype)
+        assert svd.decode(coefficients).shape == (7, 2, 3)
+
+    def test_source_encode_and_decode_arbitrary_snapshots(self):
+        pt.manual_seed(17)
+        data = pt.rand((11, 5), dtype=pt.float64)
+        source = _MatrixSource(data)
+        svd = SVD(source, rank=4, subtract_mean=True, spatial_batch_size=3)
+
+        coefficients = svd.encode(_MatrixSource(data))
+        decoded = svd.decode(coefficients).materialize_local()
+
+        pt.testing.assert_close(decoded, data)
+
     def test_source_backed_incremental_update_matches_direct_svd(self):
         pt.manual_seed(9)
         first = pt.rand((43, 4), dtype=pt.float64)

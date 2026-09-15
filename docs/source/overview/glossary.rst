@@ -6,9 +6,6 @@ Glossary
    API
       application programming interface
 
-   CNM
-      cluster-based network modeling
-
    DMD
       dynamic mode decomposition
 
