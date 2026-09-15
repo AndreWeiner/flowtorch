@@ -92,9 +92,9 @@ class ContinuousOperator(pt.nn.Module):
             if float(values[index].real) < -float(tolerance)
         ]
         real = [index for index in real_indices if index not in negative]
-        columns = []
-        pair_growth = []
-        pair_frequency = []
+        columns: list[pt.Tensor] = []
+        pair_growth: list[pt.Tensor] = []
+        pair_frequency: list[pt.Tensor] = []
         floor = pt.finfo(operator.dtype).eps * operator.norm().clamp_min(1.0)
         for index in positive:
             value = values[index]
@@ -183,7 +183,7 @@ class ContinuousOperator(pt.nn.Module):
     def growth_rate(self) -> pt.Tensor:
         if self._complex:
             return self.growth
-        values = []
+        values: list[pt.Tensor] = []
         for growth in self.pair_growth:
             values.extend((growth, growth))
         values.extend(self.real_growth)
@@ -193,7 +193,7 @@ class ContinuousOperator(pt.nn.Module):
     def frequencies(self) -> pt.Tensor:
         if self._complex:
             return self.frequency
-        values = []
+        values: list[pt.Tensor] = []
         for frequency in self.frequency:
             values.extend((frequency, -frequency))
         values.extend(self.frequency.new_zeros(self.n_real))

@@ -203,7 +203,7 @@ class PODI(ROM):
             if loss_function is None
             else loss_function
         )
-        log = {"train_loss": []}
+        log: dict[str, list[float]] = {"train_loss": []}
 
         def closure() -> pt.Tensor:
             optim.zero_grad()

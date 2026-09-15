@@ -921,9 +921,9 @@ class SVD(object):
             data_chunk = state.read(spatial_slice, slice(0, state.n_snapshots))
             if self.mean is not None:
                 assert isinstance(self.mean, StateVectorResult)
-                data_chunk = data_chunk - self.mean.read_chunk(spatial_slice).unsqueeze(
-                    -1
-                )
+                mean_chunk = self.mean.read_chunk(spatial_slice)
+                assert isinstance(mean_chunk, pt.Tensor)
+                data_chunk = data_chunk - mean_chunk.unsqueeze(-1)
             weight = self._weight_block(self._source, spatial_slice, mode_chunk)
             if weight is not None:
                 data_chunk = data_chunk * weight.unsqueeze(-1)
@@ -952,14 +952,15 @@ class SVD(object):
         modes = self.U
         assert isinstance(modes, StateVectorResult)
         source = self._source
+        mean = self.mean
+        assert mean is None or isinstance(mean, StateVectorResult)
 
         def produce(spatial_slice: slice) -> pt.Tensor:
             value = (modes.read_chunk(spatial_slice) @ flattened).reshape(-1, *trailing)
-            if self.mean is not None:
-                assert isinstance(self.mean, StateVectorResult)
-                value = value + self.mean.read_chunk(spatial_slice).reshape(
-                    -1, *((1,) * len(trailing))
-                )
+            if mean is not None:
+                mean_chunk = mean.read_chunk(spatial_slice)
+                assert isinstance(mean_chunk, pt.Tensor)
+                value = value + mean_chunk.reshape(-1, *((1,) * len(trailing)))
             return value
 
         return StateVectorResult(
