@@ -52,10 +52,10 @@ def element_areas_to_node_weights(
 ) -> pt.Tensor:
     """Convert structured-grid element areas to node weights.
 
-    Each node receives the arithmetic mean of its adjacent element areas.
-    Corner, edge, and interior nodes therefore average one, two, and four
-    elements, respectively. By default, raw diagonal inner-product weights are
-    returned and normalized by their maximum value. These can be passed
+    Each quadrilateral element distributes one quarter of its area to each of
+    its four nodes, so the sum of the nodal weights equals the sum of the
+    element areas. By default, raw diagonal inner-product weights are returned
+    and normalized by their maximum value. These can be passed
     directly to analysis classes such as :class:`flowtorch.analysis.SVD` and
     :class:`flowtorch.analysis.AMSPOD`, which apply the square root internally.
     Set ``square_root=True`` only when manually weighting data or modes.
@@ -90,7 +90,6 @@ def element_areas_to_node_weights(
     nodal_areas = pt.zeros(
         (nx, ny), dtype=element_areas.dtype, device=element_areas.device
     )
-    adjacent_elements = pt.zeros_like(nodal_areas)
     for row_slice, column_slice in (
         (slice(None, -1), slice(None, -1)),
         (slice(1, None), slice(None, -1)),
@@ -98,8 +97,7 @@ def element_areas_to_node_weights(
         (slice(None, -1), slice(1, None)),
     ):
         nodal_areas[row_slice, column_slice] += element_areas
-        adjacent_elements[row_slice, column_slice] += 1
-    weights = nodal_areas / adjacent_elements
+    weights = nodal_areas / 4
     if square_root:
         weights = pt.sqrt(weights)
     if normalize:
