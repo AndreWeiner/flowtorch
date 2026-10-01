@@ -566,7 +566,7 @@ class SVD(object):
         if self._mode == "svd":
             U_weighted, s, V = self._svd(weighted_data)
         elif self._mode == "evd":
-            U_weighted, s, V = self._gram_evd(weighted_data)
+            U_weighted, s, V = self._gram_evd(weighted_data, rank)
         else:
             raise ValueError(f"'mode' must be one of {MODES}. Got '{mode}'")
         self._opt_rank = self._optimal_rank(s)
@@ -812,16 +812,18 @@ class SVD(object):
         V = V.conj().T
         return U, s, V
 
-    def _gram_evd(self, X: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor, pt.Tensor]:
+    def _gram_evd(
+        self, X: pt.Tensor, rank: Optional[int] = None
+    ) -> Tuple[pt.Tensor, pt.Tensor, pt.Tensor]:
         """Compute the SVD via Gram matrix and eigendecomposition.
 
         :param X: data matrix of shape M x N
         :type X: pt.Tensor
-        :return: economy SVD of X with shapes:
+        :return: truncated factors and the complete singular-value spectrum:
             L = min(M, N)
-            U: M x L
+            U: M x rank
             s: L
-            V: N x L
+            V: N x rank
         :rtype: Tuple[pt.Tensor, pt.Tensor, pt.Tensor]
         """
         logger.info("Computing economy SVD via Gram matrix and eigendecomposition")
@@ -829,15 +831,23 @@ class SVD(object):
         if self._rows > self._cols:
             C = X.conj().T @ X
             evals, V = pt.linalg.eigh(C)
-            s = evals.clamp(0.0).sqrt().flip(0)
-            V = V.flip(1)
-            U = (X @ V) / s.clamp(eps * s[0])
         else:
             C = X @ X.conj().T
             evals, U = pt.linalg.eigh(C)
-            s = evals.clamp(0.0).sqrt().flip(0)
-            U = U.flip(1)
-            V = (U.conj().T @ X).conj().T / s.clamp(eps * s[0])
+        del C
+        s = evals.clamp(0.0).sqrt().flip(0)
+        self._opt_rank = self._optimal_rank(s)
+        self.rank = self.opt_rank if rank is None else rank
+        # eigh orders eigenvectors by increasing eigenvalue. Select only the
+        # retained columns before reversing and forming the large factor.
+        start = s.numel() - self.rank
+        denominator = s[: self.rank].clamp(eps * s[0])
+        if self._rows > self._cols:
+            V = V[:, start:].flip(1).contiguous()
+            U = X @ (V / denominator)
+        else:
+            U = U[:, start:].flip(1).contiguous()
+            V = X.conj().T @ (U / denominator)
         return U, s, V
 
     def _optimal_rank(self, s: pt.Tensor) -> int:

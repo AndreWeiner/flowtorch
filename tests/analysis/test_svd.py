@@ -364,6 +364,30 @@ class TestSVD:
             assert svd.s.is_contiguous()
             assert svd.V.is_contiguous()
 
+    @pytest.mark.parametrize("shape", [(80, 12), (12, 80)])
+    @pytest.mark.parametrize("complex_data", [False, True])
+    @pytest.mark.parametrize("rank", [None, 3, 12])
+    def test_evd_truncates_before_forming_large_factor(self, shape, complex_data, rank):
+        pt.manual_seed(24)
+        data = pt.randn(shape, dtype=pt.float64)
+        if complex_data:
+            data = data + 1j * pt.randn_like(data)
+        weight = pt.linspace(1.0, 2.0, shape[0], dtype=pt.float64)
+        with pt.profiler.profile(record_shapes=True) as profile:
+            svd = SVD(data, rank=rank, mode="evd", weight=weight, subtract_mean=True)
+        direct = SVD(data, rank=svd.rank, mode="svd", weight=weight, subtract_mean=True)
+        pt.testing.assert_close(svd.s_full, direct.s_full, atol=1e-6, rtol=1e-6)
+        pt.testing.assert_close(svd.reconstruct(), direct.reconstruct())
+        assert svd.opt_rank == direct.opt_rank
+        self._assert_compact_storage(svd.U)
+        self._assert_compact_storage(svd.V)
+        # The second matrix multiplication forms only the retained columns.
+        multiplications = [
+            event for event in profile.events() if event.name == "aten::mm"
+        ]
+        assert len(multiplications) == 2
+        assert multiplications[1].input_shapes[1][-1] == svd.rank
+
     @pytest.mark.skipif(not pt.cuda.is_available(), reason="CUDA not available")
     def test_init_gpu(self):
         M, N = 100, 15
