@@ -417,6 +417,48 @@ class TestSVD:
         err_r2 = pt.linalg.norm(dm - svd.reconstruct(rank=2)).item()
         assert err_r2 <= err_r1
 
+    @pytest.mark.parametrize("shape", [(25, 6), (6, 25)])
+    @pytest.mark.parametrize("complex_data", [False, True])
+    def test_reconstruct_scaling_preserves_results_and_gradients(
+        self, shape, complex_data
+    ):
+        pt.manual_seed(25)
+        data = pt.randn(shape, dtype=pt.float64)
+        if complex_data:
+            data = data + 1j * pt.randn_like(data)
+        svd = SVD(data, rank=6, mode="svd")
+        svd._U = svd.U.detach().requires_grad_()
+        svd._V = svd.V.detach().requires_grad_()
+        svd._s = svd.s.detach().requires_grad_()
+        for rank in (2, 6):
+            expected = (svd.U[:, :rank] * svd.s[:rank]) @ svd.V[:, :rank].conj().T
+            actual = svd.reconstruct(rank)
+            pt.testing.assert_close(actual, expected)
+            factors = (svd.U, svd.s, svd.V)
+            expected_grad = pt.autograd.grad(expected.abs().square().sum(), factors)
+            actual_grad = pt.autograd.grad(actual.abs().square().sum(), factors)
+            for actual_value, expected_value in zip(actual_grad, expected_grad):
+                pt.testing.assert_close(actual_value, expected_value)
+
+    @pytest.mark.parametrize("batch_size", [3, 20])
+    @pytest.mark.parametrize("complex_data", [False, True])
+    def test_source_reconstruct_forms_only_requested_modes(
+        self, batch_size, complex_data
+    ):
+        pt.manual_seed(26)
+        data = pt.randn((20, 6), dtype=pt.float64)
+        if complex_data:
+            data = data + 1j * pt.randn_like(data)
+        svd = SVD(_MatrixSource(data), rank=6, spatial_batch_size=batch_size)
+        spatial_slice = slice(0, batch_size)
+        chunk = svd._left_chunk(spatial_slice, rank=2)
+        expected = (data[spatial_slice] @ svd.V[:, :2]) / svd.s[:2]
+        pt.testing.assert_close(chunk, expected)
+        reconstructed = svd.reconstruct(rank=2).materialize_local()
+        pt.testing.assert_close(
+            reconstructed, (data @ svd.V[:, :2]) @ svd.V[:, :2].conj().T
+        )
+
     @pytest.mark.parametrize("complex_data", [False, True])
     def test_weighted_svd(self, complex_data):
         pt.manual_seed(0)

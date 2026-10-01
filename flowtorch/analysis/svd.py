@@ -771,11 +771,19 @@ class SVD(object):
             f"Truncating TSQR SVD at index {self.rank}/{min(self._cols, self._rows)}"
         )
 
-    def _left_chunk(self, spatial_slice: slice) -> pt.Tensor:
+    def _left_chunk(
+        self, spatial_slice: slice, rank: Optional[int] = None
+    ) -> pt.Tensor:
         assert self._source is not None
         block, _ = self._source_block(self._source, spatial_slice)
-        denominator = self.s.clamp_min(pt.finfo(self.s.dtype).eps * self.s[0])
-        return (block @ self.V) / denominator
+        r_rank = self.rank if rank is None else max(min(rank, self.rank), 1)
+        denominator = self.s[:r_rank].clamp_min(
+            pt.finfo(self.s.dtype).eps * self.s[0]
+        )
+        right = self.V[:, :r_rank]
+        if block.shape[0] > right.shape[0]:
+            return block @ (right / denominator)
+        return (block @ right) / denominator
 
     def _mean_result(self) -> StateVectorResult:
         assert self._source is not None
@@ -883,8 +891,11 @@ class SVD(object):
         if self._source is not None:
 
             def produce(spatial_slice: slice) -> pt.Tensor:
-                modes = self._left_chunk(spatial_slice)[:, :r_rank]
-                return (modes * self.s[:r_rank]) @ self.V[:, :r_rank].conj().T
+                modes = self._left_chunk(spatial_slice, r_rank)
+                right_h = self.V[:, :r_rank].conj().T
+                if modes.shape[0] > self._cols:
+                    return modes @ (self.s[:r_rank, None] * right_h)
+                return (modes * self.s[:r_rank]) @ right_h
 
             return StateVectorResult(
                 self._source.layout,
@@ -894,7 +905,11 @@ class SVD(object):
                 self._spatial_batch_size,
                 self._execution,
             )
-        return (self.U[:, :r_rank] * self.s[:r_rank]) @ self.V[:, :r_rank].conj().T
+        modes = self.U[:, :r_rank]
+        right_h = self.V[:, :r_rank].conj().T
+        if self._rows > self._cols:
+            return modes @ (self.s[:r_rank, None] * right_h)
+        return (modes * self.s[:r_rank]) @ right_h
 
     def encode(self, state: Union[pt.Tensor, StateVectorSource]) -> pt.Tensor:
         r"""Project one or more physical states onto the retained POD modes.
