@@ -236,7 +236,11 @@ class AMSPOD(object):
         logger.info(f"computing untapered FFT on device '{self._device}'")
         Q_hat = pt.fft.fft(
             Q_var.to(self._device), n=2 * self._nfft, dim=1, norm="ortho"
-        ) * sqrt(self._dt)
+        )
+        if pt.is_grad_enabled() and Q_hat.requires_grad:
+            Q_hat = Q_hat * sqrt(self._dt)
+        else:
+            Q_hat.mul_(sqrt(self._dt))
         del Q_var
         _free_memory(self._device)
         n_freq = f.shape[0]
@@ -250,7 +254,7 @@ class AMSPOD(object):
                 logger.info(
                     f"using {int(n_win[i])} tapers for bin {i:d} (f={f[i].item():1.4f}Hz)"
                 )
-            m, ev = self._spod_at_freq(Q_hat, i, int(n_win[i]))
+            m, ev = self._spod_at_freq(Q_hat, i, int(n_win[i]), n_modes=n_keep)
             m = m / self._sqrt_weight.type(m.dtype).to(self._device)
             modes[i] = m[:, : min(n_keep, int(n_win[i]))].cpu()
             evals[i, : int(n_win[i])] = (
@@ -301,7 +305,12 @@ class AMSPOD(object):
         return self._taper_norm * (Q_hat[:, idx_l] - Q_hat[:, idx_u]) / (2j)
 
     def _spod_at_freq(
-        self, Q_hat: pt.Tensor, f_idx: int, n_tapers: int
+        self,
+        Q_hat: pt.Tensor,
+        f_idx: int,
+        n_tapers: int,
+        *,
+        n_modes: Optional[int] = None,
     ) -> Tuple[pt.Tensor, pt.Tensor]:
         """Compute the SPOD at a single frequency for given number of tapers.
 
@@ -311,6 +320,8 @@ class AMSPOD(object):
         :type f_idx: int
         :param n_tapers: number of sin-tapers
         :type n_tapers: int
+        :param n_modes: construct only this many leading modes; by default all
+            modes are constructed. All eigenvalues are always returned.
         :return: eigenvectors (M x K) and eigenvalues (K) of cross spectral density matrix; both tensors are sorted
             according to the (real-valued) eigenvalues in descending order
         :rtype: Tuple[pt.Tensor, pt.Tensor]
@@ -320,10 +331,23 @@ class AMSPOD(object):
         ).sqrt().type(Q_hat.dtype)
         if self._nx >= n_tapers:
             vals, vecs = pt.linalg.eigh(Q_f.conj().T @ Q_f)
-            vecs = Q_f @ (vecs / vals.sqrt())
+            start = 0 if n_modes is None else max(0, vals.numel() - n_modes)
+            vecs = vecs[:, start:].flip(dims=[-1])
+            # Null modes cannot be normalized. Keep zero modes rather than
+            # amplifying roundoff or dividing by zero in rank-deficient data.
+            threshold = pt.finfo(vals.dtype).eps * vals.numel() * vals[-1].abs()
+            selected_vals = vals[start:].flip(dims=[-1])
+            resolved = selected_vals > threshold
+            roots = selected_vals.clamp_min(0).sqrt()
+            inverse = pt.where(
+                resolved, roots.clamp_min(pt.finfo(vals.dtype).tiny).reciprocal(), 0
+            )
+            vecs = Q_f @ (vecs * inverse)
         else:
             vals, vecs = pt.linalg.eigh(Q_f @ Q_f.conj().T)
-        return vecs.flip(dims=[-1]), vals.flip(dims=[-1])
+            start = 0 if n_modes is None else max(0, vals.numel() - n_modes)
+            vecs = vecs[:, start:].flip(dims=[-1])
+        return vecs, vals.flip(dims=[-1])
 
     def _determine_n_tapers(self, Q_hat: pt.Tensor, n_freq: int) -> pt.Tensor:
         """Determine the number of tapers for each frequency bin.
@@ -362,7 +386,7 @@ class AMSPOD(object):
                     if converged[f_idx]:
                         continue
                     K = int(n_tapers[f_idx])
-                    modes, _ = self._spod_at_freq(Q_hat, f_idx, K)
+                    modes, _ = self._spod_at_freq(Q_hat, f_idx, K, n_modes=1)
                     similarity = _calc_mode_similarity(modes[:, 0], prev_modes[f_idx])
                     if itr > 0:
                         self._log["convergence"][f_idx].append(similarity)
@@ -1256,7 +1280,7 @@ class PAMSPOD(AMSPOD):
         mode = super().modes[f_idx, :, mode_idx]
         basis = self.svd.U
         if isinstance(basis, pt.Tensor):
-            return (basis.type(mode.dtype) * mode).sum(dim=1)
+            return basis.type(mode.dtype) @ mode
 
         def produce(spatial_slice: slice) -> pt.Tensor:
             local_basis = basis.read_chunk(spatial_slice)
