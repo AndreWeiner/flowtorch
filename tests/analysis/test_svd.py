@@ -497,6 +497,26 @@ class TestSVD:
         assert unweighted.weight is None
         assert unweighted.U_weighted is unweighted.U
 
+    @pytest.mark.parametrize("mode", ["svd", "evd"])
+    @pytest.mark.parametrize("complex_data", [False, True])
+    def test_centered_weighted_initialization_preserves_input(self, mode, complex_data):
+        pt.manual_seed(27)
+        data = pt.randn((24, 5), dtype=pt.float64)
+        if complex_data:
+            data = data + 1j * pt.randn_like(data)
+        original = data.clone()
+        weight = pt.linspace(1.0, 2.0, data.shape[0], dtype=pt.float64)
+        original_weight = weight.clone()
+        svd = SVD(data, rank=5, mode=mode, weight=weight, subtract_mean=True)
+        pt.testing.assert_close(data, original, rtol=0, atol=0)
+        pt.testing.assert_close(weight, original_weight, rtol=0, atol=0)
+        pt.testing.assert_close(svd.mean, original.mean(dim=1))
+        centered = original - original.mean(dim=1, keepdim=True)
+        pt.testing.assert_close(svd.reconstruct(), centered)
+        pt.testing.assert_close(
+            svd.s_full, pt.linalg.svdvals(centered * weight.sqrt().unsqueeze(-1))
+        )
+
     @pytest.mark.parametrize(
         ("weight", "message"),
         [

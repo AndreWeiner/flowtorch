@@ -555,7 +555,15 @@ class SVD(object):
         )
         weighted_data = data_matrix
         if self._sqrt_weight is not None:
-            weighted_data = data_matrix * self._sqrt_weight
+            if input_mean is not None and not (
+                pt.is_grad_enabled()
+                and (data_matrix.requires_grad or self._sqrt_weight.requires_grad)
+            ):
+                # Centering owns this buffer; weighting can reuse it without
+                # modifying the caller's input.
+                weighted_data.mul_(self._sqrt_weight)
+            else:
+                weighted_data = data_matrix * self._sqrt_weight
         if mode == "auto":
             if self._rows > 1.5 * self._cols or self._cols > 1.5 * self._rows:
                 self._mode = "evd"
