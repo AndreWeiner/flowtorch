@@ -1270,7 +1270,8 @@ class SVD(object):
             or dist.get_rank(self._execution.process_group) == self._execution.root_rank
         )
         if root:
-            _, updated_s, updated_vh = pt.linalg.svd(core, full_matrices=False)
+            core_u, updated_s, updated_vh = pt.linalg.svd(core, full_matrices=False)
+            del core_u
             updated_v = updated_vh.conj().T
         else:
             updated_s = core.real.new_empty(core_size)
@@ -1282,13 +1283,18 @@ class SVD(object):
             root_global = global_ranks[self._execution.root_rank]
             dist.broadcast(updated_s, src=root_global, group=group)
             dist.broadcast(updated_v, src=root_global, group=group)
-        right_basis = self.V.new_zeros((old_columns + added_columns, core_size))
-        right_basis[:old_columns, : self.rank] = self.V
-        right_basis[old_columns:, self.rank :] = pt.eye(
-            added_columns, dtype=self.V.dtype, device=self.V.device
-        )
+        del core, local_residual, residual_r, residual, old_modes, added, weight
         new_rank = min(selected_rank, updated_s.numel())
-        new_v = (right_basis @ updated_v[:, :new_rank]).contiguous()
+        rotation = updated_v[: self.rank, :new_rank]
+        appended = updated_v[self.rank :, :new_rank]
+        # Apply the block-diagonal basis [V, I] without materializing its
+        # zeros or identity. Write the large product directly into its output.
+        if pt.is_grad_enabled() and (self.V.requires_grad or updated_v.requires_grad):
+            new_v = pt.cat((self.V @ rotation, appended), dim=0)
+        else:
+            new_v = self.V.new_empty((old_columns + added_columns, new_rank))
+            pt.mm(self.V, rotation, out=new_v[:old_columns])
+            new_v[old_columns:] = appended
         self._source = combined
         self._cols = combined.n_snapshots
         self._s_full = updated_s

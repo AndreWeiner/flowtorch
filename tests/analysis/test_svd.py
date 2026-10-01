@@ -261,21 +261,36 @@ class TestSVD:
 
         pt.testing.assert_close(decoded, data)
 
-    def test_source_backed_incremental_update_matches_direct_svd(self):
+    @pytest.mark.parametrize("complex_data", [False, True])
+    @pytest.mark.parametrize("weighted", [False, True])
+    def test_source_backed_incremental_update_matches_direct_svd(
+        self, complex_data, weighted
+    ):
         pt.manual_seed(9)
         first = pt.rand((43, 4), dtype=pt.float64)
         second = pt.rand((43, 3), dtype=pt.float64)
-        svd = SVD(_MatrixSource(first), rank=4, spatial_batch_size=9)
+        if complex_data:
+            first = first + 1j * pt.rand_like(first)
+            second = second + 1j * pt.rand_like(second)
+        weight = pt.linspace(1.0, 2.0, 43, dtype=pt.float64) if weighted else None
+        svd = SVD(_MatrixSource(first, weight), rank=4, spatial_batch_size=9)
 
-        svd.update(_MatrixSource(second))
+        svd.update(_MatrixSource(second, weight))
 
         combined = pt.cat((first, second), dim=1)
-        direct = SVD(combined, rank=4, mode="svd")
+        direct = SVD(combined, rank=4, mode="svd", weight=weight)
         pt.testing.assert_close(svd.s, direct.s)
         pt.testing.assert_close(
-            subspace_similarity(svd.U.materialize_local(), direct.U, ranks=4),
-            pt.ones(1, dtype=first.dtype),
+            subspace_similarity(
+                svd.U.materialize_local(), direct.U, ranks=4, weight=weight
+            ),
+            pt.ones(1, dtype=first.real.dtype),
         )
+        pt.testing.assert_close(
+            svd.reconstruct().materialize_local(), direct.reconstruct()
+        )
+        self._assert_compact_storage(svd.V)
+        assert svd.V.is_contiguous()
 
     def test_centered_update_recomputes_with_combined_mean(self):
         pt.manual_seed(10)
