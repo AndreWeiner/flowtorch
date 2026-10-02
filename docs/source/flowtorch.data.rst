@@ -77,6 +77,43 @@ flowtorch.data.tau\_dataloader
 flowtorch.data.tecplot\_dataloader
 ----------------------------------
 
+Select the field association when constructing the loader. The default
+``association="point"`` reads vertex-centered data; ``association="cell"``
+reads cell-centered data. ``field_names``, ``load_snapshot()``, ``locations``,
+and ``weights`` follow this selection. ``vertices`` always returns mesh points.
+An explicit association passed to ``load_snapshot()`` must match the constructor.
+
+``weights`` contains raw cell lengths, areas, or volumes for cell data. For
+point data, each cell contributes its measure divided by its vertex count to
+each vertex. VTK computes cell measures and bulk NumPy operations accumulate
+point contributions inside the isolated ParaView worker. Weights preserve
+field ordering, use the configured dtype, and are cached per zone using the
+first snapshot's geometry. This assumes a fixed mesh. The weights are neither
+normalized nor square-rooted.
+
+Mixed element types of the same dimension are supported. Mixed dimensions,
+nonpositive or unsupported cell measures, isolated points, and ghost cells
+raise errors; remove ghost cells before constructing the integration domain.
+Equal sharing is a diagonal quadrature approximation for general elements,
+and corresponds to mass lumping for linear simplices.
+
+Some legacy TDV71 files expose ambiguous element types through the ParaView
+reader. In the supplied NACA surface example, quads are reported as tetrahedra.
+For a known element type, pass an explicit override rather than inferring it
+from nearly zero volumes::
+
+    loader = TecplotDataloader.from_tau(
+        path, "alfa16.surface.pval.unsteady_",
+        association="point", cell_type="quad",
+    )
+    pressure = loader.load_snapshot("pressure", loader.write_times[0])
+    inner_product = (loader.weights * pressure.conj() * pressure).sum()
+
+``cell_type`` accepts ``line``, ``triangle``, ``quad``, ``tetra``, or
+``hexahedron``. It applies to geometric weights and cell locations, requires
+matching connectivity sizes, and should only be used when the element type
+is known. Normally leave it unset to retain the reader's topology.
+
 .. automodule:: flowtorch.data.tecplot_dataloader
    :members:
    :undoc-members:

@@ -251,6 +251,7 @@ class TecplotDataloader(Dataloader):
     ...     path,
     ...     "alfa16.surface.pval.unsteady_",
     ...     pvpython="/opt/ParaView/bin/pvpython",
+    ...     cell_type="quad",
     ... )
     >>> loader.zone_names
     ["ls", "te", "us"]
@@ -267,14 +268,24 @@ class TecplotDataloader(Dataloader):
         file_names: Dict[str, str],
         dtype: pt.dtype = DEFAULT_DTYPE,
         pvpython: Union[str, Path, None] = None,
+        association: str = "point",
+        cell_type: str | None = None,
     ):
         """Create a loader backed by a persistent pvpython subprocess.
 
         :param path: path to snapshot location
         :param file_names: mapping of write times to snapshot names
         :param dtype: tensor data type used for weights
+        :param cell_type: optional mesh element type override for legacy files
+            misidentified by the reader: line, triangle, quad, tetra, hexahedron
+        :param association: field location, ``"point"`` or ``"cell"``
         :param pvpython: path or command name of ParaView's pvpython executable
         """
+        if cell_type not in (None, "line", "triangle", "quad", "tetra", "hexahedron"):
+            raise ValueError(f"Unsupported cell type override: {cell_type!r}")
+        self._cell_type = cell_type
+        self._association = self._validate_association(association)
+        self._weights: Dict[str, pt.Tensor] = {}
         self._path = path
         self._file_names = file_names
         self._dtype = dtype
@@ -292,6 +303,8 @@ class TecplotDataloader(Dataloader):
         suffix: str = ".plt",
         dtype: pt.dtype = DEFAULT_DTYPE,
         pvpython: Union[str, Path, None] = None,
+        association: str = "point",
+        cell_type: str | None = None,
     ):
         """Construct a Tecplot dataloader from TAU snapshots.
 
@@ -299,6 +312,9 @@ class TecplotDataloader(Dataloader):
         :param base_name: common basename of all snapshots
         :param suffix: snapshot file suffix
         :param dtype: tensor data type used for weights
+        :param cell_type: optional mesh element type override for legacy files
+            misidentified by the reader: line, triangle, quad, tetra, hexahedron
+        :param association: field location, ``"point"`` or ``"cell"``
         :param pvpython: path or command name of ParaView's pvpython executable
         :raises FileNotFoundError: if snapshots or pvpython cannot be found
         :return: Tecplot dataloader object
@@ -316,7 +332,14 @@ class TecplotDataloader(Dataloader):
         file_names = {time: name for time, name in sorted_names}
         if not file_names:
             raise FileNotFoundError(f"Could not find solution files in {path}")
-        return cls(path, file_names, dtype=dtype, pvpython=pvpython)
+        return cls(
+            path,
+            file_names,
+            dtype=dtype,
+            pvpython=pvpython,
+            association=association,
+            cell_type=cell_type,
+        )
 
     def _assemble_file_path(self, time: str) -> str:
         """Assemble the path to a single snapshot."""
@@ -347,11 +370,27 @@ class TecplotDataloader(Dataloader):
             )
         return cast(Literal["point", "cell"], association)
 
+    @property
+    def association(self) -> Literal["point", "cell"]:
+        """Field association selected at construction."""
+        return self._association
+
+    def _snapshot_association(self, association):
+        if association is None:
+            return self.association
+        association = self._validate_association(association)
+        if association != self.association:
+            raise ValueError(
+                "Snapshot association must match the constructor association; "
+                "create a separate loader for the other association"
+            )
+        return association
+
     def _load_single_snapshot(
-        self, field_name: str, time: str, association: str = "point"
+        self, field_name: str, time: str, association: str | None = None
     ) -> pt.Tensor:
         """Load a single field from one snapshot."""
-        association = self._validate_association(association)
+        association = self._snapshot_association(association)
         field_names = self.field_names_for(association)[self.write_times[0]]
         if field_name not in field_names:
             raise ValueError(
@@ -368,7 +407,7 @@ class TecplotDataloader(Dataloader):
         return pt.from_numpy(array)
 
     def _load_multiple_snapshots(
-        self, field_name: str, times: List[str], association: str = "point"
+        self, field_name: str, times: List[str], association: str | None = None
     ) -> pt.Tensor:
         """Load one field from multiple snapshots."""
         return _preallocate_time_series(
@@ -380,18 +419,18 @@ class TecplotDataloader(Dataloader):
         self,
         field_name: Union[List[str], str],
         time: Union[List[str], str],
-        association: str = "point",
+        association: str | None = None,
     ) -> Union[List[pt.Tensor], pt.Tensor]:
         """Load snapshots for one or more fields and write times.
 
         :param field_name: one field name or a list of field names
         :param time: one write time or a list of write times
-        :param association: VTK array association, either ``"point"`` (the
-            backward-compatible default) or ``"cell"``
+        :param association: optional association assertion; must match the
+            association selected in the constructor
         """
         check_list_or_str(field_name, "field_name")
         check_list_or_str(time, "time")
-        association = self._validate_association(association)
+        association = self._snapshot_association(association)
         if isinstance(field_name, list):
             if isinstance(time, list):
                 return [
@@ -445,15 +484,17 @@ class TecplotDataloader(Dataloader):
 
     @property
     def field_names(self) -> Dict[str, List[str]]:
-        """Point-data field names in the selected zone's first snapshot."""
-        return self.field_names_for("point")
+        """Configured-association fields in the selected zone's first snapshot."""
+        return self.field_names_for(self.association)
 
-    def field_names_for(self, association: str = "point") -> Dict[str, List[str]]:
+    def field_names_for(self, association: str | None = None) -> Dict[str, List[str]]:
         """Return fields for one association in the currently selected zone.
 
         :param association: VTK array association, ``"point"`` or ``"cell"``
         """
-        association = self._validate_association(association)
+        association = self._validate_association(
+            self.association if association is None else association
+        )
         cache_key = (self.zone, association)
         if cache_key not in self._field_names:
             time = self.write_times[0]
@@ -469,7 +510,7 @@ class TecplotDataloader(Dataloader):
 
     @property
     def vertices(self) -> pt.Tensor:
-        """Points at which field values are defined."""
+        """Mesh vertices, irrespective of the configured field association."""
         array = self._request_for_time(
             "vertices",
             self.write_times[0],
@@ -478,9 +519,44 @@ class TecplotDataloader(Dataloader):
         return pt.from_numpy(array)
 
     @property
+    def locations(self) -> pt.Tensor:
+        """Vertices or cell centers matching the configured field association."""
+        if self.association == "point":
+            return self.vertices
+        return pt.from_numpy(
+            self._request_for_time(
+                "locations",
+                self.write_times[0],
+                block_path=self._zone_paths[self.zone],
+                association=self.association,
+                cell_type=self._cell_type,
+            )
+        )
+
+    @property
     def weights(self) -> pt.Tensor:
-        """Unit weights for POD/DMD analysis."""
-        return pt.ones(self.vertices.shape[0], dtype=self._dtype)
+        """Raw geometric integration weights for the first snapshot's mesh.
+
+        Cell measures are distributed equally among their vertices for point
+        data. Fixed geometry is assumed; results are cached per selected zone.
+        """
+        if self.zone not in self._weights:
+            array = self._request_for_time(
+                "weights",
+                self.write_times[0],
+                block_path=self._zone_paths[self.zone],
+                association=self.association,
+                cell_type=self._cell_type,
+            )
+            weights = pt.from_numpy(array).to(dtype=self._dtype)
+            if (
+                weights.ndim != 1
+                or weights.numel() == 0
+                or not bool(pt.isfinite(weights).all() and (weights > 0).all())
+            ):
+                raise ValueError("Geometric weights must be finite and positive")
+            self._weights[self.zone] = weights
+        return self._weights[self.zone]
 
     def close(self):
         """Stop the pvpython worker."""
