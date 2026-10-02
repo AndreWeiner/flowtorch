@@ -519,6 +519,33 @@ class TecplotDataloader(Dataloader):
         return pt.from_numpy(array)
 
     @property
+    def mesh(self):
+        """Selected zone's first-snapshot geometry as a VTK unstructured grid.
+
+        Requires VTK in the calling interpreter. The mesh contains geometry and
+        topology only; source fields are loaded separately. A fresh, independent
+        mesh is returned, with any configured cell-type correction applied.
+        """
+        from vtkmodules.vtkCommonDataModel import vtkUnstructuredGrid  # type: ignore[import-not-found]
+        from vtkmodules.vtkIOXML import vtkXMLUnstructuredGridReader  # type: ignore[import-not-found]
+
+        serialized = self._request_for_time(
+            "mesh",
+            self.write_times[0],
+            block_path=self._zone_paths[self.zone],
+            cell_type=self._cell_type,
+        )
+        reader = vtkXMLUnstructuredGridReader()
+        reader.ReadFromInputStringOn()
+        reader.SetInputString(serialized.tobytes().decode("utf-8"))
+        reader.Update()
+        if reader.GetErrorCode() or reader.GetOutput().GetNumberOfPoints() == 0:
+            raise ParaViewProcessError("Could not decode the exported Tecplot mesh")
+        mesh = vtkUnstructuredGrid()
+        mesh.DeepCopy(reader.GetOutput())
+        return mesh
+
+    @property
     def locations(self) -> pt.Tensor:
         """Vertices or cell centers matching the configured field association."""
         if self.association == "point":

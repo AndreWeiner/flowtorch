@@ -230,7 +230,7 @@ def test_selection_and_output_protection(exports, tmp_path):
     assert not (tmp_path / "output").exists()
     loader = EnSightDataloader(path, part="movingWall")
     for output in [path.parent, path.parent.parent, exports]:
-        with pytest.raises(ValueError, match="source EnSight files"):
+        with pytest.raises(ValueError, match="source EnSight or Tecplot files"):
             EnSightWriter.from_loader(loader, output)
     directory = tmp_path / "occupied"
     directory.mkdir()

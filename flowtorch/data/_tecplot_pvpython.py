@@ -396,6 +396,28 @@ def _cell_locations(leaf, numpy, cell_type=None):
     return numpy.array(vtk_to_numpy(points.GetData()), copy=True)
 
 
+def _export_mesh(leaf, numpy, cell_type=None):
+    """Serialize geometry/topology through VTK, without source field arrays."""
+    from vtkmodules.vtkIOXML import vtkXMLUnstructuredGridWriter  # type: ignore[import-not-found]
+
+    source = _integration_mesh(leaf, numpy, cell_type)
+    mesh = source.NewInstance()
+    mesh.ShallowCopy(source)
+    mesh.GetPointData().Initialize()
+    mesh.GetCellData().Initialize()
+    mesh.GetFieldData().Initialize()
+    writer = vtkXMLUnstructuredGridWriter()
+    writer.SetInputData(mesh)
+    writer.SetDataModeToBinary()
+    writer.WriteToOutputStringOn()
+    if writer.Write() != 1:
+        raise ValueError("VTK failed to serialize the selected Tecplot mesh")
+    serialized = writer.GetOutputString()
+    if isinstance(serialized, str):
+        serialized = serialized.encode("utf-8")
+    return numpy.frombuffer(serialized, dtype=numpy.uint8).copy()
+
+
 def _handle(
     request,
     reader_type,
@@ -437,11 +459,13 @@ def _handle(
             )
         finally:
             delete(reader)
-    if operation in ("weights", "locations"):
+    if operation in ("weights", "locations", "mesh"):
         reader, leaf, _ = _fetch_leaf(
             request, reader_type, servermanager, dataset_adapter
         )
         try:
+            if operation == "mesh":
+                return "array", _export_mesh(leaf, numpy, request.get("cell_type"))
             if operation == "weights":
                 return "array", _geometric_weights(
                     leaf,

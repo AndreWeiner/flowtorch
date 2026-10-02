@@ -202,6 +202,40 @@ flowtorch.data.ensight\_dataloader
 flowtorch.data.ensight\_writer
 -------------------------------------
 
+``EnSightWriter.from_loader()`` accepts either an EnSight loader or a Tecplot
+loader. For Tecplot, it copies the selected zone from the first snapshot as a
+single EnSight part, retaining its name and the configured field association.
+The default output descriptor is ``results.case``; set ``case_name`` to change
+it. Existing source fields are not copied automatically.
+
+The Tecplot worker serializes geometry and topology in memory through VTK XML
+and transfers it through the existing binary channel. The main interpreter
+requires the optional VTK dependency to reconstruct the mesh and write EnSight.
+No interpolation or remeshing is performed. Vertex ordering is preserved;
+cell fields follow the writer's grouping by element type. The loader's
+``cell_type`` correction also applies to the exported geometry.
+
+For example, export a fixed surface mesh and attach generated fields::
+
+    from flowtorch.data import TecplotDataloader, EnSightWriter
+
+    with TecplotDataloader.from_tau(
+        path, base_name, association="point", cell_type="quad",
+    ) as loader:
+        loader.zone = "WingUpper"
+        with EnSightWriter.from_loader(
+            loader, "reconstructed", case_name="wing_results",
+        ) as writer:
+            writer.write_static("cp_mean", cp_mean)
+            writer.write_static("cp_mode_001", cp_mode)
+            writer.write_series({"cp_reconstructed": cp_reconstructed}, times)
+
+Open ``reconstructed/wing_results.case`` in ParaView. The geometry is written
+once and static fields remain available at every output time. The writer
+supports one zone and one association per output dataset and assumes fixed
+geometry. The PLT source files remain unchanged. Omit ``cell_type`` when the
+reader correctly identifies the input mesh's element types.
+
 .. automodule:: flowtorch.data.ensight_writer
    :members:
    :undoc-members:

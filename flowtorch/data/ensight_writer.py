@@ -1,4 +1,4 @@
-"""Write static fields and time series on an existing EnSight mesh."""
+"""Write static fields and time series on an EnSight or Tecplot mesh."""
 
 from pathlib import Path
 import re
@@ -7,9 +7,10 @@ from typing import Mapping, Optional, Sequence, Union
 
 import numpy as np
 import torch as pt
-from vtkmodules.util.numpy_support import vtk_to_numpy
+from vtkmodules.util.numpy_support import vtk_to_numpy  # type: ignore[import-not-found]
 
 from .ensight_dataloader import EnSightDataloader
+from .tecplot_dataloader import TecplotDataloader
 
 # VTK type -> EnSight element name and fixed node count (None for ragged cells).
 _ELEMENT_TYPES = {
@@ -41,8 +42,9 @@ class EnSightWriter:
 
     Create with :meth:`from_loader` or :meth:`from_case`. The output directory
     must be new or empty and must not contain any source data. Its static mesh
-    is copied once; source files and loader tensors are never modified. The
-    selected part keeps its name but receives output part ID 1.
+    is copied once from an EnSight part or Tecplot zone; source files and loader
+    tensors are never modified. The selected part keeps its name but receives
+    output part ID 1.
 
     ``write_static`` writes a static field. ``write_snapshot`` writes a complete
     snapshot mapping, and ``write_series`` accepts tensors with time last.
@@ -78,27 +80,35 @@ class EnSightWriter:
 
     def __init__(
         self,
-        loader: EnSightDataloader,
+        loader: Union[EnSightDataloader, TecplotDataloader],
         output_dir: Union[str, Path],
         case_name: Optional[str] = None,
         format: str = "binary",
     ):
-        if not isinstance(loader, EnSightDataloader):
-            raise TypeError("loader must be an EnSightDataloader")
+        if not isinstance(loader, (EnSightDataloader, TecplotDataloader)):
+            raise TypeError("loader must be an EnSightDataloader or TecplotDataloader")
         if format not in ("ascii", "binary"):
             raise ValueError("format must be 'ascii' or 'binary'")
-        name = loader.case_file.stem if case_name is None else case_name
+        if isinstance(loader, TecplotDataloader):
+            name = "results" if case_name is None else case_name
+            part = loader.zone
+            protected = [
+                Path(loader._assemble_file_path(time)) for time in loader.write_times
+            ]
+        else:
+            name = loader.case_file.stem if case_name is None else case_name
+            part = loader.part
+            protected = [loader.case_file, loader._geometry_file]
+            protected.extend(
+                loader.case_file.parent / pattern
+                for _, pattern in loader._variables.values()
+            )
         self._validate_name(name, "case_name")
-        self._validate_record(loader.part)
+        self._validate_record(part)
         output = Path(output_dir).expanduser().resolve()
-        protected = [loader.case_file, loader._geometry_file]
-        protected.extend(
-            loader.case_file.parent / pattern
-            for _, pattern in loader._variables.values()
-        )
         if any(path.resolve().is_relative_to(output) for path in protected):
             raise ValueError(
-                "The output directory must not contain source EnSight files"
+                "The output directory must not contain source EnSight or Tecplot files"
             )
         if output.exists() and (not output.is_dir() or any(output.iterdir())):
             raise FileExistsError("The output directory must be new or empty")
@@ -106,7 +116,7 @@ class EnSightWriter:
         self._case_file = output / f"{name}.case"
         self._format = format
         self._association = loader.association
-        self._part = loader.part
+        self._part = part
         self._mesh = loader.mesh
         self._blocks = []
         types = EnSightDataloader._cell_types(self._mesh)
@@ -136,12 +146,17 @@ class EnSightWriter:
     @classmethod
     def from_loader(
         cls,
-        loader: EnSightDataloader,
+        loader: Union[EnSightDataloader, TecplotDataloader],
         output_dir: Union[str, Path],
         case_name: Optional[str] = None,
         format: str = "binary",
     ):
-        """Copy the loader's selected mesh and retain its field association."""
+        """Copy an EnSight part or Tecplot zone and retain its association.
+
+        Tecplot export uses the first snapshot's fixed geometry and applies the
+        loader's cell-type override. Source fields are not copied automatically.
+        The default case name for Tecplot sources is ``results``.
+        """
         return cls(loader, output_dir, case_name=case_name, format=format)
 
     @classmethod
