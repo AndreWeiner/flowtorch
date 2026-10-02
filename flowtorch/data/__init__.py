@@ -18,6 +18,8 @@ _EXPORTS: Dict[str, Tuple[str, str]] = {
     "XDMFWriter": ("hdf5_file", "XDMFWriter"),
     "copy_hdf5_mesh": ("hdf5_file", "copy_hdf5_mesh"),
     "CSVDataloader": ("csv_dataloader", "CSVDataloader"),
+    "EnSightWriter": ("ensight_writer", "EnSightWriter"),
+    "EnSightDataloader": ("ensight_dataloader", "EnSightDataloader"),
     "VTKDataloader": ("vtk_dataloader", "VTKDataloader"),
     "PSPDataloader": ("psp_dataloader", "PSPDataloader"),
     "TAUDataloader": ("tau_dataloader", "TAUDataloader"),

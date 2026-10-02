@@ -1,0 +1,170 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  v2606                                 |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      controlDict;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+application     icoFoam;
+
+startFrom       startTime;
+
+startTime       0;
+
+stopAt          endTime;
+
+endTime         0.1;
+
+deltaT          0.005;
+
+writeControl    timeStep;
+
+writeInterval   10;
+
+purgeWrite      0;
+
+writeFormat     ascii;
+
+writePrecision  6;
+
+writeCompression off;
+
+timeFormat      general;
+
+timePrecision   6;
+
+runTimeModifiable true;
+
+
+// ************************************************************************* //
+
+
+
+
+
+
+
+
+
+functions
+{
+    readTensors
+    {
+        type readFields;
+        libs (fieldFunctionObjects);
+        fields (T S);
+    }
+
+    volume_ascii
+    {
+        type ensightWrite;
+        libs (utilityFunctionObjects);
+        fields (p U T S);
+        format ascii;
+        nodeValues false;
+        internal true;
+        boundary true;
+        patches (movingWall fixedWalls);
+        consecutive true;
+        writeControl writeTime;
+        writeInterval 1;
+    }
+    volume_binary
+    {
+        type ensightWrite;
+        libs (utilityFunctionObjects);
+        fields (p U T S);
+        format binary;
+        nodeValues false;
+        internal true;
+        boundary true;
+        patches (movingWall fixedWalls);
+        consecutive true;
+        writeControl writeTime;
+        writeInterval 1;
+    }
+    nodes_binary
+    {
+        type ensightWrite;
+        libs (utilityFunctionObjects);
+        fields (p U T S);
+        format binary;
+        nodeValues true;
+        internal true;
+        boundary true;
+        patches (movingWall fixedWalls);
+        consecutive true;
+        writeControl writeTime;
+        writeInterval 1;
+    }
+    patch_ascii
+    {
+        type ensightWrite;
+        libs (utilityFunctionObjects);
+        fields (p U T S);
+        format ascii;
+        nodeValues false;
+        internal false;
+        boundary true;
+        patches (movingWall fixedWalls);
+        consecutive true;
+        writeControl writeTime;
+        writeInterval 1;
+    }
+    cuts_ascii
+    {
+        type surfaces;
+        libs (sampling);
+        fields (p U T S);
+        surfaceFormat ensight;
+        interpolationScheme cellPoint;
+        writeControl writeTime;
+        writeInterval 1;
+        formatOptions { ensight { format ascii; collateTimes true; } }
+        surfaces
+        {
+            midplane { type plane; point (0.05 0.05 0.0049); normal (0 0 1); triangulate false; interpolate false; }
+            oblique { type plane; point (0.0501 0.0501 0.005); normal (1 1 10); triangulate false; interpolate false; }
+            lid { type patch; patches (movingWall); interpolate false; }
+        }
+    }    patch_binary
+    {
+        type ensightWrite;
+        libs (utilityFunctionObjects);
+        fields (p U T S);
+        format binary;
+        nodeValues false;
+        internal false;
+        boundary true;
+        patches (movingWall fixedWalls);
+        consecutive true;
+        writeControl writeTime;
+        writeInterval 1;
+    }
+    cuts_binary
+    {
+        type surfaces;
+        libs (sampling);
+        fields (p U T S);
+        surfaceFormat ensight;
+        interpolationScheme cellPoint;
+        writeControl writeTime;
+        writeInterval 1;
+        formatOptions { ensight { format binary; collateTimes true; } }
+        surfaces
+        {
+            midplane { type plane; point (0.05 0.05 0.0049); normal (0 0 1); triangulate false; interpolate false; }
+            oblique { type plane; point (0.0501 0.0501 0.005); normal (1 1 10); triangulate false; interpolate false; }
+            lid { type patch; patches (movingWall); interpolate false; }
+        }
+    }
+}
