@@ -12,6 +12,7 @@ the Python :term:`API`.
    snapshot_statistics
    ensight_io
    distributed_svd_spod
+   dft_pdft
    notebooks/linear_algebra_basics
    notebooks/svd_ht
    notebooks/ipsp_explorer

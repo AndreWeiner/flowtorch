@@ -785,8 +785,10 @@ class SVD(object):
         assert self._source is not None
         block, _ = self._source_block(self._source, spatial_slice)
         r_rank = self.rank if rank is None else max(min(rank, self.rank), 1)
-        denominator = self.s[:r_rank].clamp_min(
-            pt.finfo(self.s.dtype).eps * self.s[0]
+        denominator = (
+            self.s[:r_rank]
+            .clamp_min(pt.finfo(self.s.dtype).eps * self.s[0])
+            .clamp_min(pt.finfo(self.s.dtype).tiny)
         )
         right = self.V[:, :r_rank]
         if block.shape[0] > right.shape[0]:
@@ -857,7 +859,7 @@ class SVD(object):
         # eigh orders eigenvectors by increasing eigenvalue. Select only the
         # retained columns before reversing and forming the large factor.
         start = s.numel() - self.rank
-        denominator = s[: self.rank].clamp(eps * s[0])
+        denominator = s[: self.rank].clamp(eps * s[0]).clamp_min(pt.finfo(s.dtype).tiny)
         if self._rows > self._cols:
             V = V[:, start:].flip(1).contiguous()
             U = X @ (V / denominator)
