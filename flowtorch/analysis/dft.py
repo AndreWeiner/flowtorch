@@ -68,7 +68,7 @@ class DFT:
             raise ValueError(
                 f"Unknown window option {window}. Available: {', '.join(WINDOWS)}"
             )
-        self._dm = data_matrix
+        self._real_dtype = data_matrix.real.dtype
         self._nx, self._nt = data_matrix.shape
         self._complex = pt.is_complex(data_matrix)
         self._subtract_mean = subtract_mean
@@ -82,11 +82,7 @@ class DFT:
         _, sqrt_weight = _prepare_weight(
             weight, self._nx, pt.device("cpu"), data_matrix.real.dtype
         )
-        self._sqrt_weight = (
-            pt.ones((self._nx, 1), dtype=data_matrix.real.dtype)
-            if sqrt_weight is None
-            else sqrt_weight
-        )
+        self._sqrt_weight = sqrt_weight
         self._device = str(device)
         if "cuda" in self._device and not pt.cuda.is_available():
             logger.warning("CUDA unavailable; falling back to CPU")
@@ -100,14 +96,33 @@ class DFT:
         centered = data_matrix.to(self._device)
         if self._mean is not None:
             centered = centered - self._mean.to(self._device).unsqueeze(-1)
+        if window != "boxcar":
+            taper = self._window.to(self._device)
+            if pt.is_grad_enabled() and centered.requires_grad:
+                centered = centered * taper
+            else:
+                # Reuse an owned buffer, but never overwrite caller storage.
+                if self._mean is None and centered is data_matrix:
+                    centered = centered.clone()
+                centered.mul_(taper)
         fft = pt.fft.fft if self._complex else pt.fft.rfft
         self._modes = fft(
-            centered * self._window.to(self._device),
+            centered,
             n=self._nfft,
             dim=-1,
             norm="ortho",
         ).cpu()
-        self._amplitude = (self._modes * self._sqrt_weight).norm(dim=0)
+        if self._sqrt_weight is None:
+            self._amplitude = self._modes.norm(dim=0)
+        else:
+            # Bound the weighted temporary instead of duplicating the spectrum.
+            batch_size = max(1, (1024 * 1024) // self._nx)
+            self._amplitude = pt.cat(
+                [
+                    (chunk * self._sqrt_weight).norm(dim=0)
+                    for chunk in self._modes.split(batch_size, dim=1)
+                ]
+            )
         # Used by the shared AMSPOD frequency-segment selector.
         self._adaptive = False
 
@@ -142,7 +157,11 @@ class DFT:
     @property
     def modes(self) -> pt.Tensor | StateVectorResult:
         """Weighted unit-norm physical modes; unresolved bins are zero."""
-        norms = self._amplitude[self._start :]
+        return self._normalized_modes(slice(self._start, None))
+
+    def _normalized_modes(self, indices: int | slice) -> pt.Tensor:
+        """Normalize only the requested internal bins."""
+        norms = self._amplitude[indices]
         threshold = (
             pt.finfo(norms.dtype).eps * max(self._nx, self._nt) * self._amplitude.max()
         )
@@ -151,7 +170,7 @@ class DFT:
             norms.clamp_min(pt.finfo(norms.dtype).tiny).reciprocal(),
             0,
         )
-        return self._modes[:, self._start :] * inverse
+        return self._modes[:, indices] * inverse
 
     @property
     def spectral_density(self) -> pt.Tensor:
@@ -176,7 +195,7 @@ class DFT:
     def get_mode(self, f_idx: int) -> pt.Tensor | StateVectorResult:
         """Return a single normalized physical Fourier mode."""
         self._validate_index(f_idx)
-        return self.modes[:, f_idx]
+        return self._normalized_modes(f_idx + self._start)
 
     def partial_reconstruction(
         self, mode_indices: Set[int] | int, include_mean: bool = False
@@ -231,7 +250,9 @@ class DFT:
     def mode_similarity(self) -> pt.Tensor:
         """Absolute weighted similarities across Fourier frequency bins."""
         modes = DFT.modes.fget(self)
-        return mode_similarity(modes * self._sqrt_weight, modes * self._sqrt_weight)
+        if self._sqrt_weight is not None:
+            modes = modes * self._sqrt_weight
+        return mode_similarity(modes, modes)
 
     def show_mode_similarity(
         self, reference_timescale: float | None = None, ax: Any = None, **kwargs: Any
@@ -297,8 +318,8 @@ class DFT:
             if dt is None
             else dt
         )
-        time = pt.arange(steps, dtype=self._dm.real.dtype) * resolution
-        mode = DFT.modes.fget(self)[:, f_idx]
+        time = pt.arange(steps, dtype=self._real_dtype) * resolution
+        mode = self._normalized_modes(f_idx + self._start)
         result = pt.outer(mode, pt.exp(2j * pt.pi * frequency * time))
         return result if self._complex else result.real
 
@@ -417,7 +438,7 @@ class PDFT(DFT):
     def get_mode(self, f_idx: int) -> pt.Tensor | StateVectorResult:
         """Project only one Fourier mode to physical coordinates."""
         self._validate_index(f_idx)
-        return self._project(DFT.modes.fget(self)[:, f_idx])
+        return self._project(self._normalized_modes(f_idx + self._start))
 
     def partial_reconstruction(
         self, mode_indices: Set[int] | int, include_mean: bool = False

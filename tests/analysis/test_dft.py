@@ -13,6 +13,83 @@ import torch as pt
 from flowtorch.analysis.dft import DFT, PDFT
 
 
+def test_weighted_norm_uses_bounded_batches(monkeypatch):
+    data = pt.randn(1024, 2050)
+    weight = pt.linspace(0.5, 2, 1024)
+    expected = (pt.fft.rfft(data, norm="ortho") * weight.sqrt()[:, None]).norm(dim=0)
+    norm = pt.Tensor.norm
+    shapes = []
+
+    def record_norm(tensor, *args, **kwargs):
+        shapes.append(tuple(tensor.shape))
+        return norm(tensor, *args, **kwargs)
+
+    monkeypatch.setattr(pt.Tensor, "norm", record_norm)
+    result = DFT(data, 0.1, weight=weight, subtract_mean=False)
+    assert shapes == [(1024, 1024), (1024, 2)]
+    pt.testing.assert_close(result._amplitude, expected)
+
+
+@pytest.mark.parametrize("complex_data", [False, True])
+@pytest.mark.parametrize("center", [False, True])
+@pytest.mark.parametrize("window", ["boxcar", "hamming"])
+@pytest.mark.parametrize("grad", [False, True])
+def test_dft_preprocessing_preserves_input_and_gradients(
+    complex_data, center, window, grad
+):
+    pt.manual_seed(42)
+    data = pt.randn(5, 16, dtype=pt.float64)
+    if complex_data:
+        data = data + 1j * pt.randn_like(data)
+    data.requires_grad_(grad)
+    original = data.detach().clone()
+    reference = data.detach().clone().requires_grad_(grad)
+    weight = pt.linspace(0.5, 2, 5, dtype=pt.float64)
+    result = DFT(data, 0.1, window=window, subtract_mean=center, weight=weight)
+    centered = reference - reference.mean(dim=1, keepdim=True) if center else reference
+    taper = (
+        pt.ones(16, dtype=pt.float64)
+        if window == "boxcar"
+        else pt.hamming_window(16, dtype=pt.float64)
+    )
+    fft = pt.fft.fft if complex_data else pt.fft.rfft
+    expected = fft(centered * taper, dim=-1, norm="ortho")
+    expected_norms = (expected * weight.sqrt()[:, None]).norm(dim=0)
+    pt.testing.assert_close(result._modes, expected)
+    pt.testing.assert_close(result._amplitude, expected_norms)
+    pt.testing.assert_close(data, original)
+    if grad:
+        result.amplitude.sum().backward()
+        energy = expected_norms.square()
+        if not complex_data:
+            energy = energy * pt.tensor([1] + [2] * 7 + [1])
+        (energy[int(center) :].sum() / taper.square().sum()).backward()
+        pt.testing.assert_close(data.grad, reference.grad)
+
+
+@pytest.mark.parametrize("reduced", [False, True])
+@pytest.mark.parametrize("null", [False, True])
+def test_single_mode_avoids_normalizing_full_spectrum(monkeypatch, reduced, null):
+    data = (
+        pt.ones(5, 16, dtype=pt.float64) if null else pt.randn(5, 16, dtype=pt.float64)
+    )
+    result = PDFT(data, 0.1, rank=3) if reduced else DFT(data, 0.1)
+    expected = result.modes[:, 2]
+    expected_animation = result.mode_reconstruction(2)
+    normalize = result._normalized_modes
+    requested = []
+
+    def selected_only(indices):
+        assert isinstance(indices, int)
+        requested.append(indices)
+        return normalize(indices)
+
+    monkeypatch.setattr(result, "_normalized_modes", selected_only)
+    pt.testing.assert_close(result.get_mode(2), expected)
+    pt.testing.assert_close(result.mode_reconstruction(2), expected_animation)
+    assert requested == [3, 3]
+
+
 def test_DFT():
     dm_complex_even = pt.tensor(
         [
