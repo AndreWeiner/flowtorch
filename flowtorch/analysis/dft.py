@@ -342,8 +342,8 @@ class PDFT(DFT):
         *,
         weight: pt.Tensor | None = None,
         subtract_mean: bool = True,
+        prefetch_chunks: bool = False,
         spatial_batch_size: int | None = None,
-        snapshot_batch_size: int | None = None,
         execution: DistributedExecution | None = None,
     ):
         """Fit SVD then transform its temporal factors.
@@ -357,8 +357,8 @@ class PDFT(DFT):
             rank,
             weight=weight,
             subtract_mean=subtract_mean,
+            prefetch_chunks=prefetch_chunks,
             spatial_batch_size=spatial_batch_size,
-            snapshot_batch_size=snapshot_batch_size,
             execution=execution,
         )
         self._initialize_from_svd(svd, dt, nfft, window, device)

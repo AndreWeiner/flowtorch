@@ -581,7 +581,6 @@ def test_PAMSPOD_from_existing_svd_reuses_temporal_factors():
         rank=5,
         subtract_mean=True,
         spatial_batch_size=6,
-        snapshot_batch_size=3,
     )
     source.calls.clear()
 
@@ -598,7 +597,7 @@ def test_PAMSPOD_from_existing_svd_reuses_temporal_factors():
     assert spod.eigvals.shape == (5, 3)
     mode = spod.get_mode(2).materialize_local()
     assert mode.shape == (31,)
-    assert source.calls
+    assert source.calls == []  # Spatial modes use the retained basis.
 
 
 def test_source_PAMSPOD_returns_lazy_split_reconstruction():
@@ -613,7 +612,6 @@ def test_source_PAMSPOD_returns_lazy_split_reconstruction():
         max_tapers=3,
         keep_n_modes=2,
         spatial_batch_size=7,
-        snapshot_batch_size=2,
     )
 
     reconstruction = spod.partial_reconstruction(

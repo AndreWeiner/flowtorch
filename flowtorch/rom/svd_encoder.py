@@ -31,8 +31,8 @@ def fit_svd(
     subtract_mean: bool,
     mode: str = "auto",
     weight: Optional[pt.Tensor] = None,
+    prefetch_chunks: bool = False,
     spatial_batch_size: Optional[int] = None,
-    snapshot_batch_size: Optional[int] = None,
     execution: Optional[DistributedExecution] = None,
 ) -> tuple[SVD, tuple[int, ...]]:
     """Fit one SVD to tensor- or source-backed snapshot collections."""
@@ -65,8 +65,8 @@ def fit_svd(
         mode=mode,
         weight=weight,
         subtract_mean=subtract_mean,
+        prefetch_chunks=prefetch_chunks,
         spatial_batch_size=spatial_batch_size,
-        snapshot_batch_size=snapshot_batch_size,
         execution=execution,
     )
     return svd, lengths

@@ -292,7 +292,6 @@ def test_lazy_pdft_svd_reuse(center):
         weight=weight,
         subtract_mean=center,
         spatial_batch_size=3,
-        snapshot_batch_size=4,
     )
     reads = source.calls
     result = PDFT.from_svd(svd, 0.1)

@@ -1,6 +1,8 @@
 """Multi-process tests for spatially distributed TSQR SVD."""
 
 import os
+from math import ceil
+from unittest.mock import patch
 
 import pytest
 import torch as pt
@@ -56,7 +58,6 @@ def _worker(rank, world_size, store_path):
             rank=4,
             subtract_mean=True,
             spatial_batch_size=3,
-            snapshot_batch_size=2,
             execution=execution,
         )
         direct = SVD(
@@ -66,6 +67,40 @@ def _worker(rank, world_size, store_path):
             weight=weight,
         )
         pt.testing.assert_close(svd.s, direct.s)
+        # Host B is the tightest rank even though host A has two peers.
+        fixed = (world_size + 6) * 10**2 * 8 + 4 * 5 * 5 * 8
+        workspace = 14 * 5 * 8
+        available = (
+            ceil(2 * (fixed + 6 * workspace) / 0.6)
+            if rank < 2
+            else ceil((fixed + 4 * workspace) / 0.6)
+        )
+        with (
+            patch(
+                "flowtorch.analysis.svd.gethostname",
+                return_value="a" if rank < 2 else "b",
+            ),
+            patch(
+                "flowtorch.analysis.svd._available_memory_bytes", return_value=available
+            ),
+        ):
+            bounded = SVD(
+                _DistributedMatrixSource(data, weight),
+                rank=5,
+                subtract_mean=True,
+                execution=execution,
+            )
+            assert bounded._spatial_batch_size == 4
+        pt.testing.assert_close(bounded.s, direct.s)
+        sizes = [None] * world_size
+        dist.all_gather_object(sizes, bounded._spatial_batch_size)
+        assert len(set(sizes)) == 1
+        with pytest.raises(ValueError, match="too small"):
+            SVD(
+                _DistributedMatrixSource(data),
+                memory_budget_bytes=1 if rank == 2 else 1024**3,
+                execution=execution,
+            )
         gathered_modes = svd.U.gather(root_rank=1)
         gathered_reconstruction = svd.reconstruct().gather(root_rank=1)
         if rank == 1:
@@ -114,7 +149,6 @@ def _worker(rank, world_size, store_path):
             initial,
             rank=3,
             spatial_batch_size=3,
-            snapshot_batch_size=2,
             execution=execution,
         )
         updated.update(appended)
@@ -129,6 +163,87 @@ def _worker(rank, world_size, store_path):
             )
         else:
             assert gathered_updated is None
+
+        # Centered rank growth uses stored local modes, including on tail ranks.
+        for storage in ("disk", "memory"):
+            centered_source = _DistributedMatrixSource(data[:, :2], weight)
+            centered = SVD(
+                centered_source,
+                rank=10,
+                subtract_mean=True,
+                basis_storage=storage,
+                spatial_batch_size=3,
+                execution=execution,
+            )
+            centered_source.data = None
+            centered.update(_DistributedMatrixSource(data[:, 2:], weight))
+            assert centered.rank == 4
+            assert centered.maximum_rank == 10
+            full = SVD(data, rank=4, subtract_mean=True, weight=weight, mode="svd")
+            pt.testing.assert_close(centered.s, full.s)
+            reconstructed = centered.reconstruct().gather(root_rank=1)
+            if rank == 1:
+                pt.testing.assert_close(reconstructed, full.reconstruct())
+            basis_path = f"{store_path}-{storage}"
+            centered.save(basis_path)
+            restored_centered = SVD.load(
+                basis_path, execution=execution, basis_storage=storage
+            )
+            pt.testing.assert_close(
+                restored_centered.U.materialize_local(), centered.U.materialize_local()
+            )
+            # A local weight error must reach all ranks, without deadlocking.
+            invalid = _DistributedMatrixSource(
+                data[:, :1], weight * (2 if rank == 2 else 1)
+            )
+            with pytest.raises(RuntimeError, match="weights are incompatible"):
+                centered.update(invalid)
+            pt.testing.assert_close(centered.s, full.s)
+            centered.close()
+            restored_centered.close()
+
+        # Per-rank update budgets select one common size without timing trials.
+        update_fixed = (world_size + 6) * 5**2 * 8 + 2 * 5 * 5 * 8
+        update_per_value = 8 * (6 * 2 + 4 * (3 + 5)) + 2 * 8 * (2 + 3 + 2)
+        own_budget = (
+            update_fixed + (2 if rank == 2 else 5) * update_per_value + (3 + 3 * 3) * 8
+        )
+        bounded = SVD(
+            _DistributedMatrixSource(data[:, :3]),
+            rank=5,
+            spatial_batch_size=5,
+            memory_budget_bytes=own_budget,
+            execution=execution,
+        )
+        with patch.object(
+            SVD,
+            "_select_spatial_batch",
+            side_effect=AssertionError("update reselected"),
+        ):
+            bounded.update(_DistributedMatrixSource(data[:, 3:]))
+        assert bounded._spatial_batch_size == 2
+        pt.testing.assert_close(bounded.s, SVD(data, rank=5, mode="svd").s)
+        bounded_path = f"{store_path}-budget"
+        bounded.save(bounded_path)
+        loaded_bounded = SVD.load(bounded_path, execution=execution)
+        assert loaded_bounded._memory_budget_bytes == own_budget
+        assert loaded_bounded._spatial_batch_size == 2
+        bounded.close()
+        loaded_bounded.close()
+
+        class FailedReadSource(_DistributedMatrixSource):
+            def read(self, spatial_slice, snapshot_slice):
+                if rank == 2 and spatial_slice.start >= 15:
+                    raise OSError("prefetched read failed")
+                return super().read(spatial_slice, snapshot_slice)
+
+        with pytest.raises(RuntimeError, match="prefetched read failed"):
+            SVD(
+                FailedReadSource(data),
+                rank=3,
+                spatial_batch_size=3,
+                execution=execution,
+            )
 
         checkpoint_path = f"{store_path}-svd.pt"
         updated.save(checkpoint_path)

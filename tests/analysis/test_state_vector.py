@@ -174,7 +174,7 @@ def test_fitted_rms_uses_one_vector_magnitude_factor():
 def test_checkpoint_restores_fitted_rms_without_scanning_snapshots(tmp_path):
     fields = (FieldSpec("U", (2,), ("u", "v")), FieldSpec("p"))
     source = DataloaderStateVectorSource(_Loader(), fields, normalization="rms")
-    svd = SVD(source, rank=3, spatial_batch_size=2, snapshot_batch_size=2)
+    svd = SVD(source, rank=3, spatial_batch_size=2)
     path = tmp_path / "fitted-rms-svd.pt"
     svd.save(path)
     restored_loader = _Loader()
@@ -214,3 +214,26 @@ def test_hdf5_loader_reads_spatial_slice_directly(tmp_path):
     assert velocity.shape == (3, 3, 2)
     assert loader.snapshot_shape("p", "0") == (6,)
     assert loader.snapshot_shape("U", "0") == (6, 3)
+
+
+def test_gpu_configured_loader_can_prepare_on_cpu_without_cuda():
+    source = DataloaderStateVectorSource(
+        _Loader(),
+        (FieldSpec("U", (2,)), FieldSpec("p")),
+        normalization={"U": 2.0, "p": 3.0},
+        spatial_weight=pt.ones(5),
+        device="cuda",
+    )
+    from contextlib import closing
+
+    with closing(source.iter_chunks(slice(0, 5), 2)) as chunks:
+        packets = list(chunks)
+    cpu = DataloaderStateVectorSource(
+        _Loader(),
+        source.layout.fields,
+        normalization=source.layout.normalization_factors,
+    )
+    for part, data, weight in packets:
+        assert data.device.type == "cpu"
+        assert weight.device.type == "cpu"
+        pt.testing.assert_close(data, cpu.read(part, slice(0, 4)))

@@ -2,30 +2,161 @@
 
 # standard library packages
 import logging
-from math import isfinite, sqrt
+from contextlib import closing
+from math import isfinite, sqrt, prod
 from numbers import Integral, Real
-from os import PathLike
+from os import PathLike, sysconf
+from pathlib import Path
+from socket import gethostname
+from tempfile import TemporaryDirectory
+import shutil
 from typing import Any, NamedTuple, Optional, Sequence, Tuple, Union
 
 # third party packages
+import numpy as np
 import torch as pt
 import torch.distributed as dist
 
 # flowtorch packages
 from flowtorch.utils import format_byte_size
 from .state_vector import (
-    CompositeStateVectorSource,
+    FieldSpec,
+    StateVectorLayout,
     StateVectorResult,
     StateVectorSource,
 )
 from .statistics import DistributedExecution
+from ._chunk_prefetch import iter_prepared_chunks
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 
+_UNSET_WEIGHT = object()
+
 MODES = ("auto", "svd", "evd", "tsqr")
-SVD_CHECKPOINT_VERSION = 1
+SVD_CHECKPOINT_VERSION = 2
+SVD_DEFAULT_INPUT_BYTES = 256 * 1024**2
+
+
+class _BasisStore:
+    """Owned chunk storage; disk reads materialize only overlapping spatial rows."""
+
+    def __init__(self, layout, mode="disk", directory=None):
+        if mode not in ("memory", "disk"):
+            raise ValueError("basis_storage must be 'memory' or 'disk'")
+        self.layout = layout
+        self.mode = mode
+        self.directory = directory
+        self._temp = TemporaryDirectory(dir=directory) if mode == "disk" else None
+        self.chunks = {}
+
+    def put(self, spatial_slice, **values):
+        key = (spatial_slice.start, spatial_slice.stop)
+        if self.mode == "memory":
+            self.chunks[key] = {
+                name: value.detach().clone() if value is not None else None
+                for name, value in values.items()
+            }
+        else:
+            record: dict[str, Any] = {}
+            assert self._temp is not None
+            for name, value in values.items():
+                if value is None:
+                    record[name] = None
+                else:
+                    path = Path(self._temp.name) / f"{key[0]}-{key[1]}-{name}.npy"
+                    np.save(path, value.detach().cpu().numpy())
+                    record[name] = path
+            self.chunks[key] = record
+
+    def restore_chunk(self, spatial_slice, files, device):
+        """Copy checkpoint arrays without loading disk-backed modes into RAM."""
+        if self.mode == "disk":
+            assert self._temp is not None
+            record: dict[str, Any] = {}
+            for name, source_path in files.items():
+                if source_path is None:
+                    record[name] = None
+                else:
+                    target = (
+                        Path(self._temp.name)
+                        / f"{spatial_slice.start}-{spatial_slice.stop}-{name}.npy"
+                    )
+                    shutil.copyfile(source_path, target)
+                    record[name] = target
+            self.chunks[(spatial_slice.start, spatial_slice.stop)] = record
+        else:
+            values = {
+                name: (
+                    None
+                    if path is None
+                    else pt.from_numpy(
+                        np.array(np.load(path, mmap_mode="r"), copy=True)
+                    ).to(device)
+                )
+                for name, path in files.items()
+            }
+            self.put(spatial_slice, **values)
+
+    def read(self, spatial_slice, name, device):
+        start, stop, step = spatial_slice.indices(self.layout.spatial_shape[0])
+        if step != 1:
+            raise ValueError("basis reads require contiguous spatial slices")
+        components = sum(field.n_components for field in self.layout.fields)
+        remaining = prod(self.layout.spatial_shape[1:])
+        pieces = []
+        covered = 0
+        for (left, right), record in sorted(self.chunks.items()):
+            lo, hi = max(left, start), min(right, stop)
+            if lo >= hi:
+                continue
+            value = record[name]
+            if value is None:
+                return None
+            if self.mode == "disk":
+                array = np.load(value, mmap_mode="r")
+                trailing = array.shape[1:]
+                selected = array.reshape(
+                    components, right - left, remaining, *trailing
+                )[:, lo - left : hi - left]
+                tensor = pt.from_numpy(np.array(selected, copy=True)).to(device)
+            else:
+                trailing = value.shape[1:]
+                tensor = value.reshape(components, right - left, remaining, *trailing)[
+                    :, lo - left : hi - left
+                ].to(device)
+            pieces.append(tensor)
+            covered += hi - lo
+        if covered != stop - start:
+            raise ValueError("requested basis rows are outside the local partition")
+        return pt.cat(pieces, dim=1).reshape(
+            components * covered * remaining, *trailing
+        )
+
+    def close(self):
+        if self._temp is not None:
+            self._temp.cleanup()
+        self.chunks.clear()
+
+
+class _FactorSource(StateVectorSource):
+    """Layout-only source: factors own the data needed after construction."""
+
+    def __init__(self, layout, count):
+        self._layout = layout
+        self._count = count
+
+    @property
+    def layout(self):
+        return self._layout
+
+    @property
+    def n_snapshots(self):
+        return self._count
+
+    def read(self, spatial_slice, snapshot_slice):
+        raise RuntimeError("original snapshots are not retained by this SVD")
 
 
 def _partition_spatial_axis(size: int, rank: int, world_size: int) -> tuple[int, int]:
@@ -39,6 +170,98 @@ def _partition_spatial_axis(size: int, rank: int, world_size: int) -> tuple[int,
 def _iter_slices(start: int, stop: int, batch_size: int):
     for current in range(start, stop, batch_size):
         yield slice(current, min(current + batch_size, stop))
+
+
+def _available_memory_bytes(device: pt.device) -> int:
+    """Available device memory, respecting Linux container RAM limits."""
+    if device.type == "cuda":
+        return pt.cuda.mem_get_info(device)[0]
+    try:
+        info = Path("/proc/meminfo").read_text()
+        available = next(
+            int(line.split()[1]) * 1024
+            for line in info.splitlines()
+            if line.startswith("MemAvailable:")
+        )
+    except (OSError, StopIteration):
+        available = sysconf("SC_AVPHYS_PAGES") * sysconf("SC_PAGE_SIZE")
+    # Locate this process's cgroup rather than assuming the mount root.
+    try:
+        entry = next(
+            line
+            for line in Path("/proc/self/cgroup").read_text().splitlines()
+            if line.startswith("0::")
+        )
+        directory = Path("/sys/fs/cgroup") / entry.split("::", 1)[1].lstrip("/")
+        root = Path("/sys/fs/cgroup")
+        while directory == root or root in directory.parents:
+            limit = (directory / "memory.max").read_text().strip()
+            if limit != "max":
+                used = int((directory / "memory.current").read_text())
+                available = min(available, max(0, int(limit) - used))
+            if directory == root:
+                break
+            directory = directory.parent
+    except (OSError, StopIteration, ValueError):
+        pass
+    return available
+
+
+def _initial_memory_capacity(reports: Sequence[dict], columns: int) -> int:
+    """Common spatial capacity from each rank's per-process allowance.
+
+    Host RAM is shared only among ranks on that host. Cgroup allowances are
+    conservatively treated as shared host memory; explicit budgets bypass
+    both sharing and the automatic safety factor.
+    """
+    capacities = []
+    for report in reports:
+        budget = report["budget"]
+        if budget is None:
+            available = report["available"]
+            if report["device_type"] == "cpu":
+                local_ranks = sum(
+                    other["hostname"] == report["hostname"] for other in reports
+                )
+                available //= local_ranks
+            budget = int(0.6 * available)
+        scalar_bytes = report["scalar_bytes"]
+        retained = report.get("maximum_rank", columns)
+        fixed_bytes = (len(reports) + 6) * (retained + columns) ** 2 * scalar_bytes
+        fixed_bytes += 4 * columns * retained * scalar_bytes
+        fixed_bytes += report.get("basis_reserve", 0)
+        block_bytes = report["rows_per_value"] * columns * scalar_bytes
+        capacities.append(
+            (budget - fixed_bytes)
+            // (
+                6 * block_bytes
+                + 8 * report["rows_per_value"] * retained * scalar_bytes
+                + (
+                    2
+                    * report["rows_per_value"]
+                    * scalar_bytes
+                    * (columns + retained + 2)
+                    if report.get("prefetch", False) and report["device_type"] == "cpu"
+                    else 0
+                )
+            )
+        )
+        if report.get("prefetch", False) and report["device_type"] == "cuda":
+            host = report.get("host_available")
+            if host is not None:
+                peers = sum(
+                    other["hostname"] == report["hostname"] for other in reports
+                )
+                capacities.append(
+                    int(0.6 * host / peers)
+                    // (
+                        4
+                        * report["rows_per_value"]
+                        * scalar_bytes
+                        * (columns + retained + 4)
+                    )
+                )
+    return min(capacities)
 
 
 def _merge_triangular(first: Optional[pt.Tensor], second: pt.Tensor) -> pt.Tensor:
@@ -461,7 +684,6 @@ class SVD(object):
             rank=20,
             subtract_mean=True,
             spatial_batch_size=100_000,
-            snapshot_batch_size=16,
             execution=execution,  # omit for shared-memory execution
         )
         for spatial_slice, fields in svd.U.iter_chunks(split=True):
@@ -477,8 +699,11 @@ class SVD(object):
         *,
         subtract_mean: bool = False,
         spatial_batch_size: Optional[int] = None,
-        snapshot_batch_size: Optional[int] = None,
         execution: Optional[DistributedExecution] = None,
+        memory_budget_bytes: Optional[int] = None,
+        prefetch_chunks: bool = False,
+        basis_storage: str = "disk",
+        basis_directory: Optional[Union[str, PathLike[str]]] = None,
     ):
         r"""Compute a truncated, optionally weighted SVD of a data matrix.
 
@@ -492,8 +717,9 @@ class SVD(object):
             source. Lazy sources use out-of-core TSQR and partition the first
             spatial dimension when ``execution`` is supplied.
         :type data_matrix: Union[pt.Tensor, StateVectorSource]
-        :param rank: rank at which to truncate the SVD; if no rank is given, the 'optimal'
-            rank is determined via singular value hard thresholding; defaults to None
+        :param rank: truncation rank for tensor inputs; maximum retained rank
+            across updates for source-backed TSQR. None selects a rank by
+            singular value hard thresholding after each factorization.
         :type rank: Union[int, None], optional
         :param mode: compute path; can be one of:
             'svd' - most accurate but slow for non-square matrices
@@ -507,12 +733,24 @@ class SVD(object):
         :param subtract_mean: subtract and retain the temporal mean, defaults to
             False
         :param spatial_batch_size: maximum number of first-axis spatial values
-            loaded per rank and batch for a lazy source
-        :param snapshot_batch_size: maximum number of snapshots requested from
-            a lazy source at once
+            loaded per rank and batch for a lazy source. If omitted, target
+            256 MiB of input, bounded by estimated memory and the local partition.
         :param execution: distributed execution configuration. Every rank must
             construct the same source; the spatial dimension is partitioned,
             while time is retained on every rank.
+        :param memory_budget_bytes: per-process construction/update memory budget, including
+            QR buffers and spatial chunk workspace. Each incoming temporal batch
+            must fit the loader's memory requirements independently.
+            If omitted, uses 60% of available device memory (CPU RAM shared
+            among ranks on the same host), bounded by the tightest rank's
+            allowance. This is an estimate, not a hard memory limit;
+            loaders may allocate additional buffers or read larger files.
+        :param prefetch_chunks: prepare one CPU spatial chunk ahead, default False.
+            True enables prefetching; otherwise preparation is sequential. GPU-only custom readers remain
+            synchronous unless they implement CPU preparation hooks.
+        :param basis_storage: "disk" (default) or "memory" for local TSQR modes
+        :param basis_directory: parent directory for owned temporary basis files;
+            defaults to the system temporary directory. Checkpoints are independent.
         :raises ValueError:
             - if the data matrix does not have exactly two dimensions
             - if an invalid compute mode is specified
@@ -526,8 +764,11 @@ class SVD(object):
                 weight,
                 subtract_mean,
                 spatial_batch_size,
-                snapshot_batch_size,
                 execution,
+                memory_budget_bytes,
+                basis_storage,
+                basis_directory,
+                prefetch_chunks,
             )
             return
         if execution is not None:
@@ -609,14 +850,21 @@ class SVD(object):
         weight: Optional[pt.Tensor],
         subtract_mean: bool,
         spatial_batch_size: Optional[int],
-        snapshot_batch_size: Optional[int],
         execution: Optional[DistributedExecution],
+        memory_budget_bytes: Optional[int],
+        basis_storage: str,
+        basis_directory: Optional[Union[str, PathLike[str]]],
+        prefetch_chunks: bool,
     ) -> None:
         """Compute an out-of-core tall-skinny SVD."""
         if mode not in ("auto", "tsqr"):
             raise ValueError("StateVectorSource inputs require mode 'auto' or 'tsqr'")
         if not isinstance(subtract_mean, bool):
             raise ValueError("subtract_mean must be a boolean")
+        if memory_budget_bytes is not None:
+            memory_budget_bytes = self._validate_batch_size(
+                memory_budget_bytes, 4 * 1024**3, "memory_budget_bytes"
+            )
         if execution is not None:
             if not isinstance(execution, DistributedExecution):
                 raise ValueError("execution must be a DistributedExecution instance")
@@ -641,8 +889,17 @@ class SVD(object):
                 )
             if weight.device.type != "cpu":
                 raise ValueError("source-backed global weights must be stored on CPU")
+        if not isinstance(prefetch_chunks, bool):
+            raise ValueError("prefetch_chunks must be a boolean")
+        self._prefetch_chunks = prefetch_chunks
+        self._basis = _BasisStore(source.layout, basis_storage, basis_directory)
+        self._memory_budget_bytes = memory_budget_bytes
+        self._maximum_rank = (
+            None if rank is None else self._validate_batch_size(rank, 1, "rank")
+        )
         self._source = source
         self._source_weight = weight
+        self._external_weight = weight is not None
         self._subtract_mean = subtract_mean
         self._execution = execution
         self._rows = source.layout.state_size
@@ -651,9 +908,6 @@ class SVD(object):
         self._spatial_batch_size = self._validate_batch_size(
             spatial_batch_size, min(1024, source.spatial_shape[0]), "spatial_batch_size"
         )
-        self._snapshot_batch_size = self._validate_batch_size(
-            snapshot_batch_size, min(16, source.n_snapshots), "snapshot_batch_size"
-        )
         start, stop = _partition_spatial_axis(
             source.spatial_shape[0], process_rank, world_size
         )
@@ -661,10 +915,75 @@ class SVD(object):
         source.fit_normalization(
             self._local_spatial_slice,
             self._spatial_batch_size,
-            self._snapshot_batch_size,
+            source.n_snapshots,
             execution,
         )
+        self._basis.layout = source.layout
+        if spatial_batch_size is None:
+            self._select_spatial_batch(memory_budget_bytes, world_size)
         self._fit_source_factors(rank)
+        self._source = _FactorSource(source.layout, self._cols)
+        self._source_weight = None
+        self._mean = self._mean_result() if subtract_mean else None
+
+    def _select_spatial_batch(self, budget: Optional[int], world_size: int) -> None:
+        """Select an input-byte target without timing trials or extra factorization."""
+        assert self._source is not None
+        group = None if self._execution is None else self._execution.process_group
+        report: dict[str, Any] = {}
+        try:
+            start = self._local_spatial_slice.start
+            probe = self._source.read(slice(start, start + 1), slice(0, 1))
+            device = probe.device
+            scalar_bytes = probe.element_size()
+            packed = probe.shape[0]
+            maximum = min(self._rows, self._maximum_rank or self._cols)
+            report = dict(
+                hostname=gethostname(),
+                device_type=device.type,
+                scalar_bytes=scalar_bytes,
+                rows_per_value=packed,
+                maximum_rank=maximum,
+                budget=budget,
+                prefetch=self._prefetch_chunks,
+                available=_available_memory_bytes(device) if budget is None else None,
+                local_size=self._local_spatial_slice.stop - start,
+            )
+            if self._basis.mode == "memory":
+                report["basis_reserve"] = (
+                    report["local_size"]
+                    * packed
+                    * scalar_bytes
+                    * (2 * maximum + self._cols + 3 * int(self._subtract_mean) + 1)
+                )
+            if self._prefetch_chunks and device.type == "cuda":
+                report["host_available"] = _available_memory_bytes(pt.device("cpu"))
+            del probe
+        except Exception as error:
+            report["error"] = str(error)
+        reports: list[Any] = [report]
+        if self._execution is not None:
+            reports = [None] * world_size
+            dist.all_gather_object(reports, report, group=group)
+        for index, item in enumerate(reports):
+            if "error" in item:
+                raise ValueError(f"rank {index}: {item['error']}")
+        capacity = _initial_memory_capacity(reports, self._cols)
+        if capacity < 1:
+            raise ValueError(
+                "memory_budget_bytes is too small for factors and spatial workspace"
+            )
+        targets = [
+            max(
+                1,
+                SVD_DEFAULT_INPUT_BYTES
+                // (item["rows_per_value"] * self._cols * item["scalar_bytes"]),
+            )
+            for item in reports
+        ]
+        self._spatial_batch_size = int(
+            min(capacity, min(targets), min(item["local_size"] for item in reports))
+        )
 
     def _source_block(
         self,
@@ -674,12 +993,11 @@ class SVD(object):
         subtract_mean: Optional[bool] = None,
     ) -> tuple[pt.Tensor, Optional[pt.Tensor]]:
         """Load all temporal columns for one spatial chunk."""
-        pieces = []
-        for snapshot_slice in _iter_slices(
-            0, source.n_snapshots, self._snapshot_batch_size
-        ):
-            pieces.append(source.read(spatial_slice, snapshot_slice))
-        block = pt.cat(pieces, dim=1)
+        # Own a contiguous block and force lazy/mapped pages to materialize
+        # here so source-loading timings include the actual data access.
+        block = source.read(spatial_slice, slice(0, source.n_snapshots)).clone(
+            memory_format=pt.contiguous_format
+        )
         center = self._subtract_mean if subtract_mean is None else subtract_mean
         mean = block.mean(dim=1) if center else None
         if mean is not None:
@@ -687,9 +1005,20 @@ class SVD(object):
         return block, mean
 
     def _weight_block(
-        self, source: StateVectorSource, spatial_slice: slice, reference: pt.Tensor
+        self,
+        source: StateVectorSource,
+        spatial_slice: slice,
+        reference: pt.Tensor,
+        *,
+        raw_weight: Any = _UNSET_WEIGHT,
     ) -> Optional[pt.Tensor]:
-        weight = source.read_weight(spatial_slice)
+        if isinstance(source, _FactorSource):
+            return self._basis.read(spatial_slice, "weight", reference.device)
+        weight = (
+            source.read_weight(spatial_slice)
+            if raw_weight is _UNSET_WEIGHT
+            else raw_weight
+        )
         if weight is not None and self._source_weight is not None:
             raise ValueError("weight is defined by both the source and SVD")
         if weight is None and self._source_weight is not None:
@@ -719,6 +1048,93 @@ class SVD(object):
         weight = self._weight_block(source, spatial_slice, block)
         return block if weight is None else block * weight.sqrt().unsqueeze(-1)
 
+    def _source_batches(
+        self,
+        source: StateVectorSource,
+        size: Optional[int] = None,
+        stop: Optional[int] = None,
+    ):
+        """CPU preparation; transfer and processing occur only on consumption."""
+        region = (
+            self._local_spatial_slice
+            if stop is None
+            else slice(self._local_spatial_slice.start, stop)
+        )
+        with closing(
+            source.iter_chunks(
+                region,
+                self._spatial_batch_size if size is None else size,
+                prefetch=self._prefetch_chunks,
+            )
+        ) as chunks:
+            for part, host, raw_weight in chunks:
+                device = source.device or host.device
+                block = host.to(device)
+                mean = block.mean(dim=1) if self._subtract_mean else None
+                if mean is not None:
+                    block = block - mean[:, None]
+                weight = self._weight_block(source, part, block, raw_weight=raw_weight)
+                yield part, block, mean, weight
+
+    def _update_batches(self, staged=None, source=None):
+        """Prepare disk basis and staged data together; GPU-resident stores stay direct."""
+        resident_gpu = self._basis.mode == "memory" and self.V.device.type == "cuda"
+        read_device = self.V.device if resident_gpu else pt.device("cpu")
+
+        def read(part):
+            packet = dict(part=part)
+            if not resident_gpu:
+                packet.update(
+                    U=self._basis.read(part, "U", read_device),
+                    weight=self._basis.read(part, "weight", read_device),
+                    mean=(
+                        self._basis.read(part, "mean", read_device)
+                        if self._subtract_mean
+                        else None
+                    ),
+                )
+            if source is not None:
+                packet["added"] = source.read_cpu(
+                    part, slice(0, source.n_snapshots)
+                ).clone(memory_format=pt.contiguous_format)
+                packet["new_weight"] = source.read_weight_cpu(part)
+            elif not resident_gpu:
+                packet["added"] = staged.read(part, "added", read_device)
+                packet["next_mean"] = staged.read(part, "mean", read_device)
+            return packet
+
+        with closing(
+            iter_prepared_chunks(
+                self._basis_slices(),
+                read,
+                prefetch=self._prefetch_chunks
+                and (not resident_gpu or source is not None),
+            )
+        ) as chunks:
+            for packet in chunks:
+                part = packet["part"]
+                if resident_gpu:
+                    packet.update(
+                        U=self._basis.read(part, "U", read_device),
+                        weight=self._basis.read(part, "weight", read_device),
+                        mean=(
+                            self._basis.read(part, "mean", read_device)
+                            if self._subtract_mean
+                            else None
+                        ),
+                    )
+                    if staged is not None:
+                        packet["added"] = staged.read(part, "added", read_device)
+                        packet["next_mean"] = staged.read(part, "mean", read_device)
+                yield {
+                    name: (
+                        value.to(self.V.device)
+                        if isinstance(value, pt.Tensor)
+                        else value
+                    )
+                    for name, value in packet.items()
+                }
+
     def _local_triangular_factor(
         self,
         source: StateVectorSource,
@@ -726,20 +1142,16 @@ class SVD(object):
         block_transform=None,
     ) -> pt.Tensor:
         """Accumulate one rank-local TSQR factor from spatial chunks."""
-        local_start, local_stop, _ = self._local_spatial_slice.indices(
-            source.spatial_shape[0]
-        )
         triangular = None
         reference = None
-        for spatial_slice in _iter_slices(
-            local_start, local_stop, self._spatial_batch_size
-        ):
-            block, _ = self._source_block(source, spatial_slice)
-            if block_transform is not None:
-                block = block_transform(spatial_slice, block)
-            block = self._weighted_block(source, spatial_slice, block)
-            reference = block
-            triangular = _merge_triangular(triangular, block)
+        with closing(self._source_batches(source)) as chunks:
+            for spatial_slice, block, _, weight in chunks:
+                if block_transform is not None:
+                    block = block_transform(spatial_slice, block)
+                if weight is not None:
+                    block = block * weight.sqrt()[:, None]
+                reference = block
+                triangular = _merge_triangular(triangular, block)
         if reference is None or triangular is None:
             raise RuntimeError("the local spatial partition is empty")
         padded = reference.new_zeros((columns, columns))
@@ -748,7 +1160,16 @@ class SVD(object):
 
     def _fit_source_factors(self, requested_rank: Optional[int]) -> None:
         assert self._source is not None
-        local = self._local_triangular_factor(self._source, self._cols)
+        error = None
+        local = None
+        try:
+            local = self._local_triangular_factor(self._source, self._cols)
+        except Exception as exc:
+            if self._execution is None:
+                raise
+            error = str(exc)
+        self._collective_error(error)
+        assert local is not None
         triangular = _reduce_triangular(local, self._execution)
         root = (
             self._execution is None
@@ -769,11 +1190,34 @@ class SVD(object):
             dist.broadcast(right, src=root_global, group=group)
         self._opt_rank = self._optimal_rank(singular_values)
         self.rank = self.opt_rank if requested_rank is None else requested_rank
+        # Null singular directions cannot be recovered through X V / s.
+        # Retain only resolved directions; the requested ceiling is unchanged.
+        tolerance = (
+            pt.finfo(singular_values.dtype).eps
+            * max(triangular.shape)
+            * singular_values[0]
+        )
+        self._rank = max(1, min(self.rank, int((singular_values > tolerance).sum())))
         self._s_full = singular_values
         self._s = singular_values[: self.rank].clone().contiguous()
         self._V = right[:, : self.rank].contiguous()
         self._weight = None
         self._sqrt_weight = None
+        source = self._source
+        error = None
+        try:
+            with closing(self._source_batches(source)) as chunks:
+                for spatial_slice, block, mean, weight_chunk in chunks:
+                    denominator = self.s.clamp_min(
+                        pt.finfo(self.s.dtype).eps * self.s[0]
+                    ).clamp_min(pt.finfo(self.s.dtype).tiny)
+                    modes = block @ (self.V / denominator)
+                    self._basis.put(
+                        spatial_slice, U=modes, mean=mean, weight=weight_chunk
+                    )
+        except Exception as exc:
+            error = str(exc)
+        self._collective_error(error)
         self._mean = self._mean_result() if self._subtract_mean else None
         logger.info(
             f"Truncating TSQR SVD at index {self.rank}/{min(self._cols, self._rows)}"
@@ -782,36 +1226,44 @@ class SVD(object):
     def _left_chunk(
         self, spatial_slice: slice, rank: Optional[int] = None
     ) -> pt.Tensor:
-        assert self._source is not None
-        block, _ = self._source_block(self._source, spatial_slice)
+        modes = self._basis.read(spatial_slice, "U", self.V.device)
         r_rank = self.rank if rank is None else max(min(rank, self.rank), 1)
-        denominator = (
-            self.s[:r_rank]
-            .clamp_min(pt.finfo(self.s.dtype).eps * self.s[0])
-            .clamp_min(pt.finfo(self.s.dtype).tiny)
+        return modes[:, :r_rank]
+
+    def _basis_slices(self):
+        yield from _iter_slices(
+            self._local_spatial_slice.start,
+            self._local_spatial_slice.stop,
+            self._spatial_batch_size,
         )
-        right = self.V[:, :r_rank]
-        if block.shape[0] > right.shape[0]:
-            return block @ (right / denominator)
-        return (block @ right) / denominator
 
     def _mean_result(self) -> StateVectorResult:
         assert self._source is not None
-        source = self._source
-
-        def produce(spatial_slice: slice) -> pt.Tensor:
-            _, mean = self._source_block(source, spatial_slice, subtract_mean=True)
-            assert mean is not None
-            return mean
-
         return StateVectorResult(
-            source.layout,
+            self._source.layout,
             self._local_spatial_slice,
             (),
-            produce,
+            lambda spatial_slice: self._basis.read(
+                spatial_slice, "mean", self.V.device
+            ),
             self._spatial_batch_size,
             self._execution,
         )
+
+    @property
+    def maximum_rank(self) -> Optional[int]:
+        """Requested TSQR rank ceiling; None selects the rank automatically."""
+        return getattr(self, "_maximum_rank", None)
+
+    @property
+    def basis_storage(self) -> Optional[str]:
+        """Local TSQR basis storage mode, or None for a tensor decomposition."""
+        return self._basis.mode if self._source is not None else None
+
+    def close(self) -> None:
+        """Release owned temporary basis files. Saved checkpoints are independent."""
+        if hasattr(self, "_basis"):
+            self._basis.close()
 
     def _svd(self, X: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor, pt.Tensor]:
         """Compute the economy SVD via the native SVD implementation.
@@ -868,7 +1320,7 @@ class SVD(object):
             V = X.conj().T @ (U / denominator)
         return U, s, V
 
-    def _optimal_rank(self, s: pt.Tensor) -> int:
+    def _optimal_rank(self, s: pt.Tensor, columns: Optional[int] = None) -> int:
         """Compute the optimal singular value hard threshold.
 
         This function implements the svht_ rank estimation.
@@ -880,7 +1332,8 @@ class SVD(object):
         :return: optimal rank for truncation
         :rtype: int
         """
-        beta = min(self._rows, self._cols) / max(self._rows, self._cols)
+        columns = self._cols if columns is None else columns
+        beta = min(self._rows, columns) / max(self._rows, columns)
         omega = 0.56 * beta**3 - 0.95 * beta**2 + 1.82 * beta + 1.43
         tau_star = omega * pt.median(s)
         closest = int(pt.argmin((s - tau_star).abs()).item())
@@ -956,9 +1409,9 @@ class SVD(object):
             data_chunk = state.read(spatial_slice, slice(0, state.n_snapshots))
             if self.mean is not None:
                 assert isinstance(self.mean, StateVectorResult)
-                data_chunk = data_chunk - self.mean.read_chunk(spatial_slice).unsqueeze(
-                    -1
-                )
+                mean_chunk = self.mean.read_chunk(spatial_slice)
+                assert isinstance(mean_chunk, pt.Tensor)
+                data_chunk = data_chunk - mean_chunk.unsqueeze(-1)
             weight = self._weight_block(self._source, spatial_slice, mode_chunk)
             if weight is not None:
                 data_chunk = data_chunk * weight.unsqueeze(-1)
@@ -992,9 +1445,9 @@ class SVD(object):
             value = (modes.read_chunk(spatial_slice) @ flattened).reshape(-1, *trailing)
             if self.mean is not None:
                 assert isinstance(self.mean, StateVectorResult)
-                value = value + self.mean.read_chunk(spatial_slice).reshape(
-                    -1, *((1,) * len(trailing))
-                )
+                mean_chunk = self.mean.read_chunk(spatial_slice)
+                assert isinstance(mean_chunk, pt.Tensor)
+                value = value + mean_chunk.reshape(-1, *((1,) * len(trailing)))
             return value
 
         return StateVectorResult(
@@ -1187,13 +1640,21 @@ class SVD(object):
     def required_memory(self) -> int:
         """Compute the memory size in bytes of the truncated SVD.
 
-        :return: cumulative size of truncated U, s, and V tensors in bytes
+        :return: persistent factor tensor bytes (local for TSQR), excluding
+            disk arrays, filesystem cache, and temporary workspace
         :rtype: int
         """
         if self._source is None:
             memory = self._U.element_size() * self._U.nelement()
         else:
             memory = 0
+            if self._basis.mode == "memory":
+                memory = sum(
+                    value.element_size() * value.nelement()
+                    for record in self._basis.chunks.values()
+                    for value in record.values()
+                    if value is not None
+                )
         memory += self.s.element_size() * self.s.nelement()
         memory += self.V.element_size() * self.V.nelement()
         if self.weight is not None:
@@ -1202,109 +1663,311 @@ class SVD(object):
             memory += self._sqrt_weight.element_size() * self._sqrt_weight.nelement()
         return memory
 
+    def _collective_error(self, error: Optional[str]) -> None:
+        """Propagate local I/O failures before entering the next collective."""
+        if self._execution is not None:
+            group = self._execution.process_group
+            errors: list[Any] = [None] * dist.get_world_size(group)
+            dist.all_gather_object(errors, error, group=group)
+            error = next((value for value in errors if value is not None), None)
+        if error is not None:
+            raise RuntimeError(error)
+
+    def _small_svd(self, matrix: pt.Tensor):
+        """Factor a compact update matrix on the execution root."""
+        root = (
+            self._execution is None
+            or dist.get_rank(self._execution.process_group) == self._execution.root_rank
+        )
+        error = None
+        size = min(matrix.shape)
+        if root:
+            try:
+                left, values, right_h = pt.linalg.svd(matrix, full_matrices=False)
+                left, values, right_h = (
+                    left.contiguous(),
+                    values.contiguous(),
+                    right_h.contiguous(),
+                )
+            except Exception as exc:
+                error = str(exc)
+        self._collective_error(error)
+        if self._execution is not None:
+            group = self._execution.process_group
+            ranks: list[Any] = [None] * dist.get_world_size(group)
+            dist.all_gather_object(ranks, dist.get_rank(), group=group)
+            global_root = ranks[self._execution.root_rank]
+            if not root:
+                left = matrix.new_empty((matrix.shape[0], size))
+                values = matrix.real.new_empty(size)
+                right_h = matrix.new_empty((size, matrix.shape[1]))
+            for tensor in (left, values, right_h):
+                dist.broadcast(tensor, src=global_root, group=group)
+        return left, values, right_h
+
+    def _update_spatial_capacity(self, batch_count: int) -> int:
+        """Reuse the selected size, shrinking only for estimated memory needs."""
+        assert self._source is not None
+        group = None if self._execution is None else self._execution.process_group
+        world_size = 1 if self._execution is None else dist.get_world_size(group)
+        columns = batch_count + int(self._subtract_mean)
+        next_rank = min(
+            self._rows,
+            self._cols + batch_count,
+            self._maximum_rank or self.rank + columns,
+            self.rank + columns,
+        )
+        packed_per_value = prod(self._source.spatial_shape[1:]) * sum(
+            field.n_components for field in self._source.layout.fields
+        )
+        local_rows = (
+            self._local_spatial_slice.stop - self._local_spatial_slice.start
+        ) * packed_per_value
+        scalar_bytes = self.V.element_size()
+        error = None
+        report: dict[str, Any] = {}
+        try:
+            explicit = self._memory_budget_bytes
+            report = dict(
+                hostname=gethostname(),
+                device_type=self.V.device.type,
+                available=(
+                    _available_memory_bytes(self.V.device) if explicit is None else None
+                ),
+                budget=None if explicit is None else explicit - self.required_memory,
+                # Existing factors already reduce automatically probed
+                # free memory. Reserve only newly allocated arrays.
+                fixed=(world_size + 6) * (self.rank + columns) ** 2 * scalar_bytes
+                + 2 * (self._cols + batch_count) * next_rank * scalar_bytes,
+                block_bytes=packed_per_value
+                * scalar_bytes
+                * (6 * columns + 4 * (self.rank + next_rank)),
+            )
+            if self._prefetch_chunks and self.V.device.type == "cuda":
+                report["host_available"] = _available_memory_bytes(pt.device("cpu"))
+                report["host_block_bytes"] = (
+                    4 * packed_per_value * scalar_bytes * (columns + self.rank + 4)
+                )
+            if self._prefetch_chunks and self.V.device.type == "cpu":
+                report["block_bytes"] += (
+                    2 * packed_per_value * scalar_bytes * (columns + self.rank + 2)
+                )
+            if self._basis.mode == "memory":
+                report["fixed"] += (
+                    local_rows
+                    * scalar_bytes
+                    * (next_rank + batch_count + 3 * int(self._subtract_mean) + 1)
+                )
+        except Exception as exc:
+            error = str(exc)
+        self._collective_error(error)
+        reports: list[Any] = [report]
+        if self._execution is not None:
+            reports = [None] * world_size
+            dist.all_gather_object(reports, report, group=group)
+        capacities = []
+        for item in reports:
+            allowance = item["budget"]
+            if allowance is None:
+                available = item["available"]
+                if available is None:
+                    raise ValueError(
+                        "cannot determine update memory; supply memory_budget_bytes"
+                    )
+                if item["device_type"] == "cpu":
+                    available //= sum(
+                        other["hostname"] == item["hostname"] for other in reports
+                    )
+                allowance = int(0.6 * available)
+            capacities.append((allowance - item["fixed"]) // item["block_bytes"])
+            if item.get("host_available") is not None:
+                peers = sum(other["hostname"] == item["hostname"] for other in reports)
+                capacities.append(
+                    int(0.6 * item["host_available"] / peers)
+                    // item["host_block_bytes"]
+                )
+        capacity = min(capacities)
+        if capacity < 1:
+            raise ValueError(
+                "update memory budget is too small for factors and one spatial value; use a smaller temporal batch or increase memory_budget_bytes"
+            )
+        return min(self._spatial_batch_size, capacity)
+
     def update(self, new_source: StateVectorSource) -> "SVD":
-        """Append snapshots from a compatible lazy source.
+        """Append snapshots using stored local modes, including mean corrections.
 
-        Uncentered decompositions use a distributed incremental update. A
-        centered decomposition is recomputed out of core so that changing the
-        global mean is handled exactly.
-
-        The update modifies and returns this object::
-
-            new_source = source.with_times(new_times)
-            svd.update(new_source)
-            updated_singular_values = svd.s
+        Explicit source-backed ranks are ceilings. Intermediate truncation is
+        approximate and may differ from truncating a single full factorization.
+        The initial spatial size is reused, reduced only if the current memory
+        estimate requires it. Updates never run timing trials.
+        Old snapshots are never read. The new batch is staged once in owned
+        chunk storage and remains available only for the duration of the update.
         """
         if self._source is None:
             raise RuntimeError("update requires a source-backed SVD")
         if not isinstance(new_source, StateVectorSource):
             raise ValueError("new_source must be a StateVectorSource")
+        new_source.restore_normalization(self._source.layout.normalization_factors)
         if new_source.layout.signature != self._source.layout.signature:
             raise ValueError("new source layout or normalization is incompatible")
-        if new_source.spatial_shape != self._source.spatial_shape:
-            raise ValueError("new source has an incompatible spatial shape")
-        combined = CompositeStateVectorSource((self._source, new_source))
-        selected_rank = self.rank
-        if self._subtract_mean:
-            self._source = combined
-            self._cols = combined.n_snapshots
-            self._fit_source_factors(selected_rank)
-            return self
-
-        old_source = self._source
-        old_columns = self._cols
-        added_columns = new_source.n_snapshots
-        cross = self.V.new_zeros((self.rank, added_columns))
-        local_start, local_stop, _ = self._local_spatial_slice.indices(
-            old_source.spatial_shape[0]
-        )
-        for spatial_slice in _iter_slices(
-            local_start, local_stop, self._spatial_batch_size
-        ):
-            old_modes = self._left_chunk(spatial_slice)
-            added, _ = self._source_block(
-                new_source, spatial_slice, subtract_mean=False
+        old_count, batch_count, old_rank = self._cols, new_source.n_snapshots, self.rank
+        total = old_count + batch_count
+        columns = batch_count + int(self._subtract_mean)
+        previous_size = self._spatial_batch_size
+        self._spatial_batch_size = self._update_spatial_capacity(batch_count)
+        if self._spatial_batch_size < previous_size:
+            logger.info(
+                "Reducing update spatial_batch_size from %s to %s for memory capacity",
+                previous_size,
+                self._spatial_batch_size,
             )
-            weight = self._weight_block(old_source, spatial_slice, old_modes)
-            if weight is None:
-                cross += old_modes.conj().T @ added
+        cross = self.V.new_zeros((old_rank, columns))
+        staged = _BasisStore(
+            self._source.layout, self._basis.mode, self._basis.directory
+        )
+        replacement = _BasisStore(
+            self._source.layout, self._basis.mode, self._basis.directory
+        )
+        try:
+            error = None
+            try:
+                with closing(self._update_batches(source=new_source)) as chunks:
+                    for packet in chunks:
+                        spatial_slice = packet["part"]
+                        added = packet["added"]
+                        batch_mean = added.mean(dim=1) if self._subtract_mean else None
+                        if batch_mean is not None:
+                            added = added - batch_mean[:, None]
+                        modes, weight = packet["U"], packet["weight"]
+                        supplied_weight = self._weight_block(
+                            new_source,
+                            spatial_slice,
+                            modes,
+                            raw_weight=packet["new_weight"],
+                        )
+                        if self._external_weight and supplied_weight is None:
+                            supplied_weight = weight
+                        if (weight is None) != (supplied_weight is None) or (
+                            weight is not None
+                            and not pt.allclose(weight, supplied_weight)
+                        ):
+                            raise ValueError(
+                                "new source spatial weights are incompatible"
+                            )
+                        mean = None
+                        if self._subtract_mean:
+                            old_mean = packet["mean"]
+                            delta = batch_mean - old_mean
+                            mean = old_mean + delta * (batch_count / total)
+                            added = pt.cat(
+                                (
+                                    added,
+                                    delta[:, None]
+                                    * sqrt(old_count * batch_count / total),
+                                ),
+                                dim=1,
+                            )
+                        staged.put(spatial_slice, added=added, mean=mean)
+                        cross += modes.conj().T @ (
+                            added if weight is None else added * weight[:, None]
+                        )
+            except Exception as exc:
+                error = str(exc)
+            self._collective_error(error)
+            if self._execution is not None:
+                dist.all_reduce(cross, group=self._execution.process_group)
+            triangular = None
+            error = None
+            try:
+                with closing(self._update_batches(staged=staged)) as chunks:
+                    for packet in chunks:
+                        spatial_slice = packet["part"]
+                        residual = packet["added"] - packet["U"] @ cross
+                        weight = packet["weight"]
+                        if weight is not None:
+                            residual = residual * weight.sqrt()[:, None]
+                        triangular = _merge_triangular(triangular, residual)
+            except Exception as exc:
+                error = str(exc)
+            self._collective_error(error)
+            padded = cross.new_zeros((columns, columns))
+            assert triangular is not None
+            padded[: triangular.shape[0]] = triangular
+            residual_r = _reduce_triangular(padded, self._execution)
+            # Residual SVD provides a stable spatial basis, including when the
+            # residual is rank deficient (e.g. a centered batch).
+            _, residual_s, residual_vh = self._small_svd(residual_r)
+            tolerance = (
+                pt.finfo(residual_s.dtype).eps
+                * max(residual_r.shape)
+                * max(float(self.s[0]), float(residual_s[0]))
+            )
+            active = residual_s > tolerance
+            residual_s = residual_s[active]
+            residual_vh = residual_vh[active]
+            core = cross.new_zeros((old_rank + residual_s.numel(), old_rank + columns))
+            core[:old_rank, :old_rank] = pt.diag(self.s).to(core.dtype)
+            core[:old_rank, old_rank:] = cross
+            core[old_rank:, old_rank:] = residual_s[:, None] * residual_vh
+            core_u, updated_s, updated_vh = self._small_svd(core)
+            optimal = self._optimal_rank(updated_s, columns=total)
+            ceiling = optimal if self._maximum_rank is None else self._maximum_rank
+            new_rank = max(1, min(ceiling, self._rows, total, updated_s.numel()))
+            core_u = core_u[:, :new_rank]
+            updated_v = updated_vh[:new_rank].conj().T
+            new_v = self.V.new_empty((total, new_rank))
+            new_v[:old_count] = self.V @ updated_v[:old_rank]
+            batch_v = updated_v[old_rank : old_rank + batch_count]
+            if self._subtract_mean:
+                correction = updated_v[-1]
+                new_v[:old_count] -= (
+                    sqrt(batch_count / (old_count * total)) * correction
+                )
+                new_v[old_count:] = (
+                    batch_v
+                    - batch_v.mean(dim=0)
+                    + sqrt(old_count / (batch_count * total)) * correction
+                )
             else:
-                cross += old_modes.conj().T @ (added * weight.unsqueeze(-1))
-        if self._execution is not None:
-            dist.all_reduce(
-                cross, op=dist.ReduceOp.SUM, group=self._execution.process_group
-            )
-
-        def residual(spatial_slice: slice, added: pt.Tensor) -> pt.Tensor:
-            return added - self._left_chunk(spatial_slice) @ cross
-
-        local_residual = self._local_triangular_factor(
-            new_source, added_columns, residual
-        )
-        residual_r = _reduce_triangular(local_residual, self._execution)
-        core_size = self.rank + added_columns
-        core = self.V.new_zeros((core_size, core_size))
-        core[: self.rank, : self.rank] = pt.diag(self.s).to(core.dtype)
-        core[: self.rank, self.rank :] = cross
-        core[self.rank :, self.rank :] = residual_r
-        root = (
-            self._execution is None
-            or dist.get_rank(self._execution.process_group) == self._execution.root_rank
-        )
-        if root:
-            core_u, updated_s, updated_vh = pt.linalg.svd(core, full_matrices=False)
-            del core_u
-            updated_v = updated_vh.conj().T
-        else:
-            updated_s = core.real.new_empty(core_size)
-            updated_v = core.new_empty((core_size, core_size))
-        if self._execution is not None:
-            group = self._execution.process_group
-            global_ranks: list[Any] = [None] * dist.get_world_size(group)
-            dist.all_gather_object(global_ranks, dist.get_rank(), group=group)
-            root_global = global_ranks[self._execution.root_rank]
-            dist.broadcast(updated_s, src=root_global, group=group)
-            dist.broadcast(updated_v, src=root_global, group=group)
-        del core, local_residual, residual_r, residual, old_modes, added, weight
-        new_rank = min(selected_rank, updated_s.numel())
-        rotation = updated_v[: self.rank, :new_rank]
-        appended = updated_v[self.rank :, :new_rank]
-        # Apply the block-diagonal basis [V, I] without materializing its
-        # zeros or identity. Write the large product directly into its output.
-        if pt.is_grad_enabled() and (self.V.requires_grad or updated_v.requires_grad):
-            new_v = pt.cat((self.V @ rotation, appended), dim=0)
-        else:
-            new_v = self.V.new_empty((old_columns + added_columns, new_rank))
-            pt.mm(self.V, rotation, out=new_v[:old_columns])
-            new_v[old_columns:] = appended
-        self._source = combined
-        self._cols = combined.n_snapshots
-        self._s_full = updated_s
-        self._opt_rank = self._optimal_rank(updated_s)
-        self._rank = new_rank
-        self._s = updated_s[:new_rank].clone().contiguous()
-        self._V = new_v
-        self._mean = None
+                new_v[old_count:] = batch_v
+            error = None
+            try:
+                with closing(self._update_batches(staged=staged)) as chunks:
+                    for packet in chunks:
+                        spatial_slice = packet["part"]
+                        old_modes, added = packet["U"], packet["added"]
+                        residual = added - old_modes @ cross
+                        residual_modes = residual @ (residual_vh.conj().T / residual_s)
+                        modes = (
+                            old_modes @ core_u[:old_rank]
+                            + residual_modes @ core_u[old_rank:]
+                        )
+                        replacement.put(
+                            spatial_slice,
+                            U=modes,
+                            mean=packet["next_mean"],
+                            weight=packet["weight"],
+                        )
+            except Exception as exc:
+                error = str(exc)
+            self._collective_error(error)
+            old_basis = self._basis
+            self._basis = replacement
+            old_basis.close()
+            self._cols = total
+            self._source = _FactorSource(self._source.layout, total)
+            self._rank = new_rank
+            self._s_full = updated_s
+            self._s = updated_s[:new_rank].clone().contiguous()
+            self._V = new_v.contiguous()
+            self._opt_rank = optimal
+            self._mean = self._mean_result() if self._subtract_mean else None
+        except BaseException:
+            self._spatial_batch_size = previous_size
+            replacement.close()
+            raise
+        finally:
+            staged.close()
         return self
 
     @staticmethod
@@ -1324,20 +1987,14 @@ class SVD(object):
         }
 
     def save(self, path: Union[str, PathLike[str]]) -> None:
-        """Save a versioned SVD checkpoint.
+        """Save self-contained factors, including the retained physical basis.
 
-        Tensor-backed decompositions include the left modes and can be loaded
-        independently.  Source-backed decompositions store only compact
-        factors, layout metadata, and configuration; pass a compatible source
-        to :meth:`load` to restore their lazy modes and reconstructions.
-
-        In distributed execution this method is collective. Only the configured
-        root writes the shared path, then all ranks synchronize::
-
-            svd.save("svd.pt")
-            restored = SVD.load("svd.pt", source=source, execution=execution)
+        Tensor decompositions use one torch file. Source-backed decompositions
+        use a new directory with metadata and one chunk-file shard per rank.
+        Distributed saves are collective and require a shared filesystem.
+        Existing checkpoint directories are never overwritten.
         """
-        checkpoint: dict[str, Any] = {
+        checkpoint = {
             "format": "flowtorch.svd",
             "version": SVD_CHECKPOINT_VERSION,
             "kind": "source" if self._source is not None else "tensor",
@@ -1353,42 +2010,86 @@ class SVD(object):
         }
         if self._source is None:
             checkpoint.update(
-                {
-                    "U": self._U.detach().cpu(),
-                    "weight": (
-                        None if self._weight is None else self._weight.detach().cpu()
-                    ),
-                    "sqrt_weight": (
-                        None
-                        if self._sqrt_weight is None
-                        else self._sqrt_weight.detach().cpu()
-                    ),
-                    "mean": None if self._mean is None else self._mean.detach().cpu(),
-                }
+                U=self._U.detach().cpu(),
+                weight=None if self._weight is None else self._weight.detach().cpu(),
+                sqrt_weight=(
+                    None
+                    if self._sqrt_weight is None
+                    else self._sqrt_weight.detach().cpu()
+                ),
+                mean=None if self._mean is None else self._mean.detach().cpu(),
             )
-        else:
-            checkpoint.update(
-                {
-                    "layout": self._layout_metadata(self._source),
-                    "spatial_batch_size": self._spatial_batch_size,
-                    "snapshot_batch_size": self._snapshot_batch_size,
-                    "source_weight": (
-                        None
-                        if self._source_weight is None
-                        else self._source_weight.detach().cpu()
-                    ),
-                }
-            )
-        should_write = True
-        if self._execution is not None:
-            should_write = (
-                dist.get_rank(self._execution.process_group)
-                == self._execution.root_rank
-            )
-        if should_write:
             pt.save(checkpoint, path)
+            return
+        group = None if self._execution is None else self._execution.process_group
+        process_rank = 0 if self._execution is None else dist.get_rank(group)
+        world_size = 1 if self._execution is None else dist.get_world_size(group)
+        destination = Path(path)
+        # Every rank checks before any rank creates the destination.
+        exists = destination.exists()
         if self._execution is not None:
-            dist.barrier(group=self._execution.process_group)
+            reports = [None] * world_size
+            dist.all_gather_object(reports, exists, group=group)
+            exists = any(reports)
+        if exists:
+            raise FileExistsError(
+                f"checkpoint destination already exists: {destination}"
+            )
+        error = None
+        try:
+            shard = destination / f"rank-{process_rank}"
+            shard.mkdir(parents=True)
+            chunks = []
+            for (start, stop), record in sorted(self._basis.chunks.items()):
+                names: dict[str, Optional[str]] = {}
+                for name, value in record.items():
+                    if value is None:
+                        names[name] = None
+                        continue
+                    filename = f"{start}-{stop}-{name}.npy"
+                    if self._basis.mode == "disk":
+                        shutil.copyfile(value, shard / filename)
+                    else:
+                        np.save(shard / filename, value.detach().cpu().numpy())
+                    names[name] = filename
+                chunks.append((start, stop, names))
+            pt.save(
+                {
+                    "chunks": chunks,
+                    "start": self._local_spatial_slice.start,
+                    "stop": self._local_spatial_slice.stop,
+                    "memory_budget_bytes": self._memory_budget_bytes,
+                },
+                shard / "index.pt",
+            )
+        except Exception as exc:
+            error = str(exc)
+        if self._execution is not None:
+            errors = [None] * world_size
+            dist.all_gather_object(errors, error, group=group)
+            error = next((item for item in errors if item is not None), None)
+        if error is not None:
+            raise RuntimeError(f"checkpoint shard write failed: {error}")
+        if process_rank == 0:
+            checkpoint.update(
+                layout=self._layout_metadata(self._source),
+                maximum_rank=self._maximum_rank,
+                prefetch_chunks=self._prefetch_chunks,
+                external_weight=self._external_weight,
+                spatial_batch_size=self._spatial_batch_size,
+                world_size=world_size,
+            )
+            try:
+                # Metadata is written last and marks a complete checkpoint.
+                pt.save(checkpoint, destination / "metadata.pt")
+            except Exception as exc:
+                error = str(exc)
+        if self._execution is not None:
+            errors = [None] * world_size
+            dist.all_gather_object(errors, error, group=group)
+            error = next((item for item in errors if item is not None), None)
+        if error is not None:
+            raise RuntimeError(f"checkpoint metadata write failed: {error}")
 
     @classmethod
     def load(
@@ -1399,33 +2100,27 @@ class SVD(object):
         execution: Optional[DistributedExecution] = None,
         map_location: Any = "cpu",
         spatial_batch_size: Optional[int] = None,
-        snapshot_batch_size: Optional[int] = None,
+        prefetch_chunks: Optional[bool] = None,
+        basis_storage: str = "disk",
+        basis_directory: Optional[Union[str, PathLike[str]]] = None,
     ) -> "SVD":
-        """Restore an SVD without recomputing its factors.
+        """Restore self-contained factors without accessing original snapshots.
 
-        ``source`` is required for a source-backed checkpoint and must have the
-        same fields, component shapes, normalization factors, spatial shape,
-        and snapshot count.  Use ``map_location`` to place compact factors on
-        the device from which the source returns chunks.  The batch-size
-        arguments optionally override their saved values.
-
-        Loading does not read physical snapshots::
-
-            source = DataloaderStateVectorSource(
-                loader,
-                fields,
-                normalization=saved_normalization,
-            )
-            svd = SVD.load("svd.pt", source=source)
+        Source-backed directory checkpoints restore using the same rank count.
+        ``source`` is optional and, when supplied, only validates the layout.
+        ``basis_storage`` selects memory or owned temporary disk storage.
         """
+        checkpoint_path = Path(path)
+        if checkpoint_path.is_dir():
+            checkpoint_path = checkpoint_path / "metadata.pt"
         try:
             checkpoint = pt.load(
-                path,
+                checkpoint_path,
                 map_location=map_location,
                 weights_only=True,
             )
         except TypeError:  # PyTorch versions before ``weights_only``
-            checkpoint = pt.load(path, map_location=map_location)
+            checkpoint = pt.load(checkpoint_path, map_location=map_location)
         if not isinstance(checkpoint, dict):
             raise ValueError("invalid SVD checkpoint")
         if checkpoint.get("format") != "flowtorch.svd":
@@ -1459,25 +2154,24 @@ class SVD(object):
             instance._sqrt_weight = checkpoint["sqrt_weight"]
             instance._mean = checkpoint["mean"]
             return instance
-        if source is None:
-            raise ValueError("source-backed checkpoints require a source")
-        saved_layout = checkpoint.get("layout")
-        if not isinstance(saved_layout, dict):
-            raise ValueError("source-backed checkpoint has invalid layout metadata")
-        saved_normalization = saved_layout.get("normalization_factors")
-        if not isinstance(saved_normalization, dict):
-            raise ValueError(
-                "source-backed checkpoint has invalid normalization metadata"
-            )
-        source.restore_normalization(saved_normalization)
-        if cls._layout_metadata(source) != saved_layout:
-            raise ValueError(
-                "source layout, component metadata, or normalization is incompatible"
-            )
-        if source.n_snapshots != instance._cols:
-            raise ValueError(
-                f"source has {source.n_snapshots} snapshots; expected {instance._cols}"
-            )
+        saved_layout = checkpoint["layout"]
+        layout = StateVectorLayout(
+            tuple(
+                FieldSpec(
+                    field["name"],
+                    tuple(field["component_shape"]),
+                    field["component_names"],
+                )
+                for field in saved_layout["fields"]
+            ),
+            saved_layout["spatial_shape"],
+            saved_layout["normalization_factors"],
+        )
+        if source is not None:
+            source.restore_normalization(layout.normalization_factors)
+            if cls._layout_metadata(source) != saved_layout:
+                raise ValueError("source layout is incompatible with checkpoint")
+        source = _FactorSource(layout, instance._cols)
         if execution is not None:
             if not isinstance(execution, DistributedExecution):
                 raise ValueError("execution must be a DistributedExecution instance")
@@ -1498,9 +2192,20 @@ class SVD(object):
             )
         instance._source = source
         instance._execution = execution
-        instance._source_weight = checkpoint["source_weight"]
-        if instance._source_weight is not None:
-            instance._source_weight = instance._source_weight.cpu()
+        instance._source_weight = None
+        instance._maximum_rank = checkpoint["maximum_rank"]
+        if prefetch_chunks is not None and not isinstance(prefetch_chunks, bool):
+            raise ValueError("prefetch_chunks must be a boolean")
+        instance._prefetch_chunks = (
+            checkpoint.get("prefetch_chunks", False)
+            if prefetch_chunks is None
+            else prefetch_chunks
+        )
+        instance._memory_budget_bytes = None
+        instance._external_weight = checkpoint["external_weight"]
+        if world_size != checkpoint["world_size"]:
+            raise ValueError("checkpoint requires the original number of ranks")
+        instance._basis = _BasisStore(layout, basis_storage, basis_directory)
         instance._weight = None
         instance._sqrt_weight = None
         instance._spatial_batch_size = cls._validate_batch_size(
@@ -1508,15 +2213,21 @@ class SVD(object):
             int(checkpoint["spatial_batch_size"]),
             "spatial_batch_size",
         )
-        instance._snapshot_batch_size = cls._validate_batch_size(
-            snapshot_batch_size,
-            int(checkpoint["snapshot_batch_size"]),
-            "snapshot_batch_size",
-        )
         start, stop = _partition_spatial_axis(
             source.spatial_shape[0], process_rank, world_size
         )
         instance._local_spatial_slice = slice(start, stop)
+        shard = Path(path) / f"rank-{process_rank}"
+        index = pt.load(shard / "index.pt", weights_only=True)
+        instance._memory_budget_bytes = index.get("memory_budget_bytes")
+        if (index["start"], index["stop"]) != (start, stop):
+            raise ValueError("checkpoint spatial partition is incompatible")
+        for left, right, names in index["chunks"]:
+            files = {
+                name: None if filename is None else shard / filename
+                for name, filename in names.items()
+            }
+            instance._basis.restore_chunk(slice(left, right), files, instance.V.device)
         instance._mean = instance._mean_result() if instance._subtract_mean else None
         return instance
 

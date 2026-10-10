@@ -1070,7 +1070,7 @@ class PAMSPOD(AMSPOD):
             dt=0.001,
             rank=40,
             spatial_batch_size=100_000,
-            snapshot_batch_size=16,
+
             execution=execution,
         )
         for spatial_slice, fields in spod.get_mode(5).iter_chunks(split=True):
@@ -1092,8 +1092,8 @@ class PAMSPOD(AMSPOD):
         verbose: bool = False,
         rank: Union[int, None] = None,
         spatial_batch_size: Optional[int] = None,
-        snapshot_batch_size: Optional[int] = None,
         execution: Optional[DistributedExecution] = None,
+        prefetch_chunks: bool = False,
     ):
         """Perform POD-projection and compute AMSPOD.
 
@@ -1143,8 +1143,8 @@ class PAMSPOD(AMSPOD):
             rank,
             weight=weight,
             subtract_mean=subtract_mean,
+            prefetch_chunks=prefetch_chunks,
             spatial_batch_size=spatial_batch_size,
-            snapshot_batch_size=snapshot_batch_size,
             execution=execution,
         )
         self._initialize_from_svd(
