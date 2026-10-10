@@ -68,7 +68,11 @@ def test_volume_parts(exports, variant, encoding, part, measure):
     for field, snapshot in zip(fields, [p, velocity, symm, tensor]):
         pt.testing.assert_close(field[..., 0], snapshot)
     assert loader.snapshot_shape("S", first) == (len(p), 6)
-    assert loader.load_snapshot_slice("p", first, slice(2, 5)).shape == (3,)
+    if encoding == "binary":
+        assert loader.load_snapshot_slice("p", first, slice(2, 5)).shape == (3,)
+    else:
+        with pytest.raises(ValueError, match="C-binary"):
+            loader.load_snapshot_slice("p", first, slice(2, 5))
     # Caller-owned snapshots survive subsequent reader updates.
     original = p.clone()
     loader.load_snapshot("p", last)
@@ -360,3 +364,207 @@ def test_vtk_read_errors_are_raised(mutable_case):
     )
     with pytest.raises(ValueError, match="VTK could not read EnSight data"):
         EnSightDataloader(mutable_case, part="internalMesh")
+
+
+@pytest.mark.parametrize("variant", ["", "dual", "parallel"])
+@pytest.mark.parametrize(
+    "source,part,association",
+    [
+        ("volume", "internalMesh", "cell"),
+        ("volume", "fixedWalls", "cell"),
+        ("nodes", "internalMesh", "point"),
+        ("oblique", None, "cell"),
+    ],
+)
+def test_native_slices_match_vtk(exports, variant, source, part, association):
+    """Compare both slice backends, including mixed-block boundary crossings."""
+    if source == "oblique":
+        path = exports / variant / "postProcessing/cuts_binary/oblique/oblique.case"
+    else:
+        path = case_path(exports, source, "binary", variant)
+    native = EnSightDataloader(
+        path,
+        part=part,
+        association=association,
+        dtype=pt.float64,
+        slice_backend="native",
+    )
+    vtk = EnSightDataloader(
+        path, part=part, association=association, dtype=pt.float64, slice_backend="vtk"
+    )
+    grid = native._selected_grid()
+    assert grid.GetCellData().GetNumberOfArrays() == 0
+    assert grid.GetPointData().GetNumberOfArrays() == 0
+    fields = ["p", "U", "S", "T"]
+    times = [native.write_times[-1], native.write_times[0], native.write_times[-1]]
+    count = native.snapshot_shape("p", times[0])[0]
+    types = native._cell_types(native.mesh)
+    boundaries = np.flatnonzero(types[1:] != types[:-1]) + 1
+    slices = [
+        slice(2, 5),
+        slice(-7, None),
+        slice(None),
+        slice(5, 2),
+        slice(count, count + 2),
+    ]
+    if association == "cell":
+        slices += [slice(max(0, int(b) - 2), int(b) + 3) for b in boundaries]
+    for spatial_slice in slices:
+        actual = native.load_snapshot_slice(fields, times, spatial_slice)
+        expected = vtk.load_snapshot_slice(fields, times, spatial_slice)
+        for a, b in zip(actual, expected):
+            pt.testing.assert_close(a, b)
+    pt.testing.assert_close(
+        native.load_snapshot_slice("U", times[0], slice(2, 5)),
+        vtk.load_snapshot_slice("U", times[0], slice(2, 5)),
+    )
+    assert native.field_names == vtk.field_names
+    pt.testing.assert_close(native.vertices, vtk.vertices)
+    pt.testing.assert_close(native.weights, vtk.weights)
+    # Full snapshots still use VTK; later native slices remain valid.
+    pt.testing.assert_close(
+        native.load_snapshot("p", times[0]), vtk.load_snapshot("p", times[0])
+    )
+    pt.testing.assert_close(
+        native.load_snapshot_slice("p", times[0], slice(2, 5)),
+        vtk.load_snapshot_slice("p", times[0], slice(2, 5)),
+    )
+
+
+def test_native_slice_reads_only_requested_payload(exports, monkeypatch):
+    from flowtorch.data._ensight_slice import _Binary
+
+    loader = EnSightDataloader(case_path(exports), part="internalMesh")
+    time = loader.write_times[0]
+    path = loader._field_path("U", time)
+    loader._native_slice_reader().index(path, 3, "cell")
+    reads = []
+    original = _Binary.read
+
+    def record_read(reader, size):
+        if reader.path == path:
+            reads.append(size)
+        return original(reader, size)
+
+    def forbid_vtk(*args, **kwargs):
+        pytest.fail("Native slice or metadata access invoked VTK field loading")
+
+    monkeypatch.setattr(_Binary, "read", record_read)
+    monkeypatch.setattr(loader, "_read", forbid_vtk)
+    values = loader.load_snapshot_slice("U", time, slice(10, 17))
+    assert values.shape == (7, 3)
+    assert sum(reads) == 7 * 3 * 4
+    loader.field_names
+    loader.snapshot_shape("U", time)
+    loader.weights
+    loader.vertices
+
+
+def test_native_nonconsecutive_part_ids(exports, tmp_path):
+    import struct
+
+    source = exports / "postProcessing/volume_binary"
+    copied = tmp_path / "volume"
+    shutil.copytree(source, copied)
+    record = b"part".ljust(80, b"\x00")
+    for path in copied.rglob("*"):
+        if path.is_file() and path.suffix != ".case":
+            data = path.read_bytes()
+            for old, new in [(1, 17), (2, 92), (3, 203)]:
+                data = data.replace(
+                    record + struct.pack("<i", old), record + struct.pack("<i", new)
+                )
+            path.write_bytes(data)
+    path = copied / "ensight_cavity.case"
+    native = EnSightDataloader(path, part="fixedWalls", slice_backend="native")
+    vtk = EnSightDataloader(path, part="fixedWalls", slice_backend="vtk")
+    time = native.write_times[0]
+    pt.testing.assert_close(
+        native.load_snapshot_slice("p", time, slice(2, 8)),
+        vtk.load_snapshot_slice("p", time, slice(2, 8)),
+    )
+
+
+def test_native_slice_errors(exports, tmp_path):
+    with pytest.raises(ValueError, match="slice_backend"):
+        EnSightDataloader(
+            case_path(exports), part="internalMesh", slice_backend="other"
+        )
+    with pytest.raises(ValueError, match="C-binary"):
+        ascii_loader = EnSightDataloader(
+            case_path(exports, encoding="ascii"), part="internalMesh"
+        )
+        ascii_loader.load_snapshot_slice("p", ascii_loader.write_times[0], slice(2, 5))
+    copied = tmp_path / "volume"
+    shutil.copytree(exports / "postProcessing/volume_binary", copied)
+    loader = EnSightDataloader(
+        copied / "ensight_cavity.case", part="internalMesh", slice_backend="native"
+    )
+    time = loader.write_times[0]
+    with pytest.raises(ValueError, match="unit stride"):
+        loader.load_snapshot_slice("p", time, slice(None, None, 2))
+    with pytest.raises(ValueError, match="Unknown time"):
+        loader.load_snapshot_slice("p", "missing", slice(2, 5))
+    path = loader._field_path("p", time)
+    loader.load_snapshot_slice("p", time, slice(2, 5))  # Populate cache.
+    data = path.read_bytes()
+    path.write_bytes(data[:-4])
+    with pytest.raises(ValueError, match="beyond file"):
+        loader.load_snapshot_slice("p", time, slice(2, 5))
+    path.write_bytes(
+        data.replace(b"hexa8".ljust(80, b"\x00"), b"hexa8 partial".ljust(80, b"\x00"))
+    )
+    with pytest.raises(ValueError, match='slice_backend="vtk"'):
+        loader.load_snapshot_slice("p", time, slice(2, 5))
+
+
+@pytest.mark.parametrize("endian", ["<", ">"])
+@pytest.mark.parametrize("association", ["cell", "point"])
+def test_native_binary_byte_order(tmp_path, endian, association):
+    """Synthetic binary data exercises both endian orders and nonconstant tensors."""
+    record = lambda text: text.encode("ascii").ljust(80, b"\x00")
+    ints = lambda values: np.asarray(values, dtype=endian + "i4").tobytes()
+    floats = lambda values: np.asarray(values, dtype=endian + "f4").tobytes()
+    points = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]])
+    geometry = b"".join(
+        record(s)
+        for s in [
+            "C Binary",
+            "test",
+            "test",
+            "node id ignore",
+            "element id ignore",
+            "part",
+        ]
+    )
+    geometry += ints([37]) + record("tetra") + record("coordinates") + ints([4])
+    geometry += ints([11, 12, 13, 14]) + floats(points.T)
+    geometry += record("tetra4") + ints([1, 88, 1, 2, 3, 4])
+    (tmp_path / "geometry").write_bytes(geometry)
+    count = 1 if association == "cell" else 4
+    section = "tetra4" if association == "cell" else "coordinates"
+    location = "element" if association == "cell" else "node"
+    declarations = []
+    for name, kind, components in [
+        ("p", "scalar", 1),
+        ("U", "vector", 3),
+        ("S", "tensor symm", 6),
+        ("T", "tensor asym", 9),
+    ]:
+        values = np.arange(count * components).reshape(count, components) + 0.125
+        data = record(name) + record("part") + ints([37]) + record(section)
+        (tmp_path / name).write_bytes(data + floats(values.T))
+        declarations.append(f"{kind} per {location}: {name} {name}")
+    case = tmp_path / "test.case"
+    case.write_text(
+        "FORMAT\ntype: ensight gold\nGEOMETRY\nmodel: geometry\nVARIABLE\n"
+        + "\n".join(declarations)
+        + "\n"
+    )
+    native = EnSightDataloader(case, association=association, slice_backend="native")
+    vtk = EnSightDataloader(case, association=association, slice_backend="vtk")
+    for name in ["p", "U", "S", "T"]:
+        pt.testing.assert_close(
+            native.load_snapshot_slice(name, "0", slice(0, 2)),
+            vtk.load_snapshot_slice(name, "0", slice(0, 2)),
+        )

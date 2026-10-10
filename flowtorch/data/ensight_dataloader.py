@@ -13,6 +13,7 @@ from vtkmodules.vtkIOEnSight import vtkGenericEnSightReader
 from vtkmodules.util.numpy_support import vtk_to_numpy
 
 from flowtorch import DEFAULT_DTYPE
+from ._ensight_slice import COMPONENTS, EnSightSliceReader
 from .dataloader import Dataloader
 from .utils import check_list_or_str
 
@@ -56,6 +57,8 @@ class EnSightDataloader(Dataloader):
     :param part: named part; required if the descriptor contains multiple parts
     :param association: ``"cell"`` (default) or ``"point"``
     :param dtype: floating-point torch dtype for returned tensors
+    :param slice_backend: ``"native"`` (default) or ``"vtk"`` for direct dense
+        C-binary field slices; full snapshots and geometry always use VTK
     """
 
     def __init__(
@@ -64,6 +67,7 @@ class EnSightDataloader(Dataloader):
         part: Optional[str] = None,
         association: str = "cell",
         dtype: pt.dtype = DEFAULT_DTYPE,
+        slice_backend: str = "native",
     ):
         self._case_file = Path(case_file).expanduser().resolve()
         if not self._case_file.is_file():
@@ -77,11 +81,15 @@ class EnSightDataloader(Dataloader):
             or not pt.empty((), dtype=dtype).is_floating_point()
         ):
             raise ValueError("dtype must be a floating-point torch dtype")
+        if slice_backend not in ("vtk", "native"):
+            raise ValueError("slice_backend must be 'vtk' or 'native'")
+        self._slice_backend = slice_backend
+        self._slice_reader: Optional[EnSightSliceReader] = None
         self._association = association
         self._dtype = dtype
         self._vertices = None
         self._weights = None
-        self._field_names = None
+        self._field_names: Optional[Dict[str, List[str]]] = None
         self._parse_case()
         self._reader = vtkGenericEnSightReader()
         self._reader.SetCaseFileName(str(self._case_file))
@@ -133,16 +141,117 @@ class EnSightDataloader(Dataloader):
                 "The selected part must contain only 2D or only 3D elements"
             )
         self._dimension = dimensions.pop()
+        if slice_backend == "native" and self._geometry_is_binary:
+            count = (
+                grid.GetNumberOfCells()
+                if association == "cell"
+                else grid.GetNumberOfPoints()
+            )
+            self._field_shapes = {
+                name: (count,) if COMPONENTS[kind] == 1 else (count, COMPONENTS[kind])
+                for (assoc, name), (kind, _) in self._variables.items()
+                if assoc == association
+            }
+        else:
+            self._enable_fields()
+            self._read(self._write_times[0])
+            attributes = self._attributes()
+            self._field_shapes = {
+                name: tuple(self._array(name).shape)
+                for assoc, name in self._variables
+                if assoc == association and attributes.GetArray(name) is not None
+            }
+
+    def _native_slice_reader(self) -> EnSightSliceReader:
+        if self._slice_reader is None:
+            # VTK exposes topology but not original part IDs/block offsets.
+            reader = EnSightSliceReader(
+                self._geometry_file, self._reader.GetReader().GetByteOrderAsString()
+            )
+            output = self._reader.GetOutput()
+            grids = {
+                output.GetMetaData(i).Get(vtkCompositeDataSet.NAME()): output.GetBlock(
+                    i
+                )
+                for i in range(output.GetNumberOfBlocks())
+                if output.GetBlock(i) is not None
+            }
+            reader.validate(grids, self._cell_types)
+            self._slice_reader = reader
+        return self._slice_reader
+
+    def _enable_fields(self):
         self._reader.ReadAllVariablesOn()
         self._reader.GetCellDataArraySelection().EnableAllArrays()
         self._reader.GetPointDataArraySelection().EnableAllArrays()
-        self._read(self._write_times[0])
-        attributes = self._attributes()
-        self._field_shapes = {
-            name: tuple(self._array(name).shape)
-            for assoc, name in self._variables
-            if assoc == association and attributes.GetArray(name) is not None
-        }
+
+    def _field_path(self, field, time):
+        if time not in self._numbers:
+            raise ValueError(
+                f"Unknown time {time!r}; available times: {self._write_times}"
+            )
+        if (self._association, field) not in self._variables:
+            raise ValueError(f"Unknown {self._association} field {field!r}")
+        _, pattern = self._variables[self._association, field]
+        filename = re.sub(
+            r"\*+", lambda m: str(self._numbers[time]).zfill(len(m[0])), pattern
+        )
+        path = self._case_file.parent / filename
+        if not path.is_file():
+            raise FileNotFoundError(
+                f"Missing EnSight field file at time {time!r}: {path}"
+            )
+        return path
+
+    def load_snapshot_slice(
+        self,
+        field_name: Union[List[str], str],
+        time: Union[List[str], str],
+        spatial_slice: slice,
+    ) -> Union[List[pt.Tensor], pt.Tensor]:
+        """Read a spatial slice, using direct C-binary reads by default.
+
+        Native reads support unit stride and never invoke VTK field loading.
+        Unsupported binary sections raise; select ``slice_backend="vtk"`` to
+        use the full-read fallback. Geometry remains resident in VTK.
+        """
+        if self._slice_backend == "vtk":
+            return super().load_snapshot_slice(field_name, time, spatial_slice)
+        check_list_or_str(field_name, "field_name")
+        check_list_or_str(time, "time")
+        if not isinstance(spatial_slice, slice):
+            raise ValueError("spatial_slice must be a slice with unit stride")
+        fields = field_name if isinstance(field_name, list) else [field_name]
+        times = time if isinstance(time, list) else [time]
+        outputs = []
+        for field in fields:
+            count = self.snapshot_shape(field, times[0])[0]
+            start, stop, step = spatial_slice.indices(count)
+            if step != 1:
+                raise ValueError("spatial_slice must have unit stride")
+            stop = max(start, stop)
+            kind = self._variables[self._association, field][0]
+            output = None
+            for index, t in enumerate(times):
+                snapshot = pt.tensor(
+                    self._native_slice_reader().read(
+                        self._field_path(field, t),
+                        self._part,
+                        kind,
+                        self._association,
+                        start,
+                        stop,
+                    ),
+                    dtype=self._dtype,
+                )
+                if isinstance(time, list):
+                    if output is None:
+                        output = snapshot.new_empty((*snapshot.shape, len(times)))
+                    output[..., index].copy_(snapshot)
+                else:
+                    output = snapshot
+            outputs.append(output)
+        return outputs if isinstance(field_name, list) else outputs[0]
 
     def _parse_case(self):
         raw_sections: Dict[str, List[List[str]]] = {}
@@ -245,7 +354,8 @@ class EnSightDataloader(Dataloader):
     def _validate_geometry_header(self):
         with self._geometry_file.open("rb") as stream:
             first = stream.read(80)
-            if first.rstrip(b"\x00 ").lower() == b"c binary":
+            self._geometry_is_binary = first.rstrip(b"\x00 ").lower() == b"c binary"
+            if self._geometry_is_binary:
                 header = [stream.read(80).rstrip(b"\x00 ") for _ in range(4)]
             else:
                 stream.seek(0)
@@ -359,6 +469,7 @@ class EnSightDataloader(Dataloader):
                 raise ValueError(
                     f"Unknown time {t!r}; available times: {self._write_times}"
                 )
+        self._enable_fields()
         outputs = None
         for index, t in enumerate(times):
             self._read(t)
@@ -389,6 +500,15 @@ class EnSightDataloader(Dataloader):
             )
         if field_name not in self._field_shapes:
             raise ValueError(f"Unknown {self._association} field {field_name!r}")
+        if self._slice_backend == "native" and self._geometry_is_binary:
+            kind = self._variables[self._association, field_name][0]
+            index = self._native_slice_reader().index(
+                self._field_path(field_name, time), COMPONENTS[kind], self._association
+            )
+            if self._part not in index:
+                raise ValueError(
+                    f"Field {field_name!r} is absent from part {self._part!r}"
+                )
         return self._field_shapes[field_name]
 
     @property
@@ -432,6 +552,19 @@ class EnSightDataloader(Dataloader):
         if self._field_names is None:
             self._field_names = {}
             for time in self._write_times:
+                if self._slice_backend == "native" and self._geometry_is_binary:
+                    names = []
+                    for (assoc, name), (kind, _) in self._variables.items():
+                        if (
+                            assoc == self._association
+                            and self._part
+                            in self._native_slice_reader().index(
+                                self._field_path(name, time), COMPONENTS[kind], assoc
+                            )
+                        ):
+                            names.append(name)
+                    self._field_names[time] = names
+                    continue
                 self._read(time)
                 attributes = self._attributes()
                 self._field_names[time] = [

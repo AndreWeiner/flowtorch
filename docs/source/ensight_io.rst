@@ -6,6 +6,43 @@ meshes, patches and sampled surfaces. Both ASCII and C-binary files are supporte
 including arbitrary polygons (nsided) and polyhedra (nfaced). VTK is an optional
 runtime dependency, installed with ``pip install 'flowtorch-fluid[data]'``.
 
+Loading field chunks
+--------------------
+
+Dense C-binary field slices use the native reader by default::
+
+    loader = EnSightDataloader(
+        "input.case", part="internalMesh", slice_backend="native"
+    )
+    velocity_chunk = loader.load_snapshot_slice(
+        "U", loader.write_times[0], slice(1000, 2000)
+    )
+
+``slice_backend="native"`` is the default. Select ``"vtk"`` to read full
+snapshots before slicing. For C-binary cases, construction loads geometry through
+VTK without loading
+field arrays. Slice requests read only the intersecting field component ranges;
+``snapshot_shape`` and ``field_names`` do not load field payloads. Multiple fields
+and times retain the usual return shapes. Slices must have unit stride.
+
+Full ``load_snapshot`` requests always use VTK, even with native slices enabled.
+Geometry, vertices, weights and mesh export also retain the existing VTK path.
+Geometry stays resident; field memory scales with the requested slice, component
+count, number of requested times and output dtype, with temporary chunk buffers.
+
+Native slices support dense nodal and cell scalar, vector and tensor fields on
+static unstructured C-binary geometry, including mixed linear elements, polygons
+and polyhedra. The original part IDs and block counts are indexed without reading
+coordinates or field payloads and checked against VTK topology. Field indexes are
+cached in a bounded cache and refreshed when file size or modification time changes.
+Files must remain unchanged during a read.
+
+ASCII, Fortran binary, ghost elements, higher-order elements, repeated element
+blocks, and partial/undefined fields are unsupported by native slices. Unsupported
+sections raise an exception when native slices are requested; full snapshots
+continue to use VTK. Explicitly select ``slice_backend="vtk"`` to use the
+existing reader. There is no automatic fallback to full-field materialization.
+
 Selecting and copying a mesh
 ----------------------------
 
