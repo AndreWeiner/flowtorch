@@ -1,6 +1,8 @@
 """Plots for modal-decomposition eigenvalue spectra."""
 
 # standard library packages
+from flowtorch.provenance import tracked
+
 from collections.abc import Sequence
 from math import isfinite
 from typing import Any, Dict, Tuple
@@ -13,6 +15,7 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
 
+@tracked
 def plot_spod_spectrum(
     frequency: pt.Tensor,
     eigenvalues: pt.Tensor,
@@ -183,6 +186,7 @@ def plot_spod_spectrum(
     return figure, axes
 
 
+@tracked
 def plot_spod_spectra(
     frequencies: Sequence[pt.Tensor],
     eigenvalues: Sequence[pt.Tensor],

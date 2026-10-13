@@ -8,6 +8,8 @@ from typing import Any, Optional, Union
 
 import torch as pt
 
+from flowtorch.provenance import ProvenanceMixin
+
 from flowtorch.analysis.state_vector import StateVectorResult, StateVectorSource
 
 StateData = Union[pt.Tensor, StateVectorSource]
@@ -121,10 +123,41 @@ class Regressor(pt.nn.Module, ABC):
     ) -> pt.Tensor: ...
 
 
-class ROM(pt.nn.Module, ABC):
+class ROM(ProvenanceMixin, pt.nn.Module, ABC):
     """Base class for compositional reduced-order models."""
 
     input_spec = InputSpec()
+
+    def _effective_settings(self):
+        names = (
+            "requested_rank",
+            "stationary",
+            "stationary_initialization",
+            "subtract_mean",
+            "svd_options",
+            "dt",
+            "_time_scale_factor",
+            "noise_config",
+            "_provenance_training",
+        )
+        values = {
+            name.lstrip("_"): vars(self)[name] for name in names if name in vars(self)
+        }
+        if vars(self).get("svd") is not None:
+            values["svd"] = self.svd
+        for name in ("embedding", "dynamics", "interpolator"):
+            module = vars(self).get("_modules", {}).get(name)
+            if module is not None:
+                values[name] = {
+                    "type": type(module).__module__ + "." + type(module).__qualname__,
+                    "options": {
+                        key: value
+                        for key, value in vars(module).items()
+                        if not key.startswith("_") and key != "training"
+                    },
+                    "configuration_recorded": False,
+                }
+        return values
 
     @abstractmethod
     def forward(

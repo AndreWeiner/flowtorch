@@ -1,6 +1,7 @@
 """Classes and functions wrapping around *torch.linalg.svd*."""
 
 # standard library packages
+
 import logging
 from contextlib import closing
 from math import isfinite, sqrt, prod
@@ -18,6 +19,8 @@ import torch as pt
 import torch.distributed as dist
 
 # flowtorch packages
+from flowtorch.provenance import ProvenanceMixin, tracked
+
 from flowtorch.utils import format_byte_size
 from .state_vector import (
     FieldSpec,
@@ -648,7 +651,7 @@ def pod_subspace_data_dependency(
     )
 
 
-class SVD(object):
+class SVD(ProvenanceMixin):
     """Compute and analyze the SVD of a data matrix.
 
     Examples
@@ -690,6 +693,37 @@ class SVD(object):
             consume(fields["U"], fields["p"])
     """
 
+    def _effective_settings(self):
+        names = (
+            "_rank",
+            "_opt_rank",
+            "_mode",
+            "_subtract_mean",
+            "_maximum_rank",
+            "_spatial_batch_size",
+            "_memory_budget_bytes",
+            "_prefetch_chunks",
+            "_rows",
+            "_cols",
+        )
+        values = {
+            name.lstrip("_"): vars(self)[name] for name in names if name in vars(self)
+        }
+        if "_basis" in vars(self):
+            values["basis_storage"] = self._basis.mode
+        if self._source is not None:
+            values["source"] = self._source
+        values["singular_values"] = self._s
+        execution = vars(self).get("_execution")
+        if execution is not None:
+            values["distributed"] = {
+                "rank": dist.get_rank(execution.process_group),
+                "world_size": dist.get_world_size(execution.process_group),
+                "backend": dist.get_backend(execution.process_group),
+            }
+        return values
+
+    @tracked
     def __init__(
         self,
         data_matrix: Union[pt.Tensor, StateVectorSource],
@@ -1793,6 +1827,7 @@ class SVD(object):
             )
         return min(self._spatial_batch_size, capacity)
 
+    @tracked
     def update(self, new_source: StateVectorSource) -> "SVD":
         """Append snapshots using stored local modes, including mean corrections.
 
@@ -1995,6 +2030,7 @@ class SVD(object):
         Existing checkpoint directories are never overwritten.
         """
         checkpoint = {
+            "provenance": self.provenance,
             "format": "flowtorch.svd",
             "version": SVD_CHECKPOINT_VERSION,
             "kind": "source" if self._source is not None else "tensor",
@@ -2133,6 +2169,9 @@ class SVD(object):
         if kind not in ("tensor", "source"):
             raise ValueError("invalid SVD checkpoint kind")
         instance = cls.__new__(cls)
+        instance._provenance_records = checkpoint.get("provenance", {}).get(
+            "records", []
+        )
         instance._rows = int(checkpoint["rows"])
         instance._cols = int(checkpoint["cols"])
         instance._rank = int(checkpoint["rank"])

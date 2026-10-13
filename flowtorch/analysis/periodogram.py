@@ -8,12 +8,13 @@ from math import sqrt, log10
 
 # third-party packages
 import torch as pt
+from flowtorch.provenance import ProvenanceMixin, tracked
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 
-class AMPS(object):
+class AMPS(ProvenanceMixin):
     """Adaptive multi-taper power spectrum estimation.
 
     This class is a version of `AMSPOD` (adaptive multi-taper spectral POD)
@@ -32,6 +33,19 @@ class AMPS(object):
 
     """
 
+    def _effective_settings(self) -> dict:
+        return {
+            "dt": self._dt,
+            "nfft": self._nfft,
+            "n_samples": self._nt,
+            "adaptive": self._adaptive,
+            "max_tapers": self._max_tapers,
+            "tolerance": self._tol,
+            "subtract_mean": self._subtract_mean,
+            "signal": self._signal,
+        }
+
+    @tracked
     def __init__(
         self,
         signal: pt.Tensor,

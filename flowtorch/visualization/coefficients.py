@@ -1,6 +1,8 @@
 """Plots for SPOD temporal coefficients."""
 
 # standard library packages
+from flowtorch.provenance import tracked
+
 from math import isfinite
 from typing import Any, Dict, Tuple
 
@@ -12,6 +14,7 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
 
+@tracked
 def plot_spod_time_coefficients(
     time: pt.Tensor,
     frequency: pt.Tensor,

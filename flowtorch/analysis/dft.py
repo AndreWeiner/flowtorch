@@ -10,6 +10,8 @@ from typing import Any, Literal, Set
 
 import torch as pt
 
+from flowtorch.provenance import ProvenanceMixin, tracked
+
 from ..constants import FLOAT_TOLERANCE
 from .svd import SVD, _prepare_weight
 from .state_vector import StateVectorResult, StateVectorSource
@@ -26,7 +28,7 @@ WINDOWS = {
 }
 
 
-class DFT:
+class DFT(ProvenanceMixin):
     """Compute Fourier modes of a spatial-by-temporal tensor.
 
     Modes have unit norm in the supplied spatial inner product. Null modes
@@ -35,6 +37,26 @@ class DFT:
     window-induced DC internally for inverse-FFT reconstruction.
     """
 
+    def _effective_settings(self):
+        names = (
+            "_dt",
+            "_nfft",
+            "_device",
+            "_adaptive",
+            "_max_tapers",
+            "_tol",
+            "_n_keep",
+            "_subtract_mean",
+            "_wname",
+            "_nx",
+            "_nt",
+            "_svd",
+        )
+        return {
+            name.lstrip("_"): vars(self)[name] for name in names if name in vars(self)
+        }
+
+    @tracked
     def __init__(
         self,
         data_matrix: pt.Tensor,
@@ -331,6 +353,7 @@ class PDFT(DFT):
     and optionally distributed computation; physical results remain lazy.
     """
 
+    @tracked
     def __init__(
         self,
         data_matrix: pt.Tensor | StateVectorSource,
@@ -364,6 +387,7 @@ class PDFT(DFT):
         self._initialize_from_svd(svd, dt, nfft, window, device)
 
     @classmethod
+    @tracked
     def from_svd(
         cls,
         svd: SVD,

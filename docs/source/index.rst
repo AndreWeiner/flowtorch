@@ -10,6 +10,7 @@ the Python :term:`API`.
 
    overview/glossary
    snapshot_statistics
+   provenance
    ensight_io
    distributed_svd_spod
    dft_pdft

@@ -1,5 +1,7 @@
 """Comparative plots for two-dimensional scalar and vector fields."""
 
+from flowtorch.provenance import tracked
+
 from collections.abc import Sequence
 from math import isfinite, sqrt
 from typing import Any, Dict, Literal
@@ -12,6 +14,7 @@ from matplotlib.figure import Figure
 from flowtorch.visualization.lic import line_integral_convolution
 
 
+@tracked
 def plot_scalar_fields(
     fields: Sequence[pt.Tensor] | pt.Tensor,
     titles: Sequence[str],
@@ -186,6 +189,7 @@ def plot_scalar_fields(
     return figure, axes
 
 
+@tracked
 def plot_vector_fields(
     fields: Sequence[pt.Tensor] | pt.Tensor,
     titles: Sequence[str],

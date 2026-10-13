@@ -22,6 +22,8 @@ from typing import (
 import torch as pt
 import torch.distributed as dist
 
+from flowtorch.provenance import ProvenanceMixin, tracked
+
 if TYPE_CHECKING:
     from flowtorch.data.dataloader import Dataloader
 
@@ -207,8 +209,22 @@ class StateVectorLayout:
         return result
 
 
-class StateVectorSource(ABC):
+class StateVectorSource(ProvenanceMixin, ABC):
     """Random-access, spatially chunked source of flat state vectors."""
+
+    def _effective_settings(self):
+        names = ("_times", "_fields", "_device", "_loader", "_sources")
+        values = {
+            name.lstrip("_"): vars(self)[name] for name in names if name in vars(self)
+        }
+        layout = vars(self).get("_layout")
+        if layout is not None:
+            values["layout"] = {
+                "fields": layout.fields,
+                "spatial_shape": layout.spatial_shape,
+                "normalization": layout.normalization_factors,
+            }
+        return values
 
     @property
     @abstractmethod
@@ -327,6 +343,7 @@ class DataloaderStateVectorSource(StateVectorSource):
     the dataloader only when a decomposition or result chunk needs them.
     """
 
+    @tracked
     def __init__(
         self,
         loader: Dataloader,
@@ -573,6 +590,7 @@ class DataloaderStateVectorSource(StateVectorSource):
 class CompositeStateVectorSource(StateVectorSource):
     """Append-compatible view over consecutive state-vector sources."""
 
+    @tracked
     def __init__(self, sources: Sequence[StateVectorSource]) -> None:
         self._sources = tuple(sources)
         if not self._sources:

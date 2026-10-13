@@ -6,6 +6,8 @@ from typing import Any, Callable, Literal, NamedTuple, Optional, Sequence, Union
 
 import torch as pt
 
+from flowtorch.provenance import ProvenanceMixin, tracked
+
 SnapshotSource = Union[pt.Tensor, Callable[[int, int], pt.Tensor]]
 MOMENT_NAMES = ("mean", "variance", "skewness", "kurtosis")
 DEFAULT_QUANTILES = (0.05, 0.10, 0.25, 0.50, 0.75, 0.95)
@@ -222,7 +224,7 @@ def _move_snapshots_last(
     return pt.movedim(data, dim, -1)
 
 
-class RunningMoments:
+class RunningMoments(ProvenanceMixin):
     r"""Accumulate the first four moments from batches of snapshots.
 
     Batches are combined using stable parallel central-moment formulas. The
@@ -230,6 +232,15 @@ class RunningMoments:
     moments M2, M3, and M4.
     """
 
+    def _effective_settings(self) -> dict:
+        return {
+            "snapshot_dim": self._snapshot_dim,
+            "accumulator_dtype": self._accumulator_dtype,
+            "count": self._count,
+            "mean": self._mean,
+        }
+
+    @tracked
     def __init__(
         self,
         snapshot_dim: int = -1,
@@ -309,6 +320,7 @@ class RunningMoments:
         self._m3 = m3_combined
         self._m4 = m4_combined
 
+    @tracked
     def update(self, batch: pt.Tensor) -> None:
         """Merge a batch of snapshots into the running moments."""
         snapshots = _move_snapshots_last(batch, self._snapshot_dim)
@@ -332,6 +344,7 @@ class RunningMoments:
             centered.pow(4).sum(dim=-1),
         )
 
+    @tracked
     def merge(self, other: "RunningMoments") -> None:
         """Merge another compatible accumulator into this instance."""
         if other.count == 0:

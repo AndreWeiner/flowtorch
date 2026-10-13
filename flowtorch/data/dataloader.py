@@ -9,6 +9,8 @@ from abc import ABC, abstractmethod
 from typing import Callable, Dict, List, Sequence, Union
 from torch import Tensor
 
+from flowtorch.provenance import ProvenanceMixin, tracked
+
 
 def _preallocate_time_series(
     load_snapshot: Callable[[str], Tensor], times: Sequence[str]
@@ -37,8 +39,27 @@ def _preallocate_time_series(
     return series
 
 
-class Dataloader(ABC):
+class Dataloader(ProvenanceMixin, ABC):
     """Abstract base class to define a common interface for dataloaders."""
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        if "__init__" in cls.__dict__:
+            cls.__init__ = tracked(cls.__init__)
+
+    def _effective_settings(self):
+        names = (
+            "_association",
+            "_part",
+            "_zone",
+            "_cell_type",
+            "_slice_backend",
+            "_dtype",
+            "_case_file",
+        )
+        return {
+            name.lstrip("_"): vars(self)[name] for name in names if name in vars(self)
+        }
 
     @abstractmethod
     def load_snapshot(

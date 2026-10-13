@@ -13,6 +13,8 @@ NoiseInitialization = Union[str, Sequence[pt.Tensor]]
 SchedulerFactory = Callable[[pt.optim.Optimizer], object]
 ModelRegularizer = Callable[[object], pt.Tensor]
 
+from flowtorch.provenance import describe, tracked
+
 
 def _default_plateau_scheduler(
     optimizer: pt.optim.Optimizer,
@@ -499,6 +501,7 @@ class TrajectoryFineTuner:
             ),
         ]
 
+    @tracked
     def fine_tune(
         self,
         epochs: int = 150,
@@ -771,6 +774,13 @@ class TrajectoryFineTuner:
                 if loss_converged and noise_converged:
                     break
         self.load_state_dict(best_state)
+        self._provenance_training = {
+            "stages": describe(optimization_stages),
+            "epochs_run": len(log["train_loss"]),
+            "outcome": {
+                key: value for key, value in log.items() if not isinstance(value, list)
+            },
+        }
         self.training_log = log
         return log
 

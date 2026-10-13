@@ -1,6 +1,8 @@
 """Plots for mode similarity across frequency spectra."""
 
 # standard library packages
+from flowtorch.provenance import tracked
+
 from math import isfinite
 from typing import Any, Dict, Literal, Tuple
 
@@ -57,6 +59,7 @@ def _pod_dependency_rank_index(
     return selected_rank, int(matches[0].item())
 
 
+@tracked
 def plot_pod_subspace_data_dependency(
     result: PODSubspaceDependencyResult,
     rank: int | None = None,
@@ -142,6 +145,7 @@ def plot_pod_subspace_data_dependency(
     return figure, axes
 
 
+@tracked
 def plot_pod_subspace_data_dependency_ranks(
     result: PODSubspaceDependencyResult,
     sequence_fraction: float = 1.0,
@@ -209,6 +213,7 @@ def plot_pod_subspace_data_dependency_ranks(
     return figure, axes
 
 
+@tracked
 def plot_mode_similarity(
     first_frequency: pt.Tensor,
     second_frequency: pt.Tensor,

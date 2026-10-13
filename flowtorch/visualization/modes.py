@@ -1,6 +1,8 @@
 """Plots for image-like two-dimensional modal data."""
 
 # standard library packages
+from flowtorch.provenance import tracked
+
 from collections.abc import Sequence
 from math import isfinite, sqrt
 from typing import Any, Dict, Tuple
@@ -21,6 +23,7 @@ _TITLES = {
 }
 
 
+@tracked
 def plot_spod_mode_2d(
     mode: pt.Tensor,
     shape: tuple[int, int] | None = None,
@@ -204,6 +207,7 @@ def plot_spod_mode_2d(
     return figure, axes
 
 
+@tracked
 def plot_spod_modes_2d(
     modes: Sequence[pt.Tensor] | pt.Tensor,
     titles: Sequence[str],

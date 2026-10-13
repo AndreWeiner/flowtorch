@@ -1,6 +1,8 @@
 """Plots for adaptive multi-taper convergence residuals."""
 
 # standard library packages
+from flowtorch.provenance import tracked
+
 from collections.abc import Sequence
 from math import isfinite
 from typing import Any, Dict, Tuple
@@ -13,6 +15,7 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
 
+@tracked
 def plot_adaptive_residual(
     frequency: pt.Tensor,
     residual: pt.Tensor,
@@ -127,6 +130,7 @@ def plot_adaptive_residual(
     return figure, axes
 
 
+@tracked
 def plot_adaptive_residuals(
     frequencies: Sequence[pt.Tensor],
     residuals: Sequence[pt.Tensor],
