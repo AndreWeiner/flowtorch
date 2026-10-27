@@ -1,19 +1,22 @@
 """Command-line interface for interactive PSP mask creation.
 
+Use the ``flowtorch-mask-psp`` command (the legacy misspelling
+``flowtoch-mask-psp`` remains available).
+
 Examples
 
 Create a mask from the temporal standard deviation of all snapshots::
 
-    flowtoch-mask-psp 0226.hdf5
+    flowtorch-mask-psp 0226.hdf5
 
 Use the first 500 snapshots, adjust the color range, and select an output file::
 
-    flowtoch-mask-psp 0226.hdf5 --output 0226_mask.pt \
+    flowtorch-mask-psp 0226.hdf5 --output 0226_mask.pt \
         --n-snapshots 500 --statistic std --percentile 99
 
 Display the temporal maximum instead of the standard deviation::
 
-    flowtoch-mask-psp 0226.hdf5 --statistic max
+    flowtorch-mask-psp 0226.hdf5 --statistic max
 """
 
 # standard library packages
@@ -90,9 +93,9 @@ def main(arguments: Sequence[str] | None = None) -> None:
 
     .. code-block:: console
 
-        $ flowtoch-mask-psp 0226.hdf5
-        $ flowtoch-mask-psp 0226.hdf5 -o mask.pt -n 500
-        $ flowtoch-mask-psp 0226.hdf5 --statistic max --percentile 99
+        $ flowtorch-mask-psp 0226.hdf5
+        $ flowtorch-mask-psp 0226.hdf5 -o mask.pt -n 500
+        $ flowtorch-mask-psp 0226.hdf5 --statistic max --percentile 99
 
     :param arguments: arguments without the executable name; uses ``sys.argv``
         when omitted

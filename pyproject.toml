@@ -41,7 +41,8 @@ classifiers = [
 dependencies = ["matplotlib", "numpy", "scipy", "torch>=1.9"]
 
 [project.scripts]
-flowtoch-mask-psp = "flowtorch.data.psp_mask_cli:main"
+flowtorch-mask-psp = "flowtorch.data.psp_mask_cli:main"
+flowtoch-mask-psp = "flowtorch.data.psp_mask_cli:main"  # legacy misspelling
 
 [project.optional-dependencies]
 data = ["h5py", "netCDF4", "pandas", "Pillow", "vtk"]
