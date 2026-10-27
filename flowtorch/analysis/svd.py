@@ -6,7 +6,7 @@ import logging
 from contextlib import closing
 from math import isfinite, sqrt, prod
 from numbers import Integral, Real
-from os import PathLike, sysconf
+from os import PathLike
 from pathlib import Path
 from socket import gethostname
 from tempfile import TemporaryDirectory
@@ -187,7 +187,11 @@ def _available_memory_bytes(device: pt.device) -> int:
             if line.startswith("MemAvailable:")
         )
     except (OSError, StopIteration):
-        available = sysconf("SC_AVPHYS_PAGES") * sysconf("SC_PAGE_SIZE")
+        # Windows has no os.sysconf; macOS does not expose SC_AVPHYS_PAGES.
+        # psutil supplies available (rather than total) RAM on both platforms.
+        from psutil import virtual_memory
+
+        available = virtual_memory().available
     # Locate this process's cgroup rather than assuming the mount root.
     try:
         entry = next(

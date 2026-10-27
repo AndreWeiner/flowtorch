@@ -38,7 +38,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Mathematics",
     "Topic :: Scientific/Engineering :: Physics",
 ]
-dependencies = ["matplotlib", "numpy", "scipy", "torch>=1.9"]
+dependencies = ["matplotlib", "numpy", "psutil", "scipy", "torch>=1.9"]
 
 [project.scripts]
 flowtorch-mask-psp = "flowtorch.data.psp_mask_cli:main"

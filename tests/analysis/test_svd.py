@@ -52,8 +52,24 @@ def test_available_memory_respects_cgroup_limit(monkeypatch):
         "/sys/fs/cgroup/memory.max": "600",
         "/sys/fs/cgroup/memory.current": "100",
     }
-    monkeypatch.setattr(Path, "read_text", lambda path: contents[str(path)])
+    monkeypatch.setattr(Path, "read_text", lambda path: contents[path.as_posix()])
     assert _available_memory_bytes(pt.device("cpu")) == 500
+
+
+def test_available_memory_without_proc_files(monkeypatch):
+    from pathlib import Path
+    from types import SimpleNamespace
+    import psutil
+    from flowtorch.analysis.svd import _available_memory_bytes
+
+    def unavailable(path):
+        raise FileNotFoundError(path)
+
+    monkeypatch.setattr(Path, "read_text", unavailable)
+    monkeypatch.setattr(
+        psutil, "virtual_memory", lambda: SimpleNamespace(available=123456)
+    )
+    assert _available_memory_bytes(pt.device("cpu")) == 123456
 
 
 def test_available_cuda_memory_uses_device(monkeypatch):
@@ -600,9 +616,14 @@ class TestSVD:
         pt.testing.assert_close(svd.mean, original.mean(dim=1))
         centered = original - original.mean(dim=1, keepdim=True)
         pt.testing.assert_close(svd.reconstruct(), centered)
-        pt.testing.assert_close(
-            svd.s_full, pt.linalg.svdvals(centered * weight.sqrt().unsqueeze(-1))
-        )
+        reference = pt.linalg.svdvals(centered * weight.sqrt().unsqueeze(-1))
+        # Centering five snapshots leaves only four nonzero singular values.
+        # Gram EVD resolves eigenvalues to O(eps * ||X||**2), so its null
+        # singular value has an O(sqrt(eps) * ||X||) numerical floor.
+        pt.testing.assert_close(svd.s_full[:-1], reference[:-1])
+        null_tolerance = (data.shape[0] * pt.finfo(data.dtype).eps) ** 0.5
+        assert svd.s_full[-1] <= null_tolerance * reference[0]
+        assert reference[-1] <= null_tolerance * reference[0]
 
     @pytest.mark.parametrize(
         ("weight", "message"),
