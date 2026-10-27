@@ -6,6 +6,8 @@ from typing import Optional, Sequence, Union
 
 import torch as pt
 
+from flowtorch.provenance import ProvenanceMixin, tracked
+
 from .base import (
     ControlledTrajectory,
     InputSpec,
@@ -53,6 +55,7 @@ class DMDc(DMD):
 
     input_spec = InputSpec(initial_state=True, time=True, forcing=True)
 
+    @tracked
     def __init__(
         self,
         *args,
@@ -68,6 +71,7 @@ class DMDc(DMD):
         self.n_controls: Optional[int] = None
         self.n_control_features: Optional[int] = None
 
+    @tracked
     def fit(
         self,
         trajectories: Union[Trajectory, Sequence[Trajectory]],
@@ -85,6 +89,7 @@ class DMDc(DMD):
         coefficients = _split_columns(training_coefficients(self.svd), lengths)
         return self._fit_control_regressor(data, coefficients, controls, n_controls)
 
+    @tracked
     def fit_regressor(
         self,
         trajectories: Union[Trajectory, Sequence[Trajectory]],

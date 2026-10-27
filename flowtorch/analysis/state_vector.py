@@ -11,6 +11,7 @@ from typing import (
     Any,
     Callable,
     Iterator,
+    Generator,
     Mapping,
     Optional,
     Sequence,
@@ -20,6 +21,8 @@ from typing import (
 
 import torch as pt
 import torch.distributed as dist
+
+from flowtorch.provenance import ProvenanceMixin, tracked
 
 if TYPE_CHECKING:
     from flowtorch.data.dataloader import Dataloader
@@ -206,8 +209,22 @@ class StateVectorLayout:
         return result
 
 
-class StateVectorSource(ABC):
+class StateVectorSource(ProvenanceMixin, ABC):
     """Random-access, spatially chunked source of flat state vectors."""
+
+    def _effective_settings(self):
+        names = ("_times", "_fields", "_device", "_loader", "_sources")
+        values = {
+            name.lstrip("_"): vars(self)[name] for name in names if name in vars(self)
+        }
+        layout = vars(self).get("_layout")
+        if layout is not None:
+            values["layout"] = {
+                "fields": layout.fields,
+                "spatial_shape": layout.spatial_shape,
+                "normalization": layout.normalization_factors,
+            }
+        return values
 
     @property
     @abstractmethod
@@ -223,6 +240,63 @@ class StateVectorSource(ABC):
 
     @abstractmethod
     def read(self, spatial_slice: slice, snapshot_slice: slice) -> pt.Tensor: ...
+
+    @property
+    def device(self) -> Optional[pt.device]:
+        """Declared consumer device, when the source has one."""
+        return getattr(self, "_device", None)
+
+    def read_cpu(self, spatial_slice: slice, snapshot_slice: slice) -> pt.Tensor:
+        """CPU preparation hook; GPU-only custom readers stay synchronous.
+
+        Override this method to enable CPU prefetch for GPU-returning sources.
+        The default preserves existing readers and does not move data devices.
+        """
+        return self.read(spatial_slice, snapshot_slice)
+
+    def iter_chunks(
+        self,
+        spatial_slice: slice,
+        spatial_batch_size: int,
+        snapshot_slice: Optional[slice] = None,
+        *,
+        prefetch: bool = False,
+    ) -> Generator[tuple[slice, pt.Tensor, Optional[pt.Tensor]], None, None]:
+        """Read one spatial chunk ahead in CPU RAM, without device transfers.
+
+        The iterator owns its preparation thread, not the source. Close it when
+        stopping early. Legacy GPU-only readers use synchronous iteration.
+        """
+        from ._chunk_prefetch import iter_prepared_chunks
+
+        if spatial_batch_size < 1:
+            raise ValueError("spatial_batch_size must be positive")
+        start, stop, step = spatial_slice.indices(self.spatial_shape[0])
+        if step != 1:
+            raise ValueError("spatial slices must have unit stride")
+        snapshots = (
+            slice(0, self.n_snapshots) if snapshot_slice is None else snapshot_slice
+        )
+        requests = [
+            slice(left, min(left + spatial_batch_size, stop))
+            for left in range(start, stop, spatial_batch_size)
+        ]
+
+        def read(part):
+            # Own and touch mapped input pages during CPU preparation.
+            return (
+                part,
+                self.read_cpu(part, snapshots).clone(
+                    memory_format=pt.contiguous_format
+                ),
+                self.read_weight_cpu(part),
+            )
+
+        yield from iter_prepared_chunks(requests, read, prefetch=prefetch)
+
+    def read_weight_cpu(self, spatial_slice: slice) -> Optional[pt.Tensor]:
+        """Host weight preparation hook for prefetched chunks."""
+        return self.read_weight(spatial_slice)
 
     def read_weight(self, spatial_slice: slice) -> Optional[pt.Tensor]:
         return None
@@ -269,6 +343,7 @@ class DataloaderStateVectorSource(StateVectorSource):
     the dataloader only when a decomposition or result chunk needs them.
     """
 
+    @tracked
     def __init__(
         self,
         loader: Dataloader,
@@ -333,7 +408,11 @@ class DataloaderStateVectorSource(StateVectorSource):
         return not self._fit_rms
 
     def _read_raw_fields(
-        self, spatial_slice: slice, snapshot_slice: slice
+        self,
+        spatial_slice: slice,
+        snapshot_slice: slice,
+        *,
+        device: Optional[pt.device] = None,
     ) -> dict[str, pt.Tensor]:
         start, stop, step = snapshot_slice.indices(self.n_snapshots)
         if step != 1:
@@ -362,7 +441,7 @@ class DataloaderStateVectorSource(StateVectorSource):
                     f"field {field.name!r} returned incompatible batched shape "
                     f"{tuple(value.shape)}"
                 )
-            fields[field.name] = value.to(self._device)
+            fields[field.name] = value.to(self._device if device is None else device)
         return fields
 
     def read(self, spatial_slice: slice, snapshot_slice: slice) -> pt.Tensor:
@@ -374,6 +453,30 @@ class DataloaderStateVectorSource(StateVectorSource):
             raise ValueError("spatial_slice must have unit stride")
         chunk_shape = (stop - start, *self.spatial_shape[1:])
         return self.layout.pack(fields, spatial_shape=chunk_shape)
+
+    def read_cpu(self, spatial_slice: slice, snapshot_slice: slice) -> pt.Tensor:
+        """Pack source data on the host, deferring transfer to the consumer."""
+        if self._fit_rms:
+            raise RuntimeError("RMS normalization must be fitted before reading")
+        fields = self._read_raw_fields(
+            spatial_slice, snapshot_slice, device=pt.device("cpu")
+        )
+        start, stop, step = spatial_slice.indices(self.spatial_shape[0])
+        if step != 1:
+            raise ValueError("spatial_slice must have unit stride")
+        return self.layout.pack(
+            fields, spatial_shape=(stop - start, *self.spatial_shape[1:])
+        )
+
+    def read_weight_cpu(self, spatial_slice: slice) -> Optional[pt.Tensor]:
+        if self._spatial_weight is None:
+            return None
+        weight = (
+            self._spatial_weight(spatial_slice)
+            if callable(self._spatial_weight)
+            else self._spatial_weight[spatial_slice]
+        )
+        return weight.to("cpu")
 
     def read_weight(self, spatial_slice: slice) -> Optional[pt.Tensor]:
         if self._spatial_weight is None:
@@ -487,6 +590,7 @@ class DataloaderStateVectorSource(StateVectorSource):
 class CompositeStateVectorSource(StateVectorSource):
     """Append-compatible view over consecutive state-vector sources."""
 
+    @tracked
     def __init__(self, sources: Sequence[StateVectorSource]) -> None:
         self._sources = tuple(sources)
         if not self._sources:

@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")"
+: "${WM_PROJECT_VERSION:?Source the OpenFOAM environment first}"
+# Remove only generated data in this dedicated tutorial fixture.
+rm -rf postProcessing dual parallel constant/polyMesh 0.05 0.1
+blockMesh > log.blockMesh 2>&1
+icoFoam > log.icoFoam 2>&1
+mkdir dual
+cp -r 0 constant system dual/
+polyDualMesh -case dual -overwrite 60 > dual/log.polyDualMesh 2>&1
+icoFoam -case dual > dual/log.icoFoam 2>&1
+mkdir parallel
+cp -r 0 constant system parallel/
+cat > parallel/system/decomposeParDict <<'EOF'
+FoamFile { version 2.0; format ascii; class dictionary; object decomposeParDict; }
+numberOfSubdomains 2;
+method simple;
+simpleCoeffs { n (2 1 1); delta 0.001; }
+EOF
+decomposePar -case parallel > parallel/log.decomposePar 2>&1
+mpirun -np 2 icoFoam -parallel -case parallel > parallel/log.icoFoam 2>&1
+if command -v pvpython >/dev/null; then
+    pvpython --no-mpi inspect_outputs.py > log.inspect 2>&1
+else
+    python inspect_outputs.py > log.inspect 2>&1
+fi
+cat log.inspect

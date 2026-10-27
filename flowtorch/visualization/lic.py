@@ -1,6 +1,8 @@
 """Line integral convolution on structured curvilinear grids."""
 
 # standard library packages
+from flowtorch.provenance import tracked
+
 from math import isfinite
 
 # third party packages
@@ -8,6 +10,7 @@ import torch as pt
 from torch.nn import functional as F
 
 
+@tracked
 def line_integral_convolution(
     vector_field: pt.Tensor,
     x: pt.Tensor,

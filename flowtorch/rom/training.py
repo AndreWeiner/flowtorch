@@ -4,22 +4,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import ceil
-from typing import Any, Callable, Literal, Optional, Protocol, Sequence, Type, Union
+from typing import Any, Callable, Literal, Optional, Sequence, Type, Union
 
 import torch as pt
 import torch.nn.functional as functional
 
 NoiseInitialization = Union[str, Sequence[pt.Tensor]]
-
-
-class Scheduler(Protocol):
-    """Structural interface shared by PyTorch learning-rate schedulers."""
-
-    def step(self, *args: Any, **kwargs: Any) -> Any: ...
-
-
-SchedulerFactory = Callable[[pt.optim.Optimizer], Scheduler]
+SchedulerFactory = Callable[[pt.optim.Optimizer], object]
 ModelRegularizer = Callable[[object], pt.Tensor]
+
+from flowtorch.provenance import describe, tracked
 
 
 def _default_plateau_scheduler(
@@ -305,12 +299,6 @@ class TrajectoryFineTuner:
     noise_config: Optional[NoiseConfig]
     _estimated_noise_std: Optional[pt.Tensor]
 
-    def _module(self) -> pt.nn.Module:
-        """Return the PyTorch module that owns this training mixin."""
-        if not isinstance(self, pt.nn.Module):
-            raise TypeError("trajectory fine-tuning requires a torch module")
-        return self
-
     def _rollout(
         self,
         initial: pt.Tensor,
@@ -466,7 +454,7 @@ class TrajectoryFineTuner:
         self, selection: Literal["all", "dynamics"]
     ) -> list[pt.nn.Parameter]:
         if selection == "all":
-            return list(self._module().parameters())
+            return list(self.parameters())
         dynamics = getattr(self, "dynamics", None)
         if not isinstance(dynamics, pt.nn.Module):
             raise RuntimeError("dynamics-only optimization requires fitted dynamics")
@@ -513,6 +501,7 @@ class TrajectoryFineTuner:
             ),
         ]
 
+    @tracked
     def fine_tune(
         self,
         epochs: int = 150,
@@ -604,13 +593,12 @@ class TrajectoryFineTuner:
                 )
             ]
         generator = pt.Generator().manual_seed(seed)
-        module = self._module()
 
         def evaluate(windows: Sequence[tuple[int, int, bool]]) -> pt.Tensor:
             return self._window_loss(windows, horizon, loss_function)
 
         def regularization_loss() -> pt.Tensor:
-            reference = next(module.parameters())
+            reference = next(self.parameters())
             total = reference.real.sum() * 0.0
             for regularizer in regularizers:
                 value = regularizer(self)
@@ -660,13 +648,13 @@ class TrajectoryFineTuner:
         }
         best = initial_selection_loss
         best_state = {
-            key: value.detach().clone() for key, value in module.state_dict().items()
+            key: value.detach().clone() for key, value in self.state_dict().items()
         }
         epoch = 0
 
         for stage_index, stage in enumerate(optimization_stages):
             if stage_index:
-                module.load_state_dict(best_state)
+                self.load_state_dict(best_state)
             parameters = self._optimization_parameters(stage.parameters)
             # ``torch.optim.LBFGS`` flattens every gradient with ``view(-1)``.
             # Parameters originating from spectral decompositions can retain a
@@ -701,7 +689,7 @@ class TrajectoryFineTuner:
                 if is_lbfgs:
 
                     def closure() -> pt.Tensor:
-                        module.zero_grad(set_to_none=True)
+                        self.zero_grad(set_to_none=True)
                         loss = objective(train)
                         loss.backward()
                         return loss
@@ -715,7 +703,7 @@ class TrajectoryFineTuner:
                         batch = selected[start : start + size]
 
                         def closure() -> pt.Tensor:
-                            module.zero_grad(set_to_none=True)
+                            self.zero_grad(set_to_none=True)
                             loss = objective(batch)
                             loss.backward()
                             return loss
@@ -771,7 +759,7 @@ class TrajectoryFineTuner:
                     best = selected_loss
                     best_state = {
                         key: value.detach().clone()
-                        for key, value in module.state_dict().items()
+                        for key, value in self.state_dict().items()
                     }
                     log["best_epoch"] = epoch
                     log["best_train_loss"] = train_loss
@@ -785,7 +773,14 @@ class TrajectoryFineTuner:
                 noise_converged = not previous_noise or noise_stale >= stage.patience
                 if loss_converged and noise_converged:
                     break
-        module.load_state_dict(best_state)
+        self.load_state_dict(best_state)
+        self._provenance_training = {
+            "stages": describe(optimization_stages),
+            "epochs_run": len(log["train_loss"]),
+            "outcome": {
+                key: value for key, value in log.items() if not isinstance(value, list)
+            },
+        }
         self.training_log = log
         return log
 

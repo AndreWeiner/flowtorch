@@ -104,6 +104,48 @@ def test_free_memory():
     assert True
 
 
+@pytest.mark.parametrize("n_state,n_tapers", [(12, 5), (3, 5)])
+@pytest.mark.parametrize("null_data", [False, True])
+def test_spod_at_freq_retains_only_requested_modes(n_state, n_tapers, null_data):
+    spod = AMSPOD.__new__(AMSPOD)
+    spod._nx = n_state
+    spod._nfft = 16
+    spod._device = "cpu"
+    spod._dm = pt.empty((n_state, 16), dtype=pt.complex128)
+    spod._taper_norm = (2.0 / 17.0) ** 0.5
+    pt.manual_seed(28)
+    spectrum = pt.randn((n_state, 32), dtype=pt.complex128)
+    if null_data:
+        spectrum.zero_()
+    full_modes, full_vals = spod._spod_at_freq(spectrum, 2, n_tapers)
+    for n_modes in (1, 2):
+        modes, vals = spod._spod_at_freq(spectrum, 2, n_tapers, n_modes=n_modes)
+        assert modes.shape == (n_state, n_modes)
+        pt.testing.assert_close(modes, full_modes[:, :n_modes])
+        pt.testing.assert_close(vals, full_vals)
+
+
+@pytest.mark.parametrize("adaptive", [False, True])
+@pytest.mark.parametrize("complex_data", [False, True])
+def test_spod_selected_modes_match_full_mode_construction(adaptive, complex_data):
+    class FullModeSPOD(AMSPOD):
+        def _spod_at_freq(self, *args, n_modes=None, **kwargs):
+            return super()._spod_at_freq(*args, **kwargs)
+
+    pt.manual_seed(29)
+    data = pt.randn((12, 16), dtype=pt.float64)
+    if complex_data:
+        data = data + 1j * pt.randn_like(data)
+    original = data.clone()
+    options = dict(dt=0.2, adaptive=adaptive, max_tapers=5, keep_n_modes=2)
+    full = FullModeSPOD(data, **options)
+    selected = AMSPOD(data, **options)
+    pt.testing.assert_close(data, original, rtol=0, atol=0)
+    pt.testing.assert_close(selected.modes, full.modes, equal_nan=True)
+    pt.testing.assert_close(selected.eigvals, full.eigvals)
+    pt.testing.assert_close(selected.log["n_tapers"], full.log["n_tapers"])
+
+
 def test_AMSPOD_cpu():
     # real input data, even number of snapshots
     M, N, K = 20, 30, 5
@@ -521,6 +563,10 @@ def test_PAMSPOD():
     assert r.dtype == dm.dtype
     m = spod.get_mode(5, 0)
     assert m.shape == (M,)
+    expected_mode = (spod.svd.U.type(spod._modes.dtype) * spod._modes[5, :, 0]).sum(
+        dim=1
+    )
+    pt.testing.assert_close(m, expected_mode)
     reduced_modes = spod._modes[:, :, 0].T
     expected_similarity = mode_similarity(reduced_modes, reduced_modes)
     pt.testing.assert_close(spod.mode_similarity(), expected_similarity)
@@ -535,7 +581,6 @@ def test_PAMSPOD_from_existing_svd_reuses_temporal_factors():
         rank=5,
         subtract_mean=True,
         spatial_batch_size=6,
-        snapshot_batch_size=3,
     )
     source.calls.clear()
 
@@ -552,7 +597,7 @@ def test_PAMSPOD_from_existing_svd_reuses_temporal_factors():
     assert spod.eigvals.shape == (5, 3)
     mode = spod.get_mode(2).materialize_local()
     assert mode.shape == (31,)
-    assert source.calls
+    assert source.calls == []  # Spatial modes use the retained basis.
 
 
 def test_source_PAMSPOD_returns_lazy_split_reconstruction():
@@ -567,7 +612,6 @@ def test_source_PAMSPOD_returns_lazy_split_reconstruction():
         max_tapers=3,
         keep_n_modes=2,
         spatial_batch_size=7,
-        snapshot_batch_size=2,
     )
 
     reconstruction = spod.partial_reconstruction(

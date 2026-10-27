@@ -17,7 +17,10 @@ from flowtorch.data import TecplotDataloader
 
 class TestTecplotDataloader:
     path = DATASETS["plt_naca2409_surface"]
-    loader = TecplotDataloader.from_tau(path, "alfa16.surface.pval.unsteady_")
+    # The legacy TDV71 reader identifies these surface quads as tetrahedra.
+    loader = TecplotDataloader.from_tau(
+        path, "alfa16.surface.pval.unsteady_", cell_type="quad"
+    )
 
     @classmethod
     def teardown_class(cls):
@@ -93,6 +96,21 @@ class TestTecplotDataloader:
     def test_weights(self):
         weights = self.loader.weights
         assert weights.shape == (300,)
+        assert pt.isfinite(weights).all() and (weights > 0).all()
+        assert not pt.equal(weights, pt.ones_like(weights))
+        with TecplotDataloader.from_tau(
+            self.path,
+            "alfa16.surface.pval.unsteady_",
+            association="cell",
+            cell_type="quad",
+        ) as cells:
+            for zone in self.loader.zone_names:
+                self.loader.zone = zone
+                cells.zone = zone
+                assert cells.locations.shape == (cells.weights.numel(), 3)
+                assert pt.allclose(self.loader.weights.sum(), cells.weights.sum())
+                assert self.loader.weights.shape[0] == self.loader.vertices.shape[0]
+            self.loader.zone = "ls"
 
     def test_load_single_snapshot(self):
         density = self.loader._load_single_snapshot(

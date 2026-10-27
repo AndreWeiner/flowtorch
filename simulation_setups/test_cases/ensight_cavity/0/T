@@ -1,0 +1,9 @@
+FoamFile { version 2.0; format ascii; class volTensorField; object T; }
+dimensions [0 0 0 0 0 0 0];
+internalField uniform (1 2 3 4 5 6 7 8 9);
+boundaryField
+{
+    movingWall { type calculated; value uniform (1 2 3 4 5 6 7 8 9); }
+    fixedWalls { type calculated; value uniform (1 2 3 4 5 6 7 8 9); }
+    frontAndBack { type empty; }
+}

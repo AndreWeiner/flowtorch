@@ -1,0 +1,8 @@
+/postProcessing/
+/dual/
+/constant/polyMesh/
+/0.05/
+/0.1/
+/log.*
+/parallel/
+/*.obj

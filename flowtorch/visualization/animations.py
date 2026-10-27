@@ -1,6 +1,8 @@
 """Matplotlib animations for scalar and vector field sequences."""
 
 # standard library packages
+from flowtorch.provenance import tracked
+
 from math import isfinite, sqrt
 from typing import Any, Dict, Literal, Tuple
 
@@ -14,6 +16,7 @@ from matplotlib.animation import FuncAnimation
 from flowtorch.visualization.lic import line_integral_convolution
 
 
+@tracked
 def animate_scalar_field(
     field: pt.Tensor,
     x: pt.Tensor | None = None,
@@ -244,6 +247,7 @@ def animate_scalar_field(
     )
 
 
+@tracked
 def animate_line_integral_convolution(
     vector_field: pt.Tensor,
     x: pt.Tensor,

@@ -6,6 +6,8 @@ from typing import Callable, Optional, Sequence, Type, Union
 
 import torch as pt
 
+from flowtorch.provenance import ProvenanceMixin, tracked
+
 from flowtorch.analysis import SVD
 
 from .base import InputSpec, ParametricSnapshots, Prediction, ROM, ROMQuery, StateData
@@ -100,6 +102,7 @@ class PODI(ROM):
 
     input_spec = InputSpec(parameters=True)
 
+    @tracked
     def __init__(
         self,
         rank: Optional[int] = None,
@@ -130,6 +133,7 @@ class PODI(ROM):
             self._targets = function(self._targets)
         return self
 
+    @tracked
     def fit(
         self,
         samples: Union[ParametricSnapshots, Sequence[ParametricSnapshots]],
@@ -203,7 +207,7 @@ class PODI(ROM):
             if loss_function is None
             else loss_function
         )
-        log: dict[str, list[float]] = {"train_loss": []}
+        log = {"train_loss": []}
 
         def closure() -> pt.Tensor:
             optim.zero_grad()

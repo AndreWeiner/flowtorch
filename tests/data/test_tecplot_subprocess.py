@@ -34,6 +34,10 @@ class _FakeClient:
             if parameters["block_path"] == [0, 1]:
                 return ["density", "temperature"]
             return ["density", "pressure"]
+        if operation == "weights":
+            return np.arange(1, 5, dtype=np.float64)
+        if operation == "locations":
+            return np.ones((4, 3))
         if operation == "vertices":
             zone = parameters["block_path"][-1]
             return np.arange(12, dtype=np.float64).reshape(4, 3) + zone
@@ -96,9 +100,8 @@ def test_from_tau_uses_configured_pvpython_without_paraview(tmp_path, monkeypatc
         assert pt.equal(loader.vertices, pt.from_numpy(np.arange(12).reshape(4, 3) + 1))
         assert loader.field_names == {"1.0": ["density", "temperature"]}
         assert loader.field_names_for("cell") == {"1.0": ["cell_volume"]}
-        assert loader.load_snapshot("cell_volume", "1.0", association="cell").shape == (
-            4,
-        )
+        with pytest.raises(ValueError, match="constructor association"):
+            loader.load_snapshot("cell_volume", "1.0", association="cell")
 
 
 def test_from_tau_filters_extensionless_files_with_same_timestamp(
@@ -139,3 +142,32 @@ def test_invalid_field_association_is_rejected(tmp_path, monkeypatch):
     ) as loader:
         with pytest.raises(ValueError, match="expected 'point' or 'cell'"):
             loader.load_snapshot("density", "1.0", association="field")
+
+
+def test_constructor_cell_association_and_cached_weights(tmp_path, monkeypatch):
+    (tmp_path / "surface_i=1_t=1.0.plt").touch()
+    monkeypatch.setattr(tecplot_module, "_resolve_pvpython", lambda value: str(value))
+    monkeypatch.setattr(tecplot_module, "_PvpythonClient", _FakeClient)
+    with TecplotDataloader.from_tau(
+        str(tmp_path), "surface_", association="cell", dtype=pt.float64
+    ) as loader:
+        assert loader.association == "cell"
+        assert loader.field_names == {"1.0": ["cell_volume"]}
+        assert loader.load_snapshot("cell_volume", "1.0").shape == (4,)
+        assert loader.locations.shape == (4, 3)
+        assert pt.equal(loader.weights, pt.arange(1, 5, dtype=pt.float64))
+        first = loader.weights
+        assert loader.weights is first
+        loader.zone = "upper"
+        assert loader.weights is not first
+        loader.zone = "lower"
+        assert loader.weights is first
+
+
+def test_invalid_constructor_association_is_rejected_before_start(monkeypatch):
+    def unexpected(value):
+        raise AssertionError("Worker must not start")
+
+    monkeypatch.setattr(tecplot_module, "_PvpythonClient", unexpected)
+    with pytest.raises(ValueError, match="expected 'point' or 'cell'"):
+        TecplotDataloader(".", {"0": "mesh.plt"}, association="field")

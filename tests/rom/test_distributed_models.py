@@ -65,7 +65,6 @@ def _worker(rank, world_size, store_path):
         options = {
             "execution": execution,
             "spatial_batch_size": 1,
-            "snapshot_batch_size": 5,
         }
         distributed_dmd = DMD(rank=2, subtract_mean=False, **options).fit(
             Trajectory(MatrixSource(state), time)

@@ -8,6 +8,8 @@ from typing import Any, Optional, Sequence, Union
 
 import torch as pt
 
+from flowtorch.provenance import ProvenanceMixin, tracked
+
 from flowtorch.analysis import SVD
 from flowtorch.analysis.state_vector import StateVectorSource
 
@@ -107,6 +109,7 @@ class DMD(ROM, TrajectoryFineTuner):
 
     input_spec = InputSpec(initial_state=True, time=True)
 
+    @tracked
     def __init__(
         self,
         rank: Optional[int] = None,
@@ -142,6 +145,7 @@ class DMD(ROM, TrajectoryFineTuner):
         self.training_log: dict[str, Any] = {}
         self.dt: Optional[float] = None
 
+    @tracked
     def fit(self, trajectories: Union[Trajectory, Sequence[Trajectory]]) -> "DMD":
         """Fit POD and analytically initialize the continuous operator."""
         data = _as_trajectories(trajectories)
@@ -156,6 +160,7 @@ class DMD(ROM, TrajectoryFineTuner):
         coefficients = _split_columns(training_coefficients(self.svd), lengths)
         return self._fit_regressor(data, coefficients)
 
+    @tracked
     def fit_regressor(
         self, trajectories: Union[Trajectory, Sequence[Trajectory]]
     ) -> "DMD":

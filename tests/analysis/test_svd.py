@@ -40,6 +40,96 @@ class _MatrixSource(StateVectorSource):
         return None if self._weight is None else self._weight[spatial_slice]
 
 
+def test_available_memory_respects_cgroup_limit(monkeypatch):
+    from pathlib import Path
+    from flowtorch.analysis.svd import _available_memory_bytes
+
+    contents = {
+        "/proc/meminfo": "MemAvailable: 1024 kB\n",
+        "/proc/self/cgroup": "0::/worker\n",
+        "/sys/fs/cgroup/worker/memory.max": "1000",
+        "/sys/fs/cgroup/worker/memory.current": "200",
+        "/sys/fs/cgroup/memory.max": "600",
+        "/sys/fs/cgroup/memory.current": "100",
+    }
+    monkeypatch.setattr(Path, "read_text", lambda path: contents[path.as_posix()])
+    assert _available_memory_bytes(pt.device("cpu")) == 500
+
+
+def test_available_memory_without_proc_files(monkeypatch):
+    from pathlib import Path
+    from types import SimpleNamespace
+    import psutil
+    from flowtorch.analysis.svd import _available_memory_bytes
+
+    def unavailable(path):
+        raise FileNotFoundError(path)
+
+    monkeypatch.setattr(Path, "read_text", unavailable)
+    monkeypatch.setattr(
+        psutil, "virtual_memory", lambda: SimpleNamespace(available=123456)
+    )
+    assert _available_memory_bytes(pt.device("cpu")) == 123456
+
+
+def test_available_cuda_memory_uses_device(monkeypatch):
+    from flowtorch.analysis.svd import _available_memory_bytes
+
+    devices = []
+
+    def memory_info(device):
+        devices.append(device)
+        return (1234, 5678)
+
+    monkeypatch.setattr(pt.cuda, "mem_get_info", memory_info)
+    device = pt.device("cuda:2")
+    assert _available_memory_bytes(device) == 1234
+    assert devices == [device]
+
+
+@pytest.mark.parametrize(
+    "hosts,available,device_type,explicit,expected_budget",
+    [
+        # One workstation: all four ranks share RAM.
+        (["a"] * 4, [800_000] * 4, "cpu", None, 120_000),
+        # Two nodes: only the two ranks on each host share that host's RAM.
+        (["a", "a", "b", "b"], [800_000] * 4, "cpu", None, 240_000),
+        # The more constrained node bounds the common size.
+        (
+            ["a", "a", "b", "b"],
+            [800_000, 800_000, 400_000, 400_000],
+            "cpu",
+            None,
+            120_000,
+        ),
+        # Explicit budgets are already per process, without the safety factor.
+        (["a"] * 4, [None] * 4, "cpu", [240_000, 240_000, 120_000, 240_000], 120_000),
+        # One GPU per rank: device memory is not shared by hostname.
+        (["a"] * 4, [800_000] * 4, "cuda", None, 480_000),
+    ],
+)
+def test_initial_capacity_accounts_for_host_memory_sharing(
+    hosts, available, device_type, explicit, expected_budget
+):
+    from flowtorch.analysis.svd import _initial_memory_capacity
+
+    reports = [
+        dict(
+            hostname=host,
+            available=memory,
+            device_type=device_type,
+            budget=None if explicit is None else explicit[index],
+            scalar_bytes=8,
+            rows_per_value=1,
+        )
+        for index, (host, memory) in enumerate(zip(hosts, available))
+    ]
+    # Four snapshots; factors for four ranks: 1280 bytes;
+    # workspace per spatial value: 192 bytes.
+    expected = (expected_budget - 5632) // 448
+    assert _initial_memory_capacity(reports, 4) == expected
+
+
 def test_subspace_similarity_is_basis_invariant():
     first = pt.eye(3)[:, :2]
     rotation = pt.tensor([[2.0**-0.5, -(2.0**-0.5)], [2.0**-0.5, 2.0**-0.5]])
@@ -206,14 +296,13 @@ class TestSVD:
             source,
             rank=6,
             spatial_batch_size=7,
-            snapshot_batch_size=2,
         )
 
         assert svd.mode == "tsqr"
         assert svd.U.global_shape == (41, 6)
         pt.testing.assert_close(svd.reconstruct().materialize_local(), data)
         assert all(call[0].stop - call[0].start <= 7 for call in source.calls)
-        assert all(call[1].stop - call[1].start <= 2 for call in source.calls)
+        assert all(call[1] == slice(0, 6) for call in source.calls)
 
     def test_source_backed_centered_weighted_tsqr(self):
         pt.manual_seed(8)
@@ -261,23 +350,38 @@ class TestSVD:
 
         pt.testing.assert_close(decoded, data)
 
-    def test_source_backed_incremental_update_matches_direct_svd(self):
+    @pytest.mark.parametrize("complex_data", [False, True])
+    @pytest.mark.parametrize("weighted", [False, True])
+    def test_source_backed_incremental_update_matches_direct_svd(
+        self, complex_data, weighted
+    ):
         pt.manual_seed(9)
         first = pt.rand((43, 4), dtype=pt.float64)
         second = pt.rand((43, 3), dtype=pt.float64)
-        svd = SVD(_MatrixSource(first), rank=4, spatial_batch_size=9)
+        if complex_data:
+            first = first + 1j * pt.rand_like(first)
+            second = second + 1j * pt.rand_like(second)
+        weight = pt.linspace(1.0, 2.0, 43, dtype=pt.float64) if weighted else None
+        svd = SVD(_MatrixSource(first, weight), rank=4, spatial_batch_size=9)
 
-        svd.update(_MatrixSource(second))
+        svd.update(_MatrixSource(second, weight))
 
         combined = pt.cat((first, second), dim=1)
-        direct = SVD(combined, rank=4, mode="svd")
+        direct = SVD(combined, rank=4, mode="svd", weight=weight)
         pt.testing.assert_close(svd.s, direct.s)
         pt.testing.assert_close(
-            subspace_similarity(svd.U.materialize_local(), direct.U, ranks=4),
-            pt.ones(1, dtype=first.dtype),
+            subspace_similarity(
+                svd.U.materialize_local(), direct.U, ranks=4, weight=weight
+            ),
+            pt.ones(1, dtype=first.real.dtype),
         )
+        pt.testing.assert_close(
+            svd.reconstruct().materialize_local(), direct.reconstruct()
+        )
+        self._assert_compact_storage(svd.V)
+        assert svd.V.is_contiguous()
 
-    def test_centered_update_recomputes_with_combined_mean(self):
+    def test_centered_update_tracks_combined_mean(self):
         pt.manual_seed(10)
         first = pt.rand((31, 4), dtype=pt.float64)
         second = 2.0 + pt.rand((31, 2), dtype=pt.float64)
@@ -289,7 +393,7 @@ class TestSVD:
 
         combined = pt.cat((first, second), dim=1)
         centered = combined - combined.mean(dim=1, keepdim=True)
-        direct = SVD(centered, rank=4, mode="svd")
+        direct = SVD(centered, rank=5, mode="svd")
         pt.testing.assert_close(
             svd.reconstruct().materialize_local(),
             direct.reconstruct(),
@@ -329,7 +433,6 @@ class TestSVD:
             rank=5,
             subtract_mean=True,
             spatial_batch_size=7,
-            snapshot_batch_size=2,
         )
         path = tmp_path / "source-svd.pt"
         svd.save(path)
@@ -364,6 +467,30 @@ class TestSVD:
             assert svd.s.is_contiguous()
             assert svd.V.is_contiguous()
 
+    @pytest.mark.parametrize("shape", [(80, 12), (12, 80)])
+    @pytest.mark.parametrize("complex_data", [False, True])
+    @pytest.mark.parametrize("rank", [None, 3, 12])
+    def test_evd_truncates_before_forming_large_factor(self, shape, complex_data, rank):
+        pt.manual_seed(24)
+        data = pt.randn(shape, dtype=pt.float64)
+        if complex_data:
+            data = data + 1j * pt.randn_like(data)
+        weight = pt.linspace(1.0, 2.0, shape[0], dtype=pt.float64)
+        with pt.profiler.profile(record_shapes=True) as profile:
+            svd = SVD(data, rank=rank, mode="evd", weight=weight, subtract_mean=True)
+        direct = SVD(data, rank=svd.rank, mode="svd", weight=weight, subtract_mean=True)
+        pt.testing.assert_close(svd.s_full, direct.s_full, atol=1e-6, rtol=1e-6)
+        pt.testing.assert_close(svd.reconstruct(), direct.reconstruct())
+        assert svd.opt_rank == direct.opt_rank
+        self._assert_compact_storage(svd.U)
+        self._assert_compact_storage(svd.V)
+        # The second matrix multiplication forms only the retained columns.
+        multiplications = [
+            event for event in profile.events() if event.name == "aten::mm"
+        ]
+        assert len(multiplications) == 2
+        assert multiplications[1].input_shapes[1][-1] == svd.rank
+
     @pytest.mark.skipif(not pt.cuda.is_available(), reason="CUDA not available")
     def test_init_gpu(self):
         M, N = 100, 15
@@ -392,6 +519,48 @@ class TestSVD:
         err_r1 = pt.linalg.norm(dm - svd.reconstruct(rank=1)).item()
         err_r2 = pt.linalg.norm(dm - svd.reconstruct(rank=2)).item()
         assert err_r2 <= err_r1
+
+    @pytest.mark.parametrize("shape", [(25, 6), (6, 25)])
+    @pytest.mark.parametrize("complex_data", [False, True])
+    def test_reconstruct_scaling_preserves_results_and_gradients(
+        self, shape, complex_data
+    ):
+        pt.manual_seed(25)
+        data = pt.randn(shape, dtype=pt.float64)
+        if complex_data:
+            data = data + 1j * pt.randn_like(data)
+        svd = SVD(data, rank=6, mode="svd")
+        svd._U = svd.U.detach().requires_grad_()
+        svd._V = svd.V.detach().requires_grad_()
+        svd._s = svd.s.detach().requires_grad_()
+        for rank in (2, 6):
+            expected = (svd.U[:, :rank] * svd.s[:rank]) @ svd.V[:, :rank].conj().T
+            actual = svd.reconstruct(rank)
+            pt.testing.assert_close(actual, expected)
+            factors = (svd.U, svd.s, svd.V)
+            expected_grad = pt.autograd.grad(expected.abs().square().sum(), factors)
+            actual_grad = pt.autograd.grad(actual.abs().square().sum(), factors)
+            for actual_value, expected_value in zip(actual_grad, expected_grad):
+                pt.testing.assert_close(actual_value, expected_value)
+
+    @pytest.mark.parametrize("batch_size", [3, 20])
+    @pytest.mark.parametrize("complex_data", [False, True])
+    def test_source_reconstruct_forms_only_requested_modes(
+        self, batch_size, complex_data
+    ):
+        pt.manual_seed(26)
+        data = pt.randn((20, 6), dtype=pt.float64)
+        if complex_data:
+            data = data + 1j * pt.randn_like(data)
+        svd = SVD(_MatrixSource(data), rank=6, spatial_batch_size=batch_size)
+        spatial_slice = slice(0, batch_size)
+        chunk = svd._left_chunk(spatial_slice, rank=2)
+        expected = (data[spatial_slice] @ svd.V[:, :2]) / svd.s[:2]
+        pt.testing.assert_close(chunk, expected)
+        reconstructed = svd.reconstruct(rank=2).materialize_local()
+        pt.testing.assert_close(
+            reconstructed, (data @ svd.V[:, :2]) @ svd.V[:, :2].conj().T
+        )
 
     @pytest.mark.parametrize("complex_data", [False, True])
     def test_weighted_svd(self, complex_data):
@@ -431,6 +600,31 @@ class TestSVD:
         assert unweighted.weight is None
         assert unweighted.U_weighted is unweighted.U
 
+    @pytest.mark.parametrize("mode", ["svd", "evd"])
+    @pytest.mark.parametrize("complex_data", [False, True])
+    def test_centered_weighted_initialization_preserves_input(self, mode, complex_data):
+        pt.manual_seed(27)
+        data = pt.randn((24, 5), dtype=pt.float64)
+        if complex_data:
+            data = data + 1j * pt.randn_like(data)
+        original = data.clone()
+        weight = pt.linspace(1.0, 2.0, data.shape[0], dtype=pt.float64)
+        original_weight = weight.clone()
+        svd = SVD(data, rank=5, mode=mode, weight=weight, subtract_mean=True)
+        pt.testing.assert_close(data, original, rtol=0, atol=0)
+        pt.testing.assert_close(weight, original_weight, rtol=0, atol=0)
+        pt.testing.assert_close(svd.mean, original.mean(dim=1))
+        centered = original - original.mean(dim=1, keepdim=True)
+        pt.testing.assert_close(svd.reconstruct(), centered)
+        reference = pt.linalg.svdvals(centered * weight.sqrt().unsqueeze(-1))
+        # Centering five snapshots leaves only four nonzero singular values.
+        # Gram EVD resolves eigenvalues to O(eps * ||X||**2), so its null
+        # singular value has an O(sqrt(eps) * ||X||) numerical floor.
+        pt.testing.assert_close(svd.s_full[:-1], reference[:-1])
+        null_tolerance = (data.shape[0] * pt.finfo(data.dtype).eps) ** 0.5
+        assert svd.s_full[-1] <= null_tolerance * reference[0]
+        assert reference[-1] <= null_tolerance * reference[0]
+
     @pytest.mark.parametrize(
         ("weight", "message"),
         [
@@ -444,3 +638,371 @@ class TestSVD:
     def test_weighted_svd_validates_weight(self, weight, message):
         with pytest.raises(ValueError, match=message):
             SVD(pt.rand((5, 3)), weight=weight)
+
+
+@pytest.mark.parametrize("storage", ["disk", "memory"])
+@pytest.mark.parametrize("centered", [False, True])
+@pytest.mark.parametrize("complex_data", [False, True])
+def test_stored_basis_updates_without_old_snapshots(
+    tmp_path, storage, centered, complex_data
+):
+    pt.manual_seed(42)
+    data = pt.randn((37, 12), dtype=pt.float64)
+    if complex_data:
+        data = data + 1j * pt.randn_like(data)
+    data[:, 4:] += 4.0
+    weight = pt.linspace(0.5, 2.0, 37, dtype=data.real.dtype)
+    first = _MatrixSource(data[:, :4], weight)
+    svd = SVD(
+        first,
+        rank=100,
+        subtract_mean=centered,
+        spatial_batch_size=7,
+        basis_storage=storage,
+        basis_directory=tmp_path,
+    )
+    assert svd.maximum_rank == 100
+    first.calls.clear()
+    first.data = None  # Old snapshots are deliberately inaccessible.
+    for stop in (8, 12):
+        batch = _MatrixSource(data[:, stop - 4 : stop], weight)
+        svd.update(batch)
+        batch.data = None
+        direct = SVD(
+            data[:, :stop],
+            rank=stop - int(centered),
+            mode="svd",
+            subtract_mean=centered,
+            weight=weight,
+        )
+        assert svd.rank == stop - int(centered)
+        pt.testing.assert_close(svd.s, direct.s)
+        pt.testing.assert_close(
+            svd.reconstruct().materialize_local(), direct.reconstruct()
+        )
+        modes = svd.U.materialize_local()
+        pt.testing.assert_close(
+            modes.conj().T @ (weight[:, None] * modes),
+            pt.eye(svd.rank, dtype=data.dtype),
+        )
+        if centered:
+            pt.testing.assert_close(
+                svd.mean.materialize_local(), data[:, :stop].mean(dim=1)
+            )
+            pt.testing.assert_close(
+                svd.decode(
+                    svd.encode(_MatrixSource(data[:, :stop], weight))
+                ).materialize_local(),
+                data[:, :stop],
+            )
+    assert first.calls == []
+    checkpoint = tmp_path / "checkpoint"
+    svd.save(checkpoint)
+    expected = svd.reconstruct().materialize_local()
+    svd.close()
+    restored = SVD.load(
+        checkpoint,
+        basis_storage=storage,
+        basis_directory=tmp_path,
+        spatial_batch_size=5,
+    )
+    assert restored.maximum_rank == 100
+    pt.testing.assert_close(restored.reconstruct().materialize_local(), expected)
+    restored.update(_MatrixSource(data[:, :2], weight))
+    combined = pt.cat((data, data[:, :2]), dim=1)
+    direct = SVD(
+        combined,
+        rank=14 - int(centered),
+        mode="svd",
+        subtract_mean=centered,
+        weight=weight,
+    )
+    pt.testing.assert_close(
+        restored.reconstruct().materialize_local(), direct.reconstruct()
+    )
+    restored.close()
+    assert list(tmp_path.iterdir()) == [checkpoint]
+
+
+@pytest.mark.parametrize("storage", ["disk", "memory"])
+def test_maximum_rank_grows_then_caps(storage):
+    pt.manual_seed(43)
+    data = pt.randn((40, 15), dtype=pt.float64)
+    svd = SVD(_MatrixSource(data[:, :3]), rank=7, basis_storage=storage)
+    assert svd.rank == 3
+    for stop, expected in ((6, 6), (9, 7), (12, 7), (15, 7)):
+        svd.update(_MatrixSource(data[:, stop - 3 : stop]))
+        assert svd.rank == expected
+        assert svd.maximum_rank == 7
+        assert svd.V.shape == (stop, expected)
+        modes = svd.U.materialize_local()
+        pt.testing.assert_close(modes.T @ modes, pt.eye(expected, dtype=data.dtype))
+
+
+def test_disk_basis_checkpoint_does_not_materialize_complete_basis(
+    tmp_path, monkeypatch
+):
+    from flowtorch.analysis.svd import _BasisStore
+
+    data = pt.randn((41, 8), dtype=pt.float64)
+    svd = SVD(
+        _MatrixSource(data), rank=4, spatial_batch_size=6, basis_directory=tmp_path
+    )
+    original_read = _BasisStore.read
+
+    def bounded_read(self, spatial_slice, *args):
+        assert spatial_slice.stop - spatial_slice.start <= 6
+        return original_read(self, spatial_slice, *args)
+
+    monkeypatch.setattr(_BasisStore, "read", bounded_read)
+    svd.update(_MatrixSource(data[:, :2]))
+    checkpoint = tmp_path / "checkpoint"
+    svd.save(checkpoint)
+    with pytest.raises(FileExistsError):
+        svd.save(checkpoint)
+    restored = SVD.load(checkpoint)
+    pt.testing.assert_close(restored.U.materialize_local(), svd.U.materialize_local())
+
+
+def test_update_inherits_explicit_weight_and_preserves_state_on_failure(tmp_path):
+    data = pt.randn((17, 4), dtype=pt.float64)
+    weight = pt.linspace(1.0, 2.0, 17, dtype=data.dtype)
+    svd = SVD(
+        _MatrixSource(data[:, :2]),
+        rank=4,
+        weight=weight,
+        spatial_batch_size=5,
+        basis_directory=tmp_path,
+    )
+    svd.update(_MatrixSource(data[:, 2:]))
+    direct = SVD(data, rank=4, mode="svd", weight=weight)
+    pt.testing.assert_close(svd.reconstruct().materialize_local(), direct.reconstruct())
+    before = svd.reconstruct().materialize_local()
+    with pytest.raises(RuntimeError, match="weights are incompatible"):
+        svd.update(_MatrixSource(data, weight * 2))
+    pt.testing.assert_close(svd.reconstruct().materialize_local(), before)
+
+
+@pytest.mark.parametrize("storage", ["disk", "memory"])
+def test_basis_chunks_preserve_component_major_layout(tmp_path, storage):
+    class ComponentSource(StateVectorSource):
+        def __init__(self, data):
+            self.data = data
+            self._layout = StateVectorLayout(
+                (FieldSpec("u", (2,)), FieldSpec("p")), (11, 2)
+            )
+
+        @property
+        def layout(self):
+            return self._layout
+
+        @property
+        def n_snapshots(self):
+            return self.data.shape[-1]
+
+        def read(self, spatial_slice, snapshot_slice):
+            return self.data[:, spatial_slice, :, snapshot_slice].reshape(
+                -1, self.data[:, spatial_slice, :, snapshot_slice].shape[-1]
+            )
+
+    pt.manual_seed(45)
+    data = pt.randn((3, 11, 2, 7), dtype=pt.float64)
+    svd = SVD(
+        ComponentSource(data[..., :3]),
+        rank=7,
+        subtract_mean=True,
+        spatial_batch_size=4,
+        basis_storage=storage,
+    )
+    svd.update(ComponentSource(data[..., 3:]))
+    direct = SVD(data.reshape(66, 7), rank=6, mode="svd", subtract_mean=True)
+    pt.testing.assert_close(svd.reconstruct().materialize_local(), direct.reconstruct())
+    path = tmp_path / "components"
+    svd.save(path)
+    restored = SVD.load(path, spatial_batch_size=3, basis_storage=storage)
+    pt.testing.assert_close(restored.U.materialize_local(), svd.U.materialize_local())
+    pt.testing.assert_close(
+        restored.mean.materialize_local(), data.mean(dim=-1).reshape(-1)
+    )
+
+
+def test_disk_restore_copies_arrays_without_materializing(tmp_path, monkeypatch):
+    from flowtorch.analysis import svd as module
+
+    svd = SVD(_MatrixSource(pt.randn((25, 5), dtype=pt.float64)), rank=3)
+    checkpoint = tmp_path / "checkpoint"
+    svd.save(checkpoint)
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            module.np,
+            "load",
+            lambda *args, **kwargs: pytest.fail("disk restore materialized an array"),
+        )
+        restored = SVD.load(checkpoint, basis_storage="disk")
+    pt.testing.assert_close(restored.U.materialize_local(), svd.U.materialize_local())
+
+
+@pytest.mark.parametrize("centered", [False, True])
+def test_single_snapshot_updates_include_mean_correction(centered):
+    pt.manual_seed(46)
+    data = pt.randn((21, 5), dtype=pt.float64)
+    svd = SVD(_MatrixSource(data[:, :1]), rank=10, subtract_mean=centered)
+    for column in range(1, 5):
+        svd.update(_MatrixSource(data[:, column : column + 1]))
+    direct = SVD(data, rank=5 - int(centered), mode="svd", subtract_mean=centered)
+    pt.testing.assert_close(svd.reconstruct().materialize_local(), direct.reconstruct())
+    if centered:
+        pt.testing.assert_close(svd.mean.materialize_local(), data.mean(dim=1))
+
+
+def test_automatic_rank_remains_automatic_on_update():
+    pt.manual_seed(47)
+    data = pt.randn((25, 8), dtype=pt.float64)
+    svd = SVD(_MatrixSource(data[:, :4]))
+    assert svd.maximum_rank is None
+    svd.update(_MatrixSource(data[:, 4:]))
+    assert svd.rank == max(1, svd.opt_rank)
+    assert svd.V.shape == (8, svd.rank)
+
+
+@pytest.mark.parametrize("storage", ["disk", "memory"])
+def test_update_reduces_size_only_for_memory_capacity(monkeypatch, storage):
+    data = pt.randn((31, 8), dtype=pt.float64)
+    svd = SVD(
+        _MatrixSource(data[:, :4]), rank=8, spatial_batch_size=7, basis_storage=storage
+    )
+    # Four new columns, rank grows from four to eight. The budget fits three rows.
+    fixed = 7 * 8**2 * 8 + 2 * 8 * 8 * 8
+    if storage == "memory":
+        fixed += 31 * 8 * (8 + 4 + 1)
+    per_value = 8 * (6 * 4 + 4 * (4 + 8)) + 2 * 8 * (4 + 4 + 2)
+    monkeypatch.setattr(
+        "flowtorch.analysis.svd._available_memory_bytes",
+        lambda device: (fixed + 3 * per_value + 1) / 0.6,
+    )
+    svd.update(_MatrixSource(data[:, 4:]))
+    assert svd._spatial_batch_size == 3
+    pt.testing.assert_close(svd.reconstruct().materialize_local(), data)
+    monkeypatch.setattr(
+        "flowtorch.analysis.svd._available_memory_bytes", lambda device: 10**9
+    )
+    svd.update(_MatrixSource(data[:, :1]))
+    assert svd._spatial_batch_size == 3  # Capacity checks do not tune or grow it.
+
+
+def test_update_rejects_insufficient_memory_before_reading(monkeypatch):
+    data = pt.randn((21, 5), dtype=pt.float64)
+    svd = SVD(_MatrixSource(data[:, :3]), rank=5, spatial_batch_size=7)
+    source = _MatrixSource(data[:, 3:])
+    before = svd.reconstruct().materialize_local()
+    monkeypatch.setattr(
+        "flowtorch.analysis.svd._available_memory_bytes", lambda device: 1
+    )
+    with pytest.raises(ValueError, match="update memory budget is too small"):
+        svd.update(source)
+    assert source.calls == []
+    assert svd._spatial_batch_size == 7
+    pt.testing.assert_close(svd.reconstruct().materialize_local(), before)
+
+
+@pytest.mark.parametrize("storage", ["disk", "memory"])
+@pytest.mark.parametrize("centered", [False, True])
+def test_prefetched_update_matches_sequential_and_checkpoint(
+    tmp_path, storage, centered
+):
+    pt.manual_seed(53)
+    data = pt.randn((43, 9), dtype=pt.float64)
+    weight = pt.linspace(0.5, 2.0, 43, dtype=data.dtype)
+    results = []
+    for enabled in (False, True):
+        svd = SVD(
+            _MatrixSource(data[:, :3], weight),
+            rank=9,
+            spatial_batch_size=7,
+            subtract_mean=centered,
+            basis_storage=storage,
+            prefetch_chunks=enabled,
+        )
+        for start in (3, 6):
+            svd.update(_MatrixSource(data[:, start : start + 3], weight))
+        results.append(svd)
+    pt.testing.assert_close(results[0].s, results[1].s)
+    pt.testing.assert_close(
+        results[0].reconstruct().materialize_local(),
+        results[1].reconstruct().materialize_local(),
+    )
+    path = tmp_path / "checkpoint"
+    results[1].save(path)
+    restored = SVD.load(path, prefetch_chunks=False)
+    assert restored._prefetch_chunks is False
+    pt.testing.assert_close(
+        restored.U.materialize_local(), results[1].U.materialize_local()
+    )
+
+
+@pytest.mark.parametrize("dtype", [pt.float32, pt.float64])
+def test_default_spatial_target_has_no_trial_reads(monkeypatch, dtype):
+    data = pt.randn((41, 5), dtype=dtype)
+    source = _MatrixSource(data)
+    monkeypatch.setattr(
+        "flowtorch.analysis.svd.SVD_DEFAULT_INPUT_BYTES", 8 * 5 * data.element_size()
+    )
+    svd = SVD(source, rank=5, subtract_mean=True)
+    assert svd._spatial_batch_size == 8
+    assert svd._prefetch_chunks is False
+    assert source.calls[0] == (slice(0, 1), slice(0, 1))
+    assert len(source.calls) == 1 + 2 * 6
+    direct = SVD(data, rank=4, subtract_mean=True, mode="svd")
+    pt.testing.assert_close(svd.s, direct.s)
+    pt.testing.assert_close(svd.reconstruct().materialize_local(), direct.reconstruct())
+    svd.close()
+
+
+def test_default_memory_bound_reserves_maximum_rank(monkeypatch):
+    data = pt.randn((200, 4), dtype=pt.float64)
+    small = SVD(_MatrixSource(data), rank=4, memory_budget_bytes=1_000_000)
+    large = SVD(_MatrixSource(data), rank=100, memory_budget_bytes=1_000_000)
+    assert large._spatial_batch_size < small._spatial_batch_size
+    queued = SVD(
+        _MatrixSource(data),
+        rank=100,
+        memory_budget_bytes=1_000_000,
+        prefetch_chunks=True,
+    )
+    assert queued._spatial_batch_size < large._spatial_batch_size
+    for svd in (small, large, queued):
+        pt.testing.assert_close(svd.reconstruct().materialize_local(), data)
+        svd.close()
+
+
+def test_explicit_spatial_size_overrides_input_target(monkeypatch):
+    monkeypatch.setattr("flowtorch.analysis.svd.SVD_DEFAULT_INPUT_BYTES", 1)
+    source = _MatrixSource(pt.randn((17, 4)))
+    svd = SVD(source, rank=4, spatial_batch_size=7)
+    assert svd._spatial_batch_size == 7
+    assert source.calls[0] == (slice(0, 7), slice(0, 4))
+    svd.close()
+
+
+def test_default_rejects_insufficient_memory():
+    with pytest.raises(ValueError, match="too small"):
+        SVD(_MatrixSource(pt.randn((17, 4))), memory_budget_bytes=1)
+
+
+def test_removed_search_keyword_is_not_accepted():
+    with pytest.raises(TypeError, match="autotune_chunks"):
+        SVD(_MatrixSource(pt.randn((17, 4))), autotune_chunks=True)
+
+
+def test_update_reuses_default_without_reselecting(monkeypatch):
+    data = pt.randn((31, 8), dtype=pt.float64)
+    monkeypatch.setattr("flowtorch.analysis.svd.SVD_DEFAULT_INPUT_BYTES", 7 * 4 * 8)
+    svd = SVD(_MatrixSource(data[:, :4]), rank=8)
+    assert svd._spatial_batch_size == 7
+    monkeypatch.setattr(
+        SVD, "_select_spatial_batch", lambda *args: pytest.fail("update reselected")
+    )
+    svd.update(_MatrixSource(data[:, 4:]))
+    assert svd._spatial_batch_size == 7
+    pt.testing.assert_close(svd.reconstruct().materialize_local(), data)
+    svd.close()

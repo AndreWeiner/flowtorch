@@ -11,11 +11,12 @@ of Ohmichi et al.
 """
 
 import torch as pt
+from flowtorch.provenance import ProvenanceMixin, tracked
 from .svd import SVD
 from .hodmd import _create_time_delays
 
 
-class MSSA(object):
+class MSSA(ProvenanceMixin):
     """Multivariate singular spectrum analysis (MSSA).
 
     Examples
@@ -28,6 +29,19 @@ class MSSA(object):
     >>> err = mssa.reconstruction_error.norm() / dm.norm()
     """
 
+    def _effective_settings(self) -> dict:
+        settings = {
+            "window_size": self._window_size,
+            "delay": self._delay,
+            "rows": self._rows,
+            "cols": self._cols,
+            "hankel_svd": self._svd,
+        }
+        if "_svd_dr" in vars(self):
+            settings["projection_svd"] = self._svd_dr
+        return settings
+
+    @tracked
     def __init__(
         self, data_matrix: pt.Tensor, window_size: int = None, rank: int = None
     ):
@@ -114,6 +128,7 @@ class PMSSA(MSSA):
     >>> err = pmssa.reconstruction_error.norm() / dm.norm()
     """
 
+    @tracked
     def __init__(
         self, data_matrix: pt.Tensor, window_size: int = None, rank: int = None
     ):

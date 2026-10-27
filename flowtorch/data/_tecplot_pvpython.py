@@ -270,6 +270,154 @@ def _copy_field(leaf, wrapper, field_name, association, numpy):
     return value
 
 
+def _integration_mesh(leaf, numpy, cell_type=None):
+    """Expose explicit connectivity, optionally correcting a known reader type."""
+    from vtkmodules.vtkFiltersCore import vtkAppendFilter  # type: ignore[import-not-found]
+    from vtkmodules.util.numpy_support import vtk_to_numpy  # type: ignore[import-not-found]
+
+    # Convert implicit structured connectivity and polydata in compiled VTK.
+    # With a single input and merging disabled, point/cell order is preserved.
+    if leaf.IsA("vtkUnstructuredGrid"):
+        mesh = leaf
+    else:
+        convert = vtkAppendFilter()
+        convert.MergePointsOff()
+        convert.AddInputData(leaf)
+        convert.Update()
+        mesh = convert.GetOutput()
+    if (
+        mesh.GetNumberOfPoints() != leaf.GetNumberOfPoints()
+        or mesh.GetNumberOfCells() != leaf.GetNumberOfCells()
+    ):
+        raise ValueError("Mesh conversion changed point or cell counts")
+    if cell_type is not None:
+        # Override only a shallow copy, leaving the fetched geometry unchanged.
+        original = mesh
+        mesh = original.NewInstance()
+        mesh.ShallowCopy(original)
+        types = {
+            "line": (3, 2),
+            "triangle": (5, 3),
+            "quad": (9, 4),
+            "tetra": (10, 4),
+            "hexahedron": (12, 8),
+        }
+        if cell_type not in types:
+            raise ValueError(f"Unsupported cell type override: {cell_type!r}")
+        vtk_type, count = types[cell_type]
+        offsets = vtk_to_numpy(mesh.GetCells().GetOffsetsArray())
+        if numpy.any(numpy.diff(offsets) != count):
+            raise ValueError(
+                f"Cell type {cell_type!r} requires {count} vertices per cell"
+            )
+        mesh.SetCells(vtk_type, mesh.GetCells())
+    return mesh
+
+
+def _geometric_weights(leaf, association, numpy, chunk_size=1_000_000, cell_type=None):
+    """Compute measures and lump them using compiled bulk-array operations."""
+    from vtkmodules.vtkFiltersVerdict import vtkCellSizeFilter  # type: ignore[import-not-found]
+    from vtkmodules.util.numpy_support import vtk_to_numpy
+
+    if association not in ("point", "cell"):
+        raise ValueError("Expected 'point' or 'cell' association")
+    if leaf.GetNumberOfCells() == 0:
+        raise ValueError("Cannot compute geometric weights without cells")
+    mesh = _integration_mesh(leaf, numpy, cell_type)
+    ghosts = mesh.GetCellData().GetArray("vtkGhostType")
+    if ghosts is not None and numpy.any(vtk_to_numpy(ghosts) != 0):
+        raise ValueError(
+            "Ghost cells must be removed before computing integration weights"
+        )
+    sizes = vtkCellSizeFilter()
+    sizes.SetInputData(mesh)
+    sizes.SetComputeVertexCount(False)
+    sizes.Update()
+    output = sizes.GetOutput()
+    measures = numpy.stack(
+        [
+            vtk_to_numpy(output.GetCellData().GetArray(name))
+            for name in ("Length", "Area", "Volume")
+        ]
+    )
+    active = numpy.any(measures != 0, axis=1)
+    if not numpy.any(active):
+        raise ValueError(
+            "Cell measures must be finite and positive; check mesh geometry"
+        )
+    if numpy.count_nonzero(active) != 1:
+        raise ValueError(
+            "Expected cells of a single dimension (line, surface or volume)"
+        )
+    measures = measures[active][0].astype(numpy.float64, copy=True)
+    if not numpy.all(numpy.isfinite(measures) & (measures > 0)):
+        raise ValueError(
+            "Cell measures must be finite and positive; check mesh geometry or "
+            "supply cell_type if the reader misidentifies legacy elements"
+        )
+    if association == "cell":
+        return measures
+    cells = mesh.GetCells()
+    offsets = vtk_to_numpy(cells.GetOffsetsArray())
+    connectivity = vtk_to_numpy(cells.GetConnectivityArray())
+    counts = numpy.diff(offsets)
+    if numpy.any(counts <= 0):
+        raise ValueError("Cannot distribute measures from empty cells")
+    shares = measures / counts
+    weights = numpy.zeros(mesh.GetNumberOfPoints(), dtype=numpy.float64)
+    # Each chunk holds at most chunk_size cells; no Python loop over mesh items.
+    for start in range(0, len(counts), chunk_size):
+        end = min(start + chunk_size, len(counts))
+        ids = connectivity[offsets[start] : offsets[end]]
+        weights += numpy.bincount(
+            ids,
+            weights=numpy.repeat(shares[start:end], counts[start:end]),
+            minlength=len(weights),
+        )
+    if not numpy.all(numpy.isfinite(weights) & (weights > 0)):
+        raise ValueError(
+            "Point weights must be positive; mesh contains isolated points"
+        )
+    if not numpy.isclose(weights.sum(), measures.sum(), rtol=1e-12):
+        raise ValueError("Point weights do not conserve total mesh measure")
+    return weights
+
+
+def _cell_locations(leaf, numpy, cell_type=None):
+    from vtkmodules.vtkFiltersCore import vtkCellCenters
+    from vtkmodules.util.numpy_support import vtk_to_numpy
+
+    centers = vtkCellCenters()
+    centers.SetInputData(_integration_mesh(leaf, numpy, cell_type))
+    centers.Update()
+    points = centers.GetOutput().GetPoints()
+    if points is None or points.GetNumberOfPoints() != leaf.GetNumberOfCells():
+        raise ValueError("Cannot compute one location per cell")
+    return numpy.array(vtk_to_numpy(points.GetData()), copy=True)
+
+
+def _export_mesh(leaf, numpy, cell_type=None):
+    """Serialize geometry/topology through VTK, without source field arrays."""
+    from vtkmodules.vtkIOXML import vtkXMLUnstructuredGridWriter  # type: ignore[import-not-found]
+
+    source = _integration_mesh(leaf, numpy, cell_type)
+    mesh = source.NewInstance()
+    mesh.ShallowCopy(source)
+    mesh.GetPointData().Initialize()
+    mesh.GetCellData().Initialize()
+    mesh.GetFieldData().Initialize()
+    writer = vtkXMLUnstructuredGridWriter()
+    writer.SetInputData(mesh)
+    writer.SetDataModeToBinary()
+    writer.WriteToOutputStringOn()
+    if writer.Write() != 1:
+        raise ValueError("VTK failed to serialize the selected Tecplot mesh")
+    serialized = writer.GetOutputString()
+    if isinstance(serialized, str):
+        serialized = serialized.encode("utf-8")
+    return numpy.frombuffer(serialized, dtype=numpy.uint8).copy()
+
+
 def _handle(
     request,
     reader_type,
@@ -309,6 +457,23 @@ def _handle(
                 request.get("association"),
                 numpy,
             )
+        finally:
+            delete(reader)
+    if operation in ("weights", "locations", "mesh"):
+        reader, leaf, _ = _fetch_leaf(
+            request, reader_type, servermanager, dataset_adapter
+        )
+        try:
+            if operation == "mesh":
+                return "array", _export_mesh(leaf, numpy, request.get("cell_type"))
+            if operation == "weights":
+                return "array", _geometric_weights(
+                    leaf,
+                    request.get("association", "point"),
+                    numpy,
+                    cell_type=request.get("cell_type"),
+                )
+            return "array", _cell_locations(leaf, numpy, request.get("cell_type"))
         finally:
             delete(reader)
     if operation == "vertices":

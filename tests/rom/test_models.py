@@ -182,7 +182,6 @@ def test_pod_basis_centers_and_supports_lazy_sources():
         rank=2,
         subtract_mean=True,
         spatial_batch_size=1,
-        snapshot_batch_size=7,
     )
     coefficients = source_svd.encode(MatrixSource(shifted))
     result = source_svd.decode(coefficients)
