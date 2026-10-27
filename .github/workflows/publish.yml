@@ -26,6 +26,21 @@ jobs:
       - name: Install build tools
         run: python -m pip install --upgrade build twine
 
+      - name: Verify release version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          python - <<'PY'
+          import os
+          import runpy
+
+          version = runpy.run_path("flowtorch/version.py")["__version__"]
+          tag = os.environ["RELEASE_TAG"]
+          if tag.removeprefix("v") != version:
+              raise SystemExit(f"Release tag {tag!r} does not match version {version!r}")
+          print(f"Verified release version {version}")
+          PY
+
       - name: Build distributions
         run: python -m build
 

@@ -16,6 +16,8 @@
 import sphinx_rtd_theme
 import sys
 import os
+import runpy
+from pathlib import Path
 
 sys.path.insert(0, os.path.abspath('../../'))
 
@@ -29,7 +31,9 @@ copyright = '2022, flowTorch contributors'
 author = 'flowTorch contributors'
 
 # The full version, including alpha/beta/rc tags
-release = '1.1'
+release = runpy.run_path(
+    str(Path(__file__).resolve().parents[2] / 'flowtorch' / 'version.py')
+)['__version__']
 
 
 # -- General configuration ---------------------------------------------------
