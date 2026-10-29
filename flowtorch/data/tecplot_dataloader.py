@@ -275,7 +275,7 @@ class TecplotDataloader(Dataloader):
 
         :param path: path to snapshot location
         :param file_names: mapping of write times to snapshot names
-        :param dtype: tensor data type used for weights
+        :param dtype: tensor data type used for snapshots, coordinates, and weights
         :param cell_type: optional mesh element type override for legacy files
             misidentified by the reader: line, triangle, quad, tetra, hexahedron
         :param association: field location, ``"point"`` or ``"cell"``
@@ -311,7 +311,7 @@ class TecplotDataloader(Dataloader):
         :param path: path to snapshot location
         :param base_name: common basename of all snapshots
         :param suffix: snapshot file suffix
-        :param dtype: tensor data type used for weights
+        :param dtype: tensor data type used for snapshots, coordinates, and weights
         :param cell_type: optional mesh element type override for legacy files
             misidentified by the reader: line, triangle, quad, tetra, hexahedron
         :param association: field location, ``"point"`` or ``"cell"``
@@ -404,7 +404,7 @@ class TecplotDataloader(Dataloader):
             association=association,
             block_path=self._zone_paths[self.zone],
         )
-        return pt.from_numpy(array)
+        return pt.from_numpy(array).to(dtype=self._dtype)
 
     def _load_multiple_snapshots(
         self, field_name: str, times: List[str], association: str | None = None
@@ -516,7 +516,7 @@ class TecplotDataloader(Dataloader):
             self.write_times[0],
             block_path=self._zone_paths[self.zone],
         )
-        return pt.from_numpy(array)
+        return pt.from_numpy(array).to(dtype=self._dtype)
 
     @property
     def mesh(self):
@@ -558,7 +558,7 @@ class TecplotDataloader(Dataloader):
                 association=self.association,
                 cell_type=self._cell_type,
             )
-        )
+        ).to(dtype=self._dtype)
 
     @property
     def weights(self) -> pt.Tensor:

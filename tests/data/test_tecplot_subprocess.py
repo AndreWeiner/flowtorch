@@ -171,3 +171,39 @@ def test_invalid_constructor_association_is_rejected_before_start(monkeypatch):
     monkeypatch.setattr(tecplot_module, "_PvpythonClient", unexpected)
     with pytest.raises(ValueError, match="expected 'point' or 'cell'"):
         TecplotDataloader(".", {"0": "mesh.plt"}, association="field")
+
+
+@pytest.mark.parametrize("dtype", [pt.float32, pt.float64])
+@pytest.mark.parametrize("source_dtype", [np.float32, np.float64])
+@pytest.mark.parametrize("association", ["point", "cell"])
+def test_requested_dtype_for_fields_and_geometry(
+    tmp_path, monkeypatch, dtype, source_dtype, association
+):
+    precise = 1.0000000001234568
+
+    class Client(_FakeClient):
+        def request(self, operation, **parameters):
+            value = super().request(operation, **parameters)
+            if isinstance(value, np.ndarray):
+                return np.full(value.shape, precise, dtype=source_dtype)
+            return value
+
+    (tmp_path / "surface_i=1_t=1.0.plt").touch()
+    monkeypatch.setattr(tecplot_module, "_resolve_pvpython", lambda value: str(value))
+    monkeypatch.setattr(tecplot_module, "_PvpythonClient", Client)
+    with TecplotDataloader.from_tau(
+        str(tmp_path), "surface_", dtype=dtype, association=association
+    ) as loader:
+        field = "density" if association == "point" else "cell_volume"
+        expected = pt.tensor(np.array(precise, dtype=source_dtype), dtype=dtype)
+        outputs = [
+            loader.load_snapshot(field, "1.0"),
+            loader.load_snapshot(field, ["1.0"]),
+            *loader.load_snapshot([field], ["1.0"]),
+            loader.vertices,
+            loader.locations,
+            loader.weights,
+        ]
+        for output in outputs:
+            assert output.dtype == dtype
+            pt.testing.assert_close(output, expected.expand_as(output), rtol=0, atol=0)

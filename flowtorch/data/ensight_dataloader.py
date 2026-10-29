@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import re
+import warnings
 from typing import Dict, List, Optional, Union
 
 import numpy as np
@@ -53,6 +54,10 @@ class EnSightDataloader(Dataloader):
     ...                          part="movingWall")
     >>> plane = EnSightDataloader("postProcessing/cuts_binary/oblique/oblique.case")
 
+    Requesting ``torch.float64`` emits a :class:`UserWarning`: binary files
+    store float32 values, and the current VTK ASCII reader also uses float32
+    fields and coordinates. Conversion cannot restore source precision.
+
     :param case_file: path to an EnSight Gold .case descriptor
     :param part: named part; required if the descriptor contains multiple parts
     :param association: ``"cell"`` (default) or ``"point"``
@@ -91,6 +96,16 @@ class EnSightDataloader(Dataloader):
         self._weights = None
         self._field_names: Optional[Dict[str, List[str]]] = None
         self._parse_case()
+        if dtype == pt.float64:
+            warnings.warn(
+                "EnSight data are returned as torch.float64, but source precision "
+                "is limited: Gold binary stores float32 values, and the current "
+                "VTK ASCII reader also reads fields and coordinates as float32. "
+                "Conversion to float64 cannot recover additional digits. The "
+                "native chunk backend shares the binary format's precision limit.",
+                UserWarning,
+                stacklevel=2,
+            )
         self._reader = vtkGenericEnSightReader()
         self._reader.SetCaseFileName(str(self._case_file))
         self._reader.ReadAllVariablesOn()

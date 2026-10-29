@@ -79,7 +79,7 @@ class ImageDataloader(Dataloader):
             norm = 2**16 - 1
         else:
             norm = 1
-        return (pt.from_numpy(img) / norm).type(self._dtype)
+        return pt.from_numpy(img).to(dtype=self._dtype) / norm
 
     def load_snapshot(
         self,
