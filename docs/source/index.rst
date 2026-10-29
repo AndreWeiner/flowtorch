@@ -33,6 +33,13 @@ the Python :term:`API`.
    flowtorch
 
 
+.. toctree::
+   :maxdepth: 1
+   :caption: Releases
+
+   release_notes
+
+
 Indices and tables
 ==================
 

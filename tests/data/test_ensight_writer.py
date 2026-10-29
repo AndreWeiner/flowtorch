@@ -501,3 +501,31 @@ def test_numeric_case_stem(exports, tmp_path):
     pt.testing.assert_close(
         EnSightDataloader(writer.case_file).load_snapshot("mode", "0"), pt.ones(400)
     )
+
+
+@pytest.mark.parametrize("format", [None, "ascii"])
+@pytest.mark.parametrize("dtype", [pt.float32, pt.float64, pt.complex128])
+def test_binary_precision_warning_once(exports, tmp_path, format, dtype):
+    import warnings
+
+    loader = EnSightDataloader(source_case(exports), part="internalMesh")
+    options = {} if format is None else {"format": format}
+    values = pt.full((len(loader.weights),), 1.0000000001234568, dtype=dtype)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        with EnSightWriter.from_loader(
+            loader, tmp_path / "export", **options
+        ) as writer:
+            writer.write_snapshot({"a": values, "b": values}, "0")
+            writer.write_snapshot({"a": values, "b": values}, "1")
+    precision_warnings = [w for w in caught if "converts float64" in str(w.message)]
+    assert len(precision_warnings) == int(format is None and dtype != pt.float32)
+    if precision_warnings:
+        assert precision_warnings[0].category is UserWarning
+    if format == "ascii" and dtype == pt.float64:
+        files = list((tmp_path / "export" / "data").rglob("*"))
+        assert any(
+            "1.00000000012345680e+00" in path.read_text()
+            for path in files
+            if path.is_file()
+        )

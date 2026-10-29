@@ -48,3 +48,19 @@ def test_ImageDataloader(create_image_dir):
         _ = loader.vertices
     with raises(NotImplementedError):
         _ = loader.weights
+
+
+def test_double_precision_normalization(tmp_path):
+    for source_dtype, maximum in [(np.uint8, 255), (np.uint16, 65535)]:
+        folder = tmp_path / str(maximum)
+        folder.mkdir()
+        Image.fromarray(np.array([[1, maximum]], dtype=source_dtype)).save(
+            folder / "0.tif"
+        )
+        for dtype in (pt.float32, pt.float64):
+            loader = ImageDataloader(str(folder), dtype=dtype)
+            expected = pt.tensor([[1 / maximum, 1.0]], dtype=dtype)
+            pt.testing.assert_close(loader.load_snapshot("0"), expected, rtol=0, atol=0)
+            pt.testing.assert_close(
+                loader.load_snapshot(["0"]), expected[..., None], rtol=0, atol=0
+            )

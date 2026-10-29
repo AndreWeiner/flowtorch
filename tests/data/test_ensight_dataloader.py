@@ -568,3 +568,34 @@ def test_native_binary_byte_order(tmp_path, endian, association):
             native.load_snapshot_slice(name, "0", slice(0, 2)),
             vtk.load_snapshot_slice(name, "0", slice(0, 2)),
         )
+
+
+@pytest.mark.parametrize("encoding", ["ascii", "binary"])
+@pytest.mark.parametrize("backend", ["native", "vtk"])
+@pytest.mark.parametrize("dtype", [pt.float32, pt.float64])
+def test_precision_warning_once_per_loader(exports, encoding, backend, dtype):
+    import warnings
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        loader = EnSightDataloader(
+            case_path(exports, encoding=encoding),
+            part="internalMesh",
+            dtype=dtype,
+            slice_backend=backend,
+        )
+        time = loader.write_times[0]
+        outputs = [
+            loader.load_snapshot("p", time),
+            loader.load_snapshot("p", loader.write_times),
+            loader.vertices,
+            loader.weights,
+        ]
+        if encoding == "binary" or backend == "vtk":
+            outputs.append(loader.load_snapshot_slice("p", time, slice(0, 2)))
+        for output in outputs:
+            assert output.dtype == dtype
+    precision_warnings = [w for w in caught if "source precision" in str(w.message)]
+    assert len(precision_warnings) == int(dtype == pt.float64)
+    if precision_warnings:
+        assert precision_warnings[0].category is UserWarning

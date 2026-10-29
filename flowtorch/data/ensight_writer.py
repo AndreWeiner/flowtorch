@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import re
+import warnings
 from tempfile import TemporaryDirectory
 from typing import Mapping, Optional, Sequence, Union
 
@@ -55,7 +56,9 @@ class EnSightWriter:
     ``NAME_real`` and ``NAME_imag`` fields by default, never silently discarded.
 
     Binary output uses little-endian 32-bit integers and single-precision floats.
-    ASCII uses 17 significant digits, although readers may use single precision.
+    Float64 fields written in binary trigger a :class:`UserWarning` once per
+    writer. ASCII preserves double-precision field values in the file using 17
+    significant digits, but the current VTK EnSight reader reads them as float32.
     Linear triangles, quads, polygons, tetrahedra, hexahedra, wedges, pyramids and
     polyhedra are supported. Higher-order cells are rejected. One part and one
     association are supported per writer, including assembled MPI input exports.
@@ -115,6 +118,7 @@ class EnSightWriter:
         self._output_dir = output
         self._case_file = output / f"{name}.case"
         self._format = format
+        self._warned_float64 = False
         self._association = loader.association
         self._part = part
         self._mesh = loader.mesh
@@ -341,6 +345,20 @@ class EnSightWriter:
                     raise ValueError(f"Duplicate output field name {output_name!r}")
                 if not pt.isfinite(piece).all().item():
                     raise ValueError(f"Field {output_name!r} contains nonfinite values")
+                if (
+                    self._format == "binary"
+                    and piece.dtype == pt.float64
+                    and not self._warned_float64
+                ):
+                    warnings.warn(
+                        "EnSight Gold binary output converts float64 fields to "
+                        "float32; double-precision digits may be lost. Use ASCII "
+                        "to preserve field values in the file, although the current "
+                        "VTK EnSight reader still reads them as float32.",
+                        UserWarning,
+                        stacklevel=2,
+                    )
+                    self._warned_float64 = True
                 dtype = pt.float32 if self._format == "binary" else pt.float64
                 array = piece.detach().to(device="cpu", dtype=dtype).numpy()
                 if not np.isfinite(array).all():
