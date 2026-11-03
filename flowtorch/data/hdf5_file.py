@@ -11,8 +11,7 @@ of reconstructed OpenFOAM simulation cases into the HDF5-based flowTorch format.
 # standard library packages
 from functools import partial
 import logging
-from os.path import isfile, exists, join
-from os import remove
+from os.path import isfile, join
 from typing import List, Dict, Union
 
 # third party packages
@@ -39,14 +38,14 @@ VERTICES_DS = "vertices"
 CONNECTIVITY_DS = "connectivity"
 CENTERS_DS = "centers"
 VOLUMES_DS = "volumes"
-XDMF_HEADER = """<source lang="xml" line="1">
+XDMF_HEADER = """<Xdmf Version="3.0">
     <Domain>
         <Grid Name="flowTorch" GridType="Collection" CollectionType="Temporal">
 """
 XDMF_FOOTER = """
         </Grid>
     </Domain>
-</source> 
+</Xdmf>
 """
 TOPOLOGY = "topology"
 GEOMETRY = "geometry"
@@ -89,7 +88,14 @@ class HDF5Dataloader(Dataloader):
 
     """
 
-    def __init__(self, file_path: str, dtype: pt.dtype = DEFAULT_DTYPE):
+    def __init__(
+        self,
+        file_path: str,
+        dtype: pt.dtype = DEFAULT_DTYPE,
+        *,
+        zones=None,
+        geometry_file=None,
+    ):
         """Create HDF5Dataloader instance.
 
         :param file_path: path to HDF5 file
@@ -97,25 +103,71 @@ class HDF5Dataloader(Dataloader):
         :param dtype: tensor type of floating point values, defaults to DEFAULT_DTYPE
         :type dtype: pt.dtype, optional
         """
+        from pathlib import Path
+
+        path = Path(file_path).resolve()
+        if path.is_dir():
+            path = path / "fields.h5"
+        if path.suffix.lower() in (".xdmf", ".xmf"):
+            import xml.etree.ElementTree as ET
+
+            candidates = set()
+            for item in ET.parse(path).iter("DataItem"):
+                if item.attrib.get("Format") == "HDF" and item.text:
+                    reference = path.parent / item.text.strip().rsplit(":", 1)[0]
+                    with File(reference, "r") as handle:
+                        if "frames" in handle:
+                            candidates.add(reference.resolve())
+            if len(candidates) != 1:
+                raise ValueError(
+                    "Descriptor must reference exactly one versioned field container"
+                )
+            path = candidates.pop()
+        file_path = str(path)
         if not isfile(file_path):
             raise FileNotFoundError(f"Could not find file {file_path}")
         self._file_path = file_path
         self._dtype = dtype
-        self._file = File(self._file_path, mode="a")
+        self._series = None
+        self._file = File(self._file_path, mode="r")
+        if "schema" in self._file.attrs:
+            self._file.close()
+            from ._hdf5_schema import SeriesReader
+
+            self._series = SeriesReader(file_path, dtype, zones, geometry_file)
+            self._file = self._series.file
+        else:
+            try:
+                if zones is not None or geometry_file is not None:
+                    raise ValueError(
+                        "Zone selection and shared geometry require the versioned schema"
+                    )
+                from ._hdf5_compression import prepare_read, prepare_dataset_read
+
+                prepare_read(self._file)
+                if CONST_GROUP in self._file:
+                    for dataset in self._file[CONST_GROUP].values():
+                        prepare_dataset_read(dataset)
+            except Exception:
+                self._file.close()
+                raise
 
     def _load_single_snapshot(self, field_name: str, time: str) -> pt.Tensor:
         """Load one field at one time."""
-        return pt.tensor(
-            self._file[f"{VAR_GROUP}/{time}/{field_name}"][:].copy(),
-            dtype=self._dtype,
-        ).squeeze()
+        return self._load_single_snapshot_slice(field_name, time, slice(None))
 
     def _load_single_snapshot_slice(
         self, field_name: str, time: str, spatial_slice: slice
     ) -> pt.Tensor:
         """Load a first-axis slice directly from an HDF5 dataset."""
+        if self._series is not None:
+            return self._series.read(field_name, time, spatial_slice)
+        from ._hdf5_compression import prepare_dataset_read
+
+        dataset = self._file[f"{VAR_GROUP}/{time}/{field_name}"]
+        prepare_dataset_read(dataset)
         values = pt.tensor(
-            self._file[f"{VAR_GROUP}/{time}/{field_name}"][spatial_slice],
+            dataset[spatial_slice],
             dtype=self._dtype,
         )
         return (
@@ -177,15 +229,24 @@ class HDF5Dataloader(Dataloader):
 
     def snapshot_shape(self, field_name: str, time: str) -> tuple[int, ...]:
         """Return a variable dataset shape without loading it."""
+        if self._series is not None:
+            return self._series.shape(field_name, time)
         shape = tuple(self._file[f"{VAR_GROUP}/{time}/{field_name}"].shape)
         return shape[:-1] if len(shape) > 1 and shape[-1] == 1 else shape
 
     @property
     def write_times(self) -> List[str]:
-        return list(self._file[VAR_GROUP].keys())
+        if self._series is not None:
+            return list(self._series.frames)
+        return sorted(self._file[VAR_GROUP].keys(), key=float)
 
     @property
     def field_names(self) -> Dict[str, List[str]]:
+        if self._series is not None:
+            return {
+                time: list(self._series.datasets[time, self._series.keys[0]])
+                for time in self.write_times
+            }
         times = self.write_times
         field_names: Dict[str, List[str]] = {}
         for time in times:
@@ -194,27 +255,112 @@ class HDF5Dataloader(Dataloader):
 
     @property
     def vertices(self) -> pt.Tensor:
+        if self._series is not None:
+            return pt.tensor(
+                self._series.geometry_values("locations"), dtype=pt.float64
+            )
         return pt.tensor(
             self._file[f"{CONST_GROUP}/{CENTERS_DS}"][:], dtype=self._dtype
         )
 
     @property
     def weights(self) -> pt.Tensor:
+        if self._series is not None:
+            if len(set(self.zone_dimensions.values())) != 1:
+                raise ValueError(
+                    "Selected zones mix geometric dimensions. Select compatible zones "
+                    "or use weights_by_zone to define explicit combined analysis weights."
+                )
+            return pt.tensor(self._series.geometry_values("weights"), dtype=self._dtype)
         return pt.tensor(
             self._file[f"{CONST_GROUP}/{VOLUMES_DS}"][:], dtype=self._dtype
         )
 
     @property
+    def zone_dimensions(self) -> Dict[str, int]:
+        """Physical mesh dimension of each selected zone (1, 2 or 3)."""
+        if self._series is None:
+            return {"mesh": 3}
+        return {
+            name: int(self._series.geometry["zones"][key].attrs["dimension"])
+            for name, key in zip(self._series.names, self._series.keys)
+        }
+
+    @property
+    def weights_by_zone(self) -> Dict[str, pt.Tensor]:
+        """Raw measures per zone, without combining different physical dimensions."""
+        if self._series is None:
+            return {"mesh": self.weights}
+        return {
+            name: pt.tensor(
+                self._series.geometry["zones"][key]["weights"][:], dtype=self._dtype
+            )
+            for name, key in zip(self._series.names, self._series.keys)
+        }
+
+    @property
     def connectivity(self) -> pt.Tensor:
+        if self._series is not None:
+            if len(self._series.keys) != 1:
+                raise ValueError("Use geometry(zone) for multi-zone topology")
+            return pt.tensor(self._series.geometry_values("topology"), dtype=pt.int64)
         return pt.tensor(
-            self._file[f"{CONST_GROUP}/{CONNECTIVITY_DS}"][:], dtype=self._dtype
+            self._file[f"{CONST_GROUP}/{CONNECTIVITY_DS}"][:], dtype=pt.int64
         )
 
     @property
     def edge_vertices(self) -> pt.Tensor:
+        if self._series is not None:
+            return pt.tensor(self._series.geometry_values("points"), dtype=pt.float64)
         return pt.tensor(
             self._file[f"{CONST_GROUP}/{VERTICES_DS}"][:], dtype=self._dtype
         )
+
+    @property
+    def supports_direct_slicing(self) -> bool:
+        return True
+
+    @property
+    def zone_names(self):
+        return self._series.names if self._series is not None else ["mesh"]
+
+    @property
+    def geometry_id(self):
+        return self._series.geometry_id if self._series is not None else None
+
+    @property
+    def association(self):
+        return self._series.association if self._series is not None else "cell"
+
+    @property
+    def locations(self):
+        return self.vertices
+
+    def geometry(self, zone=None):
+        """Read one zone's explicit geometry from a versioned file."""
+        from ._hdf5_schema import read_geometry
+
+        if self._series is None:
+            raise ValueError("Explicit zone geometry requires the versioned schema")
+        zone = (
+            self.zone_names[0] if zone is None and len(self.zone_names) == 1 else zone
+        )
+        if zone not in self.zone_names:
+            raise ValueError("Select one of the loaded geometry zones")
+        key = self._series.keys[self.zone_names.index(zone)]
+        return read_geometry(self._series.geometry["zones"][key])
+
+    def close(self):
+        if self._series is not None:
+            self._series.close()
+        else:
+            self._file.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()
 
 
 class HDF5Writer(object):
@@ -238,14 +384,105 @@ class HDF5Writer(object):
 
     """
 
-    def __init__(self, file: str):
+    def __init__(
+        self,
+        file: str,
+        *,
+        geometry_file=None,
+        field_dtype=DEFAULT_DTYPE,
+        spatial_chunk=65536,
+        compression=None,
+        compression_level=None,
+        shuffle=None,
+        geometry_compression=None,
+        geometry_compression_level=None,
+        geometry_shuffle=False,
+        overwrite=False,
+        append=False,
+    ):
         """Write flowTorch HDF5 files.
 
         :param file: path and file name to HDF5 file.
         :type file: str
+        :param compression: field codec: None (default), "gzip" or "zstd".
+        :param compression_level: codec level; defaults to gzip 4 or Zstd 3.
+        :param shuffle: reversible byte shuffle for fields. None disables it
+            for new output and inherits the existing setting on append.
+        :param geometry_compression: codec for legacy constant datasets.
+        :param geometry_compression_level: level for legacy constant datasets.
+        :param geometry_shuffle: byte shuffle for legacy constant datasets.
+        :param spatial_chunk: maximum rows per compressed/chunked dataset chunk.
+        :param geometry_file: existing read-only geometry for split output.
+            Configure its compression when creating it with write_geometry.
+
+        :param append: add new snapshots to an existing complete split dataset.
+            Omitted compression settings inherit stored filters. Duplicate times,
+            precision/schema changes and overwrite=True are rejected. Geometry
+            can be discovered from the existing file when geometry_file is omitted.
+
+        Zstd requires the optional compression extra. All filters are lossless;
+        storage precision is selected separately. Defaults remain uncompressed.
         """
+        from ._hdf5_compression import compression_settings, record_compression
+
+        if append and overwrite:
+            raise ValueError("append and overwrite are mutually exclusive")
+        if append and geometry_file is None:
+            from pathlib import Path
+            from ._hdf5_schema import SCHEMA
+
+            with File(file, "r") as existing:
+                if existing.attrs.get("schema") != SCHEMA:
+                    raise ValueError(
+                        "Explicit append requires the split-geometry schema"
+                    )
+                geometry_file = (
+                    Path(file).resolve().parent / existing.attrs["geometry_file"]
+                )
+        self._geometry_compression = compression_settings(
+            geometry_compression, geometry_compression_level, geometry_shuffle
+        )
+        if spatial_chunk < 1:
+            raise ValueError("spatial_chunk must be positive")
+        self._spatial_chunk = spatial_chunk
         self._file_path = file
-        self._file = File(file, mode="a")
+        self._series = None
+        if geometry_file is None:
+            self._compression = compression_settings(
+                compression, compression_level, False if shuffle is None else shuffle
+            )
+            self._file = File(file, mode="a")
+            # Preserve provenance for existing compressed datasets in append mode.
+            if "compression_settings" not in self._file.attrs:
+                record_compression(
+                    self._file,
+                    fields=self._compression,
+                    geometry=self._geometry_compression,
+                )
+        else:
+            from ._hdf5_schema import FieldFile
+
+            if (
+                geometry_compression is not None
+                or geometry_shuffle
+                or geometry_compression_level is not None
+            ):
+                raise ValueError(
+                    "Configure new geometry with HDF5Writer.write_geometry; existing geometry is read-only"
+                )
+            self._series = FieldFile(
+                file,
+                geometry_file,
+                field_dtype,
+                spatial_chunk,
+                compression,
+                overwrite,
+                compression_level=compression_level,
+                shuffle=shuffle,
+                append=append,
+            )
+            self._compression = self._series.compression
+            self._file = self._series.file
 
     def write(
         self,
@@ -268,16 +505,31 @@ class HDF5Writer(object):
         :param dtype: data type, defaults to pt.float32
         :type dtype: pt.dtype, optional
         """
+        if self._series is not None:
+            raise ValueError("Use allocate_field/write_slice for versioned output")
         if time is not None:
             ds_name = VAR_GROUP + "/{:s}/{:s}".format(time, name)
         else:
             ds_name = CONST_GROUP + "/{:s}".format(name)
 
         if dtype in dtype_conversion.keys():
+            settings = (
+                self._compression if time is not None else self._geometry_compression
+            )
+            options = settings.dataset_options
+            if settings.enabled:
+                if not size or any(n < 1 for n in size):
+                    raise ValueError("Compressed datasets require positive dimensions")
+                options["chunks"] = (min(size[0], self._spatial_chunk), *size[1:])
             if ds_name in self._file:
                 del self._file[ds_name]
+            ds = self._file.create_dataset(
+                ds_name, size, dtype=dtype_conversion[dtype], **options
+            )
+            # Per-dataset provenance also supports mixed settings in append mode.
+            import json
 
-            ds = self._file.create_dataset(ds_name, size, dtype=dtype_conversion[dtype])
+            ds.attrs["compression_settings"] = json.dumps(settings.metadata)
             if data is not None:
                 shape_diff = len(size) - len(data.size())
                 if shape_diff == 1:
@@ -292,17 +544,80 @@ class HDF5Writer(object):
                 )
             )
 
-    def write_xdmf(self):
+    def write_xdmf(self, filename=None):
         """Write XDMF wrapper to access flowTorch HDF5 files in ParaView."""
-        writer = XDMFWriter(self._file_path, self._file)
-        writer.create_xdmf("flowtorch.xdmf")
+        if self._series is not None:
+            from pathlib import Path
+
+            self._series.write_xdmf(
+                filename or Path(self._file_path).with_suffix(".xdmf")
+            )
+        else:
+            writer = XDMFWriter(self._file_path, self._file)
+            writer.create_xdmf(filename or "flowtorch.xdmf")
+
+    @staticmethod
+    def write_geometry(
+        file,
+        zones,
+        *,
+        compression=None,
+        compression_level=None,
+        shuffle=False,
+        spatial_chunk=65536,
+    ):
+        """Create or validate reusable geometry from ordered (name, geometry) pairs.
+
+        Codec, level and shuffle affect new files only. Existing geometry is
+        validated and reused read-only, retaining its original filter pipeline.
+        Compressed arrays are written in spatial_chunk-sized row blocks.
+        """
+        from ._hdf5_schema import write_geometry
+
+        return write_geometry(
+            file,
+            zones,
+            compression=compression,
+            compression_level=compression_level,
+            shuffle=shuffle,
+            spatial_chunk=spatial_chunk,
+        )
+
+    def allocate_field(self, name, component_shape, time, zone, metadata=None):
+        """Allocate one field; values are supplied in increasing spatial chunks."""
+        if self._series is None:
+            raise ValueError("A shared geometry file is required")
+        return self._series.allocate(name, component_shape, time, zone, metadata)
+
+    def write_slice(self, name, time, zone, spatial_slice, values):
+        if self._series is None:
+            raise ValueError("A shared geometry file is required")
+        self._series.write_slice(name, time, zone, spatial_slice, values)
+
+    def finish(self):
+        if self._series is not None:
+            self._series.finish()
+        else:
+            self._file.flush()
+
+    def close(self):
+        if self._series is not None:
+            self._series.close()
+        else:
+            self._file.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()
 
 
 class FOAM2HDF5(object):
     """Convert reconstructed OpenFOAM cases to flowTorch HDF5 format.
 
-    If the simulation case is decomposed into processor folders/domains,
-    an info statement is displayed and no conversion is performed.
+    Decomposed cases and time-dependent meshes raise ValueError. Existing output
+    requires explicit overwrite. Supply geometry_file for reusable separate geometry.
 
     Examples
 
@@ -321,7 +636,7 @@ class FOAM2HDF5(object):
         :param dtype: tensor type, defaults to DEFAULT_DTYPE
         :type dtype: str, optional
         """
-        self._loader = FOAMDataloader(path, dtype, False)
+        self._loader = FOAMDataloader(path, pt.float64, None)
         self._dtype = dtype
         self._topology: pt.Tensor | None = None
         self._mesh_points: pt.Tensor | None = None
@@ -331,6 +646,17 @@ class FOAM2HDF5(object):
         filename: str,
         fields: List[str] | None = None,
         times: List[str] | None = None,
+        *,
+        geometry_file: str | None = None,
+        spatial_chunk: int = 65536,
+        compression: str | None = None,
+        compression_level: int | None = None,
+        shuffle: bool | None = None,
+        geometry_compression: str | None = None,
+        geometry_compression_level: int | None = None,
+        geometry_shuffle: bool = False,
+        overwrite: bool = False,
+        append: bool = False,
     ):
         """Convert OpenFOAM case to flowTorch HDF5 file.
 
@@ -342,41 +668,148 @@ class FOAM2HDF5(object):
         :param times: list of times to convert; if None, all available
             times are converted
         :type times: List[str], optional
+
+        compression, compression_level and shuffle configure time-dependent
+        fields. geometry_compression, geometry_compression_level and
+        geometry_shuffle independently configure newly written geometry.
+        Both layouts support lossless gzip and optional Zstd. Reusing a shared
+        geometry file preserves its compression regardless of these options.
+        append=True adds unique new times to complete split output and inherits
+        omitted field selections and compression. It rejects legacy single-file
+        output and cannot be combined with overwrite=True. The converter dtype
+        must match existing field storage precision.
         """
-        file_path = join(self._loader._case.path, filename)
-        self._remove_file_if_present(file_path)
-        # trigger error message when the case is distributed
+        from pathlib import Path
+        from ._hdf5_schema import select_names
+        from ._hdf5_compression import compression_settings
+
+        if append and overwrite:
+            raise ValueError("append and overwrite are mutually exclusive")
+        if not append:
+            compression_settings(
+                compression, compression_level, False if shuffle is None else shuffle
+            )
+        compression_settings(
+            geometry_compression, geometry_compression_level, geometry_shuffle
+        )
         if self._loader._case.distributed:
-            message = """The direct conversion of distributed cases is currently not supported.\n
-        Workaround:
-            1.  run reconstructPar (OpenFOAM utility)
-            1.1 if there is no reconstructed mesh, run also reconstructParMesh
-            2.  remove all processor* folders
-            3.  perform the conversion again (flowTorch)
-            """
-            logger.critical(message)
-            logger.critical("Exiting due to previous encountered errors.")
-            exit()
+            raise ValueError(
+                "Decomposed OpenFOAM conversion is unsupported; reconstruct the case first"
+            )
+        if self._dtype not in (pt.float32, pt.float64) or spatial_chunk < 1:
+            raise ValueError("Expected float32/float64 fields and positive chunks")
+        selected_times = select_names(self._loader.write_times, times, "time")
+        selected_times.sort(key=float)
+        selected_fields = select_names(
+            self._loader.field_names[selected_times[0]], fields, "field"
+        )
+        case = Path(self._loader._case.path)
+        for time in selected_times:
+            select_names(self._loader.field_names[time], selected_fields, "field")
+            if (case / time / "polyMesh").exists():
+                raise ValueError(
+                    "Time-dependent meshes are unsupported; map to a fixed mesh first"
+                )
+        file_path = case / filename
+        if file_path.exists() and not overwrite and not append:
+            raise FileExistsError(file_path)
+        if append:
+            from ._hdf5_schema import inspect_append, validate_append_selection
+
+            info = inspect_append(
+                file_path,
+                self._dtype,
+                geometry_file,
+                compression=compression,
+                compression_level=compression_level,
+                shuffle=shuffle,
+            )
+            geometry_file = info["geometry_path"]
+            if info["zone_names"] != ["mesh"]:
+                raise ValueError("OpenFOAM append requires the existing mesh zone")
+            if fields is None:
+                selected_fields = select_names(
+                    self._loader.field_names[selected_times[0]],
+                    list(info["schema"]["mesh"]),
+                    "field",
+                )
+            n_cells, _, _ = self._gather_mesh_information(str(case / POLYMESH_PATH))
+            schemas = {
+                "mesh": {
+                    name: (
+                        n_cells,
+                        *self._loader.load_snapshot(name, selected_times[0]).shape[1:],
+                    )
+                    for name in selected_fields
+                }
+            }
+            validate_append_selection(info, selected_times, schemas)
+        if geometry_file is not None:
+            from .unstructured import UnstructuredGeometry
+
+            mesh_path = str(case / POLYMESH_PATH)
+            n_cells, _, _ = self._gather_mesh_information(mesh_path)
+            geometry = UnstructuredGeometry(
+                self._mesh_points.numpy(),
+                self._topology.numpy(),
+                "Mixed",
+                n_cells,
+                "cell",
+                self._get_cell_centers().numpy(),
+                self._get_cell_volumes().numpy(),
+            )
+            geometry_path = Path(geometry_file).resolve()
+            HDF5Writer.write_geometry(
+                geometry_path,
+                [("mesh", geometry)],
+                compression=geometry_compression,
+                compression_level=geometry_compression_level,
+                shuffle=geometry_shuffle,
+                spatial_chunk=spatial_chunk,
+            )
+            descriptor = file_path.with_suffix(".xdmf")
+            if descriptor.exists() and not overwrite and not append:
+                raise FileExistsError(descriptor)
+            if descriptor.exists() and not append:
+                descriptor.unlink()
+            with HDF5Writer(
+                str(file_path),
+                geometry_file=geometry_path,
+                field_dtype=self._dtype,
+                spatial_chunk=spatial_chunk,
+                compression=compression,
+                compression_level=compression_level,
+                shuffle=shuffle,
+                overwrite=overwrite,
+                append=append,
+            ) as writer:
+                for time in selected_times:
+                    for name in selected_fields:
+                        value = self._loader.load_snapshot(name, time)
+                        writer.allocate_field(
+                            name, tuple(value.shape[1:]), time, "mesh"
+                        )
+                        for start in range(0, len(value), spatial_chunk):
+                            part = slice(start, min(start + spatial_chunk, len(value)))
+                            writer.write_slice(name, time, "mesh", part, value[part])
+                writer.write_xdmf(descriptor)
         else:
-            logger.info("Writing data to file {:s}".format(file_path))
-            writer = HDF5Writer(file_path)
-            logger.info("Converting mesh.")
-            self._convert_mesh(writer)
-            logger.info("Converting fields.")
-            self._convert_fields(writer, fields, times)
-            logger.info("Conversion finished. Writing XDMF file.")
-            writer.write_xdmf()
-
-    @staticmethod
-    def _remove_file_if_present(file_path: str):
-        """Remove the output file from previous runs if present
-
-        :param file_path: path to file
-        :type file_path: str
-        """
-        if exists(file_path):
-            logger.info("Removing old file {:s}".format(file_path))
-            remove(file_path)
+            if file_path.exists():
+                file_path.unlink()
+            with HDF5Writer(
+                str(file_path),
+                compression=compression,
+                compression_level=compression_level,
+                shuffle=shuffle,
+                geometry_compression=geometry_compression,
+                geometry_compression_level=geometry_compression_level,
+                geometry_shuffle=geometry_shuffle,
+                spatial_chunk=spatial_chunk,
+            ) as writer:
+                self._convert_mesh(writer)
+                self._convert_fields(writer, selected_fields, selected_times)
+                writer.write_xdmf()
+        return str(file_path)
 
     def _convert_mesh(self, writer: HDF5Writer):
         """Convert OpenFOAM mesh to XDMF-based structure.
@@ -386,17 +819,19 @@ class FOAM2HDF5(object):
         """
         mesh_path = join(self._loader._case.path, POLYMESH_PATH)
         n_cells, n_points, n_top = self._gather_mesh_information(mesh_path)
-        data = self._get_vertices(mesh_path, job=0)
-        writer.write(VERTICES_DS, (n_points, 3), data, None, self._dtype)
-        data = self._get_topology(job=0)
-        writer.write(CONNECTIVITY_DS, (n_top,), data, None, pt.int32)
-        data = self._get_cell_centers(job=1)
-        writer.write(CENTERS_DS, (n_cells, 3), data, None, self._dtype)
-        data = self._get_cell_volumes(job=1)
-        writer.write(VOLUMES_DS, (n_cells,), data, None, self._dtype)
+        data = self._get_vertices(mesh_path)
+        writer.write(VERTICES_DS, (n_points, 3), data, None, pt.float64)
+        data = self._get_topology()
+        writer.write(CONNECTIVITY_DS, (n_top,), data, None, pt.int64)
+        data = self._get_cell_centers()
+        writer.write(CENTERS_DS, (n_cells, 3), data, None, pt.float64)
+        data = self._get_cell_volumes()
+        if not bool(pt.isfinite(data).all() and (data > 0).all()):
+            raise ValueError("Cell volumes must be finite and positive")
+        writer.write(VOLUMES_DS, (n_cells,), data, None, pt.float64)
 
     def _gather_mesh_information(self, mesh_path: str):
-        """Gather information for parallel writing of mesh data.
+        """Gather fixed mesh sizes and assemble XDMF polyhedral topology.
 
         :param mesh_path: path to polyMesh folder
         :type mesh_path: str
@@ -406,44 +841,44 @@ class FOAM2HDF5(object):
         owners, neighbors = self._loader._mesh._parse_owners_and_neighbors(mesh_path)
         self._mesh_points = self._loader._mesh._parse_points(mesh_path)
 
-        cell_faces: List[List[pt.Tensor]] = [[] for _ in range(n_cells)]
-        n_faces_cell = pt.zeros(n_cells, dtype=pt.int32)
-        n_face_labels = 0
-
-        for i, owner in enumerate(owners):
-            cell_faces[owner].append(faces[i][: n_points_faces[i]])
-            n_face_labels += n_points_faces[i]
-            n_faces_cell[owner] += 1
-        for i, neigh in enumerate(neighbors):
-            cell_faces[neigh].append(faces[i][: n_points_faces[i]])
-            n_face_labels += n_points_faces[i]
-            n_faces_cell[neigh] += 1
-
-        topology_length = n_cells * 2 + pt.sum(n_faces_cell).item() + n_face_labels
-        topology = pt.zeros(topology_length, dtype=pt.int32)
-        marker = 0
-        for i, faces in enumerate(cell_faces):
-            topology[marker] = 16
-            topology[marker + 1] = len(faces)
-            marker += 2
-            for j in range(len(faces)):
-                n_labels = faces[j].size()[0]
-                topology[marker] = n_labels
-                topology[marker + 1 : marker + 1 + n_labels] = faces[j]
-                marker += n_labels + 1
+        # Sort face incidences by owner cell and assemble the ragged XDMF
+        # polyhedron stream in bulk, without Python loops over mesh cells.
+        face_ids = pt.cat((pt.arange(len(owners)), pt.arange(len(neighbors))))
+        cell_ids = pt.cat((owners.flatten(), neighbors.flatten())).long()
+        order = pt.argsort(cell_ids, stable=True)
+        face_ids, cell_ids = face_ids[order], cell_ids[order]
+        counts = n_points_faces.flatten()[face_ids].long()
+        n_faces_cell = pt.bincount(cell_ids, minlength=n_cells)
+        point_counts = pt.zeros(n_cells, dtype=pt.int64)
+        point_counts.scatter_add_(0, cell_ids, counts)
+        lengths = 2 + n_faces_cell + point_counts
+        cell_starts = pt.cumsum(lengths, 0) - lengths
+        topology = pt.empty(int(lengths.sum()), dtype=pt.int64)
+        topology[cell_starts] = 16
+        topology[cell_starts + 1] = n_faces_cell
+        face_lengths = counts + 1
+        face_starts = pt.cumsum(face_lengths, 0) - face_lengths + 2 * (cell_ids + 1)
+        topology[face_starts] = counts
+        source_starts = pt.cumsum(counts, 0) - counts
+        local_ids = pt.arange(int(counts.sum())) - pt.repeat_interleave(
+            source_starts, counts
+        )
+        repeated_faces = pt.repeat_interleave(face_ids, counts)
+        destinations = pt.repeat_interleave(face_starts + 1, counts) + local_ids
+        topology[destinations] = faces[repeated_faces, local_ids].long()
         self._topology = topology
         return n_cells, self._mesh_points.size()[0], topology.size()[0]
 
-    def _get_topology(self, job: int = 0):
+    def _get_topology(self):
         return self._topology
 
-    def _get_vertices(self, mesh_path: str, job: int = 0):
+    def _get_vertices(self, mesh_path: str):
         return self._mesh_points
 
-    def _get_cell_centers(self, job: int = 0):
+    def _get_cell_centers(self):
         return self._loader._mesh.get_cell_centers()
 
-    def _get_cell_volumes(self, job: int = 0):
+    def _get_cell_volumes(self):
         return self._loader._mesh.get_cell_volumes()
 
     def _convert_fields(
@@ -464,17 +899,17 @@ class FOAM2HDF5(object):
         :type times: List[str]
         """
         field_info = self._gather_field_information(fields, times)
-        for job, info in enumerate(field_info):
+        for info in field_info:
             logger.info(
                 f"Converting field {info[0]} at time {info[1]}, dimension {info[2]}"
             )
-            data = self._load_field(info[0], info[1], job=job)
-            writer.write(info[0], info[2], data, info[1])
+            data = self._load_field(info[0], info[1])
+            writer.write(info[0], info[2], data, info[1], self._dtype)
 
     def _gather_field_information(
         self, fields: List[str] | None, times: List[str] | None
     ) -> List[tuple]:
-        """Gather field information for parallel writing.
+        """Gather selected supported field names and shapes.
 
         - check if a field type is supported
         - determine data size
@@ -511,13 +946,16 @@ class FOAM2HDF5(object):
                 path = self._loader._case.build_file_path(name, time)
                 header = load_n_lines(path, MAX_LINE_HEADER)
                 field_type = self._loader._field_type(header)
-                if field_type in FIELD_TYPE_DIMENSION.keys():
-                    field_info.append(
-                        (name, time, (n_cells, FIELD_TYPE_DIMENSION[field_type]))
+                if field_type not in FIELD_TYPE_DIMENSION:
+                    raise ValueError(
+                        f"Unsupported OpenFOAM field type for {name}: {field_type!r}"
                     )
+                field_info.append(
+                    (name, time, (n_cells, FIELD_TYPE_DIMENSION[field_type]))
+                )
         return field_info
 
-    def _load_field(self, field: str, time: str, job: int = 0) -> pt.Tensor:
+    def _load_field(self, field: str, time: str) -> pt.Tensor:
         return self._loader.load_snapshot(field, time)
 
 
@@ -540,6 +978,7 @@ class XDMFWriter(object):
         :param hdf5_file: HDF5 file instance
         :type hdf5_file: File
         """
+        file_path = str(file_path)
         if "/" in file_path:
             self._path = file_path[: file_path.rfind("/")]
             self._hdf5_filename = file_path[file_path.rfind("/") + 1 :]
@@ -547,7 +986,9 @@ class XDMFWriter(object):
             self._path = "."
             self._hdf5_filename = file_path
         self._file = hdf5_file
-        self._n_cells = self._get_n_cells()
+        self._owns_file = False
+        self._versioned = self._file.attrs.get("schema") == "flowtorch-unstructured"
+        self._n_cells = 0 if self._versioned else self._get_n_cells()
 
     @classmethod
     def from_filepath(cls, file_path: str):
@@ -556,7 +997,9 @@ class XDMFWriter(object):
         :param file_path: path to HDF5 file
         :type file_path: str
         """
-        return cls(file_path, File(file_path, mode="a"))
+        writer = cls(file_path, File(file_path, mode="r"))
+        writer._owns_file = True
+        return writer
 
     def _get_n_cells(self) -> int:
         """Determine the number of mesh cells.
@@ -664,7 +1107,7 @@ class XDMFWriter(object):
             VAR_GROUP, time, name
         )
         shape = self._file[location.split(":")[-1]].shape
-        tensor_type = xdmf_attributes[len(shape)]
+        tensor_type = xdmf_attributes[__import__("math").prod(shape[1:])]
         attribute = (
             offset
             + '<Attribute Name="{:s}" AttributeType="{:s}" Center="Cell">\n'.format(
@@ -705,6 +1148,29 @@ class XDMFWriter(object):
         :param filename: name of the XDMF file, defaults to None
         :type filename: str, optional
         """
+        if self._versioned:
+            from pathlib import Path
+            from ._hdf5_schema import FieldFile, SeriesReader
+
+            # Reuse the same descriptor generator without opening output writable.
+            reader = SeriesReader(
+                join(self._path, self._hdf5_filename),
+                pt.float32,
+            )
+            try:
+                storage = object.__new__(FieldFile)
+                storage.file = reader.file
+                storage.frames = reader.frames
+                storage.geometry = reader.geometry
+                storage.path = reader.path
+                storage.geometry_path = Path(reader.geometry.filename).resolve()
+                storage.write_xdmf(
+                    Path(self._path)
+                    / (filename or Path(self._hdf5_filename).with_suffix(".xdmf").name)
+                )
+            finally:
+                reader.close()
+            return
         xdmf_str = XDMF_HEADER
         times = list(self._file[VAR_GROUP].keys()) if VAR_GROUP in self._file else []
         if len(times) > 0:
@@ -730,6 +1196,17 @@ class XDMFWriter(object):
         with open(self._path + "/" + filename, "w") as file:
             file.write(xdmf_str)
 
+    def close(self):
+        """Close only handles owned by from_filepath()."""
+        if self._owns_file:
+            self._file.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()
+
 
 def copy_hdf5_mesh(path: str, from_file: str, to_file: str) -> None:
     """Create a copy of a flowTorch hdf5 file containing only the mesh.
@@ -747,19 +1224,23 @@ def copy_hdf5_mesh(path: str, from_file: str, to_file: str) -> None:
     """
     path = check_and_standardize_path(path)
     from_file_path = join(path, from_file)
-    loader = HDF5Dataloader(from_file_path)
     to_file_path = join(path, to_file)
-    logger.info(f"Copying mesh from file {from_file_path} to {to_file_path}")
-    writer = HDF5Writer(to_file_path)
-    datasets = {
-        VERTICES_DS: loader.edge_vertices,
-        CENTERS_DS: loader.vertices,
-        VOLUMES_DS: loader.weights,
-        CONNECTIVITY_DS: loader.connectivity,
-    }
-    for ds_key in datasets.keys():
-        data = datasets[ds_key]
-        writer.write(ds_key, data.shape, data, None, data.dtype)
-    xdmf_name = f"{to_file.split('.')[0]}.xdmf"
-    xdmf = XDMFWriter.from_filepath(to_file_path)
-    xdmf.create_xdmf(xdmf_name)
+    with HDF5Dataloader(from_file_path, dtype=pt.float64) as loader:
+        if loader._series is not None:
+            HDF5Writer.write_geometry(
+                to_file_path,
+                [(zone, loader.geometry(zone)) for zone in loader.zone_names],
+            )
+            return
+        with HDF5Writer(to_file_path) as writer:
+            datasets = {
+                VERTICES_DS: loader.edge_vertices,
+                CENTERS_DS: loader.vertices,
+                VOLUMES_DS: loader.weights,
+                CONNECTIVITY_DS: loader.connectivity,
+            }
+            for name, data in datasets.items():
+                writer.write(name, data.shape, data, None, data.dtype)
+            writer.finish()
+        with XDMFWriter.from_filepath(to_file_path) as xdmf:
+            xdmf.create_xdmf(f"{to_file.rsplit('.', 1)[0]}.xdmf")
