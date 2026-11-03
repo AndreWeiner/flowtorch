@@ -20,7 +20,9 @@ both layouts. Unknown selections fail and replacing fields requires explicit
 ``overwrite=True``. Decomposed cases and time-dependent mesh directories are
 rejected; reconstruct the case or map it to a fixed mesh first. Boundary-patch
 export is outside this interface. The converter still reads complete fields;
-chunked output does not make its input path out of core.
+chunked output does not make its input path out of core. Native gzip inputs are
+supported. For partial field reads and their storage-dependent limits, see
+:doc:`foam_reader`.
 
 The same compression options are available for single-file output. Field settings
 apply to time-dependent arrays; geometry settings apply to constant arrays.

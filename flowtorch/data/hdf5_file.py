@@ -21,10 +21,10 @@ from h5py import File
 # flowtorch packages
 from flowtorch import DEFAULT_DTYPE
 from .dataloader import Dataloader, _preallocate_time_series
+from ._foam_stream import foam_open, header as foam_header
 from .foam_dataloader import (
     FOAMDataloader,
     POLYMESH_PATH,
-    MAX_LINE_HEADER,
     FIELD_TYPE_DIMENSION,
 )
 from .utils import check_list_or_str, check_and_standardize_path
@@ -923,13 +923,6 @@ class FOAM2HDF5(object):
         :rtype: List[tuple]
         """
 
-        def load_n_lines(file_name, n):
-            lines = []
-            with open(file_name, "rb") as file:
-                for _ in range(n):
-                    lines.append(file.readline())
-            return lines
-
         field_info = []
         mesh_path = join(self._loader._case.path, POLYMESH_PATH)
         n_cells = self._loader._mesh._get_n_cells(mesh_path)
@@ -944,8 +937,8 @@ class FOAM2HDF5(object):
                 ]
             for name in fields_to_convert:
                 path = self._loader._case.build_file_path(name, time)
-                header = load_n_lines(path, MAX_LINE_HEADER)
-                field_type = self._loader._field_type(header)
+                with foam_open(path) as stream:
+                    field_type = foam_header(stream).get(b"class")
                 if field_type not in FIELD_TYPE_DIMENSION:
                     raise ValueError(
                         f"Unsupported OpenFOAM field type for {name}: {field_type!r}"

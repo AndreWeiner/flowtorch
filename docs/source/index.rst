@@ -27,6 +27,7 @@ Load, convert and export fields while preserving geometry and field association.
       ensight_io
       hdf5_workflow
       foam_hdf5
+      foam_reader
 
 Algorithms and computational methods
 ------------------------------------
