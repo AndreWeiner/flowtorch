@@ -15,7 +15,7 @@ import re
 
 from glob import glob
 from os import listdir
-from os.path import isdir, isfile, join
+from os.path import basename, isdir, isfile, join
 from typing import List, Dict, Sequence, Tuple, Union
 
 # third party packages
@@ -415,7 +415,7 @@ class FOAMCase(object):
         """
         proc_dirs = glob(join(self._path, "processor*"))
         return any(
-            isdir(path) and re.fullmatch(r"processor\d+", path.rsplit("/", 1)[-1])
+            isdir(path) and re.fullmatch(r"processor\d+", basename(path))
             for path in proc_dirs
         )
 

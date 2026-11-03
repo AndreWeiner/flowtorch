@@ -980,13 +980,11 @@ class XDMFWriter(object):
         :param hdf5_file: HDF5 file instance
         :type hdf5_file: File
         """
-        file_path = str(file_path)
-        if "/" in file_path:
-            self._path = file_path[: file_path.rfind("/")]
-            self._hdf5_filename = file_path[file_path.rfind("/") + 1 :]
-        else:
-            self._path = "."
-            self._hdf5_filename = file_path
+        from pathlib import Path
+
+        path = Path(file_path)
+        self._path = str(path.parent)
+        self._hdf5_filename = path.name
         self._file = hdf5_file
         self._owns_file = False
         self._versioned = self._file.attrs.get("schema") == "flowtorch-unstructured"

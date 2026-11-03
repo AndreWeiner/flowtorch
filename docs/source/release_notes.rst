@@ -58,6 +58,8 @@ Analysis export and documentation
 * Document conversion, chunked SVD/SPOD, compression, append/recovery and ParaView
   workflows. Expand the glossary and separate format guides, algorithm examples
   and worked applications in the documentation navigation.
+* Handle native Windows path separators when detecting OpenFOAM processor
+  directories and regenerating XDMF descriptors.
 * Fix environment capture with older PyTorch precision proxies, and resolve
   static typing findings across loaders, exports, provenance and numerical APIs.
 
