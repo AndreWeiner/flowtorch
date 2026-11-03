@@ -76,6 +76,7 @@ exclude_patterns = [
 # a list of builtin themes.
 #
 html_theme = 'sphinx_rtd_theme'
+html_logo = '_static/flowtorch_logo.svg'
 html_theme_options = {
     'titles_only': False
 }
@@ -84,3 +85,6 @@ html_theme_options = {
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
 html_static_path = ['_static']
+
+# Hide repeated body captions while retaining sidebar navigation groups.
+html_css_files = ["custom.css"]

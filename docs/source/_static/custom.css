@@ -1,3 +1,16 @@
 .section {
      text-align:justify;
 }
+
+/* Section headings precede descriptions; toctree captions remain in the sidebar. */
+.homepage-section-links .toctree-wrapper > p.caption {
+    display: none;
+}
+
+/* Keep the project logo compact within the standard navigation width. */
+.wy-side-nav-search a img.logo {
+    width: 150px;
+    max-width: 100%;
+    height: auto;
+    margin: 0 auto;
+}
