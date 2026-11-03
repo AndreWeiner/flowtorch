@@ -38,7 +38,7 @@ class MSSA(ProvenanceMixin):
             "hankel_svd": self._svd,
         }
         if "_svd_dr" in vars(self):
-            settings["projection_svd"] = self._svd_dr
+            settings["projection_svd"] = vars(self)["_svd_dr"]
         return settings
 
     @tracked

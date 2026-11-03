@@ -11,11 +11,11 @@ the finite volume mesh.
 # standard library packages
 import struct
 import logging
+import re
 
-from sys import exit
 from glob import glob
 from os import listdir
-from os.path import isdir, isfile, join
+from os.path import basename, isdir, isfile, join
 from typing import List, Dict, Sequence, Tuple, Union
 
 # third party packages
@@ -24,6 +24,16 @@ import torch as pt
 # flowtorch packages
 from flowtorch import DEFAULT_DTYPE
 from .dataloader import Dataloader, _preallocate_time_series
+from ._foam_stream import (
+    foam_open,
+    resolve,
+    field_info,
+    read_values,
+    header,
+    token,
+    binary_dtype,
+    read_list,
+)
 from .utils import check_and_standardize_path, check_list_or_str
 
 logger = logging.getLogger(__name__)
@@ -36,6 +46,7 @@ logging.basicConfig(level=logging.INFO)
 # the order is: XX, XY, XZ, YX, YY, YZ, ZX, ZY, ZZ
 FIELD_TYPE_DIMENSION = {
     b"volScalarField": 1,
+    b"volSphericalTensorField": 1,
     b"volVectorField": 3,
     b"volSymmTensorField": 6,
     b"volTensorField": 9,
@@ -114,123 +125,22 @@ class FOAMDataloader(Dataloader):
         self._verbose = verbose
 
     def _parse_data(self, data: List[bytes]) -> pt.Tensor:
-        """Parse field data from an OpenFOAM snapshot.
+        """Compatibility parser for an already materialized nonuniform field."""
+        from io import BytesIO
 
-        :param data: full content of the snapshot file (including header
-            and metadata)
-        :type data: List[str]
-        :raises ValueError: if the field type is not supported
-        :return: numerical values stored in the snapshot
-        :rtype: pt.Tensor
-        """
-        field_type = self._field_type(data[:MAX_LINE_HEADER])
-        if not field_type in FIELD_TYPE_DIMENSION.keys():
-            type_name = (
-                field_type.decode("utf-8") if field_type is not None else "unknown"
-            )
-            raise ValueError(f"Field type {type_name} not supported.")
-        try:
-            if self._case.is_binary(data[:MAX_LINE_HEADER]):
-                field_data = self._unpack_internal_field_binary(
-                    data, FIELD_TYPE_DIMENSION[field_type]
-                )
-            else:
-                field_data = self._unpack_internal_field_ascii(
-                    data, FIELD_TYPE_DIMENSION[field_type]
-                )
-        except Exception as e:
-            logger.error(e)
-        else:
-            return field_data
-
-    @staticmethod
-    def _find_nonuniform(data: Sequence[bytes]) -> Tuple[int, int]:
-        """Determine the start index and size of a nonuniform field.
-
-        OpenFOAM output files with nonuniform fields contain the line
-            nonuniform
-            #####
-            (...
-            )
-        where ##### is an integer number indicating the number of list
-        entries.
-        This number is needed.
-
-        :param data: content of an OpenFOAM field file
-        :type data: List[str]
-        :return: line index containing the keyword *nonuniform* and the size of the nonuniform list;
-                 if the keyword is not found, two zeros are returned
-        :rtype: Tuple[int, int]
-        """
-        for i, line in enumerate(data):
-            if b"nonuniform" in line:
-                return i, int(data[i + 1])
-        return 0, 0
+        stream = BytesIO(b"".join(data))
+        metadata, dim, count, uniform = field_info(stream)
+        if uniform is not None or count is None:
+            raise ValueError("Uniform fields require a cell count; use load_snapshot")
+        values = read_values(stream, metadata, dim, count, 0, count)
+        shape = (count,) if dim == 1 else (count, dim)
+        return pt.as_tensor(values, dtype=self._dtype).reshape(shape)
 
     @staticmethod
     def _field_type(data: Sequence[bytes]) -> bytes | None:
-        """Determine the tensor type of a field.
-
-        :param data: content of an OpenFoam output file
-        :type data: List[str]
-        :return: the field type; if the type is not supported or not found,
-        `None` is returned
-        :rtype: str
-        """
-        for line in data:
-            if b"class" in line:
-                return line.split()[-1].strip(b";")
-        return None
-
-    def _unpack_internal_field_ascii(self, data: List[bytes], dim: int) -> pt.Tensor:
-        """Parse internal field given as ASCII-encoded text.
-
-        :param data: content of output file
-        :type data: List[str]
-        :param dim: dimensionality of the field, e.g., 1 for a scalar or
-            3 for a vector
-        :type dim: int
-        :return: tensor holding the field data as numerical values
-        :rtype: pt.Tensor
-
-        """
-        start, n_values = self._find_nonuniform(data[:MAX_LINE_INTERNAL_FIELD])
-        start += 3
-        if dim == 1:
-            return pt.tensor(
-                [float(line) for line in data[start : start + n_values]],
-                dtype=self._dtype,
-            )
-        else:
-            return pt.tensor(
-                [
-                    list(map(float, line[1:-2].split()))
-                    for line in data[start : start + n_values]
-                ],
-                dtype=self._dtype,
-            )
-
-    def _unpack_internal_field_binary(self, data: List[bytes], dim: int) -> pt.Tensor:
-        """Parse internal field given in binary encoding.
-
-        :param data: content of output file
-        :type data: List[str]
-        :param dim: dimensionality of the field, e.g., 1 for a scalar, 3 for a vector or 9 for a tensor
-        :type dim: int
-        :return: tensor holding the field data
-        :rtype: pt.Tensor
-        """
-        start, n_values = self._find_nonuniform(data[:MAX_LINE_INTERNAL_FIELD])
-        start += 2
-        buffer = b"".join(data[start:])
-        values = struct.unpack(
-            "{}d".format(dim * n_values),
-            buffer[SIZE_OF_CHAR : SIZE_OF_CHAR + SIZE_OF_DOUBLE * n_values * dim],
-        )
-        if dim > 1:
-            return pt.tensor(values, dtype=self._dtype).reshape(n_values, dim)
-        else:
-            return pt.tensor(values, dtype=self._dtype)
+        """Read the declared field class from header text."""
+        match = re.search(rb"\bclass\s+(\w+)\s*;", b"".join(data))
+        return match[1] if match else None
 
     def _load_single_snapshot(self, field_name: str, time: str) -> pt.Tensor:
         """Load a single snapshot of a single field from disk.
@@ -245,17 +155,93 @@ class FOAMDataloader(Dataloader):
         # print some info because for large fields and large number of time steps it takes quite a while to load
         if self._verbose:
             logger.info(f"Loading time step {time}s for field {field_name}.")
-        file_paths = []
-        if self._case.distributed:
-            for proc in range(self._case.processors):
-                file_paths.append(self._case.build_file_path(field_name, time, proc))
-        else:
-            file_paths.append(self._case.build_file_path(field_name, time, 0))
-        field_data = []
-        for file_path in file_paths:
-            with open(file_path, "rb") as file:
-                field_data.append(self._parse_data(file.readlines()))
-        return pt.cat(field_data)
+        return self._load_slice(field_name, time, slice(None))
+
+    def _field_layout(self, field_name: str, time: str) -> List[Tuple[str, int, int]]:
+        layout: List[Tuple[str, int, int]] = []
+        for proc in range(self._case.processors):
+            path = self._case.build_file_path(field_name, time, proc)
+            with foam_open(path) as stream:
+                metadata, dim, count, uniform = field_info(stream)
+            if count is None:
+                mesh_path = self._case.build_file_path("", POLYMESH_PATH, proc)
+                count = self._mesh._get_n_cells(mesh_path)
+            if layout and dim != layout[0][1]:
+                raise ValueError("Field component count differs across processors")
+            layout.append((path, dim, count))
+        return layout
+
+    def snapshot_shape(self, field_name: str, time: str) -> Tuple[int, ...]:
+        """Read field metadata without materializing nonuniform field values."""
+        layout = self._field_layout(field_name, time)
+        count = sum(item[2] for item in layout)
+        dim = layout[0][1]
+        return (count,) if dim == 1 else (count, dim)
+
+    def _load_slice(
+        self, field_name: str, time: str, spatial_slice: slice
+    ) -> pt.Tensor:
+        layout = self._field_layout(field_name, time)
+        count = sum(item[2] for item in layout)
+        start, stop, step = spatial_slice.indices(count)
+        if step != 1:
+            raise ValueError("spatial_slice must have unit stride")
+        dim = layout[0][1]
+        shape = (max(0, stop - start),) if dim == 1 else (max(0, stop - start), dim)
+        result = pt.empty(shape, dtype=self._dtype)
+        offset = 0
+        for path, _, local_count in layout:
+            first, last = max(start, offset), min(stop, offset + local_count)
+            if first < last:
+                with foam_open(path) as stream:
+                    metadata, _, parsed_count, uniform = field_info(stream)
+                    if uniform is not None:
+                        values = pt.tensor(uniform, dtype=self._dtype)
+                        result[first - start : last - start] = (
+                            values[0] if dim == 1 else values
+                        )
+                    else:
+                        if parsed_count != local_count:
+                            raise ValueError(f"Field size changed while reading {path}")
+                        values = read_values(
+                            stream,
+                            metadata,
+                            dim,
+                            local_count,
+                            first - offset,
+                            last - offset,
+                        )
+                        target = result[first - start : last - start]
+                        target.copy_(
+                            pt.as_tensor(values, dtype=self._dtype).reshape(
+                                target.shape
+                            )
+                        )
+            offset += local_count
+        return result
+
+    def load_snapshot_slice(self, field_name, time, spatial_slice):
+        """Load a contiguous cell range in processor concatenation order.
+
+        Plain binary fields seek directly to the range. ASCII fields scan the
+        preceding text; gzip streams decompress the preceding bytes. Neither
+        path materializes a full nonuniform snapshot. Geometry remains eager.
+        Non-unit strides are rejected explicitly.
+        """
+        check_list_or_str(field_name, "field_name")
+        check_list_or_str(time, "time")
+        if not isinstance(spatial_slice, slice):
+            raise TypeError("spatial_slice must be a slice")
+        if isinstance(field_name, list):
+            return [
+                self.load_snapshot_slice(name, time, spatial_slice)
+                for name in field_name
+            ]
+        if isinstance(time, list):
+            return _preallocate_time_series(
+                lambda value: self._load_slice(field_name, value, spatial_slice), time
+            )
+        return self._load_slice(field_name, time, spatial_slice)
 
     def _load_multiple_snapshots(self, field_name: str, times: List[str]) -> pt.Tensor:
         """Load multiple snapshots of a single field.
@@ -370,7 +356,7 @@ class FOAMCase(object):
         self._time_folders = self._eval_write_times()
         self._field_names = self._eval_field_names()
         if not self._check_mesh_files():
-            exit("Error: could not find valid mesh in case {:s}".format(self._path))
+            raise FileNotFoundError(f"Could not find valid mesh in case {self._path}")
 
     @staticmethod
     def _is_binary(header: List[Union[bytes, str]]) -> bool:
@@ -400,13 +386,20 @@ class FOAMCase(object):
             for proc in range(self._processors):
                 files_found += [
                     isfile(
-                        join(self._path, f"processor{proc:d}", POLYMESH_PATH, mesh_file)
+                        resolve(
+                            join(
+                                self._path,
+                                f"processor{proc:d}",
+                                POLYMESH_PATH,
+                                mesh_file,
+                            )
+                        )
                     )
                     for mesh_file in MESH_FILES
                 ]
         else:
             files_found = [
-                isfile(join(self._path, POLYMESH_PATH, mesh_file))
+                isfile(resolve(join(self._path, POLYMESH_PATH, mesh_file)))
                 for mesh_file in MESH_FILES
             ]
         return all(files_found)
@@ -421,7 +414,10 @@ class FOAMCase(object):
         :rtype: bool
         """
         proc_dirs = glob(join(self._path, "processor*"))
-        return len(proc_dirs) > 0
+        return any(
+            isdir(path) and re.fullmatch(r"processor\d+", basename(path))
+            for path in proc_dirs
+        )
 
     def _eval_processors(self) -> int:
         """Get number of processor folders.
@@ -430,7 +426,16 @@ class FOAMCase(object):
         :rtype: int
         """
         if self._distributed:
-            return len(glob(join(self._path, "processor*")))
+            ids = sorted(
+                int(name[len("processor") :])
+                for name in listdir(self._path)
+                if re.fullmatch(r"processor\d+", name) and isdir(join(self._path, name))
+            )
+            if not ids or ids != list(range(len(ids))):
+                raise ValueError(
+                    "Expected contiguous processor folders starting at processor0"
+                )
+            return len(ids)
         else:
             return 1
 
@@ -478,7 +483,14 @@ class FOAMCase(object):
         ]
         return {
             self._time_folders[i]: [
-                field for field in listdir(folder) if isfile(join(folder, field))
+                field
+                for field in sorted(
+                    {
+                        name.removesuffix(".gz")
+                        for name in listdir(folder)
+                        if isfile(join(folder, name))
+                    }
+                )
             ]
             for i, folder in enumerate(all_time_folders)
         }
@@ -516,7 +528,7 @@ class FOAMCase(object):
             file_path = join(self._path, f"processor{processor:d}", time, field_name)
         else:
             file_path = join(self._path, time, field_name)
-        return file_path
+        return resolve(file_path) if field_name else file_path
 
     @property
     def distributed(self) -> bool:
@@ -593,7 +605,7 @@ class FOAMMesh(object):
         Create FOAMMesh object based on :class:`FOAMCase`.
         """
         if not isinstance(case, FOAMCase):
-            exit(
+            raise TypeError(
                 "Error: case must be of type FOAMCase, not {:s}".format(
                     type(case).__name__
                 )
@@ -645,169 +657,121 @@ class FOAMMesh(object):
         :return: number of cells; defaults to 0
         :rtype: int
         """
-        n_cells = 0
-        with open(join(mesh_path, "owner"), "rb") as file:
-            found = False
-            while not found:
-                line = file.readline()
-                if b"note" in line:
-                    tokens = line.split()
-                    for token in tokens:
-                        if b"nCells" in token:
-                            n_cells = int(token.split(b":")[1])
-                            found = True
-        return n_cells
+        import numpy as np
+
+        with foam_open(join(mesh_path, "owner")) as file:
+            metadata = header(file)
+            match = re.search(rb"nCells\s*:\s*(\d+)", metadata.get(b"note", b""))
+            if match:
+                return int(match[1])
+            length = int(token(file))
+            if length < 0 or token(file) != b"(":
+                raise ValueError("Invalid owner list")
+            maximum = -1
+            if metadata.get(b"format") == b"binary":
+                dtype = binary_dtype(metadata, "label")
+                for start in range(0, length, 65536):
+                    size = min(65536, length - start) * dtype.itemsize
+                    raw = file.read(size)
+                    if len(raw) != size:
+                        raise ValueError("Truncated owner list")
+                    values = np.frombuffer(raw, dtype=dtype)
+                    if np.any(values < 0):
+                        raise ValueError("Negative owner label")
+                    maximum = max(maximum, int(values.max()))
+            else:
+                for _ in range(length):
+                    value = int(token(file))
+                    if value < 0:
+                        raise ValueError("Negative owner label")
+                    maximum = max(maximum, value)
+            if token(file) != b")":
+                raise ValueError("Missing owner list closing delimiter")
+            return maximum + 1
+
+    def _primitive_list(
+        self, path: str, dim: int = 1, kind: str = "scalar"
+    ) -> pt.Tensor:
+        with foam_open(path) as stream:
+            metadata = header(stream)
+            if metadata.get(b"class", b"").startswith(b"vol"):
+                stream.seek(0)
+                metadata, field_dim, count, uniform = field_info(stream)
+                if field_dim != dim or uniform is not None or count is None:
+                    raise ValueError(
+                        "Precomputed geometry requires a matching nonuniform field"
+                    )
+                values = read_values(stream, metadata, dim, count, 0, count)
+                if dim > 1:
+                    values = values.reshape(count, dim)
+            else:
+                values = read_list(stream, metadata, dim, kind)
+        return pt.as_tensor(
+            values, dtype=self._dtype if kind == "scalar" else self._itype
+        )
 
     def _parse_points(self, mesh_path: str) -> pt.Tensor:
-        """Parse mesh vertices defined in *constant/polyMesh/points*.
-
-        :param mesh_path: mesh location
-        :type mesh_path: str
-        :return: tensor holding the mesh vertices
-        :rtype: pt.Tensor
-        """
-        with open(join(mesh_path, "points"), "rb") as file:
-            data = file.readlines()
-            start, length = self._get_list_length(data[:MAX_LINE_HEADER])
-            if self._case.is_binary(data[:MAX_LINE_HEADER]):
-                start += 1
-                buffer = b"".join(data[start:])
-                values = struct.unpack(
-                    "{}d".format(3 * length),
-                    buffer[SIZE_OF_CHAR : SIZE_OF_CHAR + SIZE_OF_DOUBLE * length * 3],
-                )
-                return pt.tensor(values, dtype=self._dtype).reshape(length, 3)
-            else:
-                start += 2
-                return pt.tensor(
-                    [
-                        list(map(float, line[1:-2].split()))
-                        for line in data[start : start + length]
-                    ],
-                    dtype=self._dtype,
-                )
+        """Read mesh points, including compressed and architecture-tagged files."""
+        return self._primitive_list(join(mesh_path, "points"), 3)
 
     def _parse_faces(self, mesh_path: str) -> Tuple[pt.Tensor, pt.Tensor]:
-        """Parse cell faces stored in *constant/polyMesh/faces*.
-
-        :param mesh_path: mesh location
-        :type mesh_path: str
-        :return: tuple of tensors with the first tensor holding the
-            number of points per face and the second one holding the
-            point labels forming the face; the second dimension of the
-            point label tensor is determined by the face with the highest
-            number of points; faces with fewer points are padded with zeros
-        :rtype: Tuple[pt.Tensor, pt.Tensor]
-        """
-
-        def zero_pad(tensor, new_size):
-            """Increase the size of second tensor dimension."""
-            diff = new_size - tensor.size()[1]
-            pad = pt.zeros((tensor.size()[0], diff), dtype=self._itype)
-            return pt.cat([tensor, pad], dim=1)
-
-        with open(join(mesh_path, "faces"), "rb") as file:
-            data = file.readlines()
-            start, length = self._get_list_length(data[:MAX_LINE_HEADER])
-            if self._case.is_binary(data[:MAX_LINE_HEADER]):
-                n_points_faces = pt.zeros((length - 1, 1), dtype=self._itype)
-                faces = pt.zeros_like(n_points_faces, dtype=self._itype)
-                start += 1
-                buffer = b"".join(data[start:])
-                idx = struct.unpack(
-                    "{}i".format(length),
-                    buffer[SIZE_OF_CHAR : SIZE_OF_CHAR + SIZE_OF_INT * length],
+        """Read ASCII faces or binary compact face addressing."""
+        with foam_open(join(mesh_path, "faces")) as stream:
+            metadata = header(stream)
+            if metadata.get(b"format") == b"binary":
+                if metadata.get(b"class") != b"faceCompactList":
+                    raise ValueError("Only faceCompactList binary faces are supported")
+                offsets = pt.as_tensor(
+                    read_list(stream, metadata, kind="label"), dtype=self._itype
                 )
-
-                # search for the next opening bracket to see where the second list starts
-                # the length of the second list is interpreted as a sequence of characters,
-                # so looking 50 characters ahead allows for a very large number of faces
-                list_0_end = SIZE_OF_INT * length
-                offset = 0
-                for i, c in enumerate(
-                    buffer[list_0_end : list_0_end + 50 * SIZE_OF_CHAR]
+                labels = pt.as_tensor(
+                    read_list(stream, metadata, kind="label"), dtype=self._itype
+                )
+                if (
+                    offsets.numel() < 1
+                    or offsets[0] != 0
+                    or offsets[-1] != labels.numel()
+                    or pt.any(offsets[1:] < offsets[:-1])
                 ):
-                    if chr(c) == r"(":
-                        offset = i + 1
-                values = struct.unpack(
-                    "{}i".format(idx[-1]),
-                    buffer[
-                        offset
-                        + SIZE_OF_INT * length : offset
-                        + (length + idx[-1]) * SIZE_OF_INT
-                    ],
-                )
-                for i in range(length - 1):
-                    face_labels = pt.tensor(
-                        values[idx[i] : idx[i + 1]], dtype=self._itype
-                    )
-                    n_points_faces[i] = len(face_labels)
-                    if len(face_labels) > faces.size()[1]:
-                        faces = zero_pad(faces, len(face_labels))
-                    faces[i][: len(face_labels)] = face_labels
+                    raise ValueError("Invalid compact face offsets")
+                counts = offsets[1:] - offsets[:-1]
+                width = int(counts.max()) if counts.numel() else 0
+                columns = pt.arange(width).unsqueeze(0)
+                mask = columns < counts.unsqueeze(1)
+                faces = pt.zeros((counts.numel(), width), dtype=self._itype)
+                addressing = offsets[:-1].unsqueeze(1) + columns
+                faces[mask] = labels[addressing[mask]]
             else:
-                n_points_faces = pt.zeros((length, 1), dtype=self._itype)
-                faces = pt.zeros_like(n_points_faces, dtype=self._itype)
-                start += 2
-                for i, line in enumerate(data[start : start + length]):
-                    n_points_faces[i] = int(line[:1])
-                    face_labels = pt.tensor(
-                        list(map(int, line[2:-2].split())), dtype=self._itype
+                length = int(token(stream))
+                if length < 0 or token(stream) != b"(":
+                    raise ValueError("Invalid face list")
+                rows = [
+                    read_list(stream, metadata, kind="label") for _ in range(length)
+                ]
+                if token(stream) != b")":
+                    raise ValueError("Missing face list closing delimiter")
+                counts = pt.tensor([len(row) for row in rows], dtype=self._itype)
+                width = int(counts.max()) if length else 0
+                faces = pt.zeros((length, width), dtype=self._itype)
+                if length:
+                    import numpy as np
+
+                    faces[pt.arange(width).unsqueeze(0) < counts.unsqueeze(1)] = (
+                        pt.as_tensor(np.concatenate(rows), dtype=self._itype)
                     )
-                    if len(face_labels) > faces.size()[1]:
-                        faces = zero_pad(faces, len(face_labels))
-                    faces[i][: len(face_labels)] = face_labels
-            return n_points_faces, faces
+            if pt.any(counts < 3) or pt.any(faces < 0):
+                raise ValueError(
+                    "Faces must have at least three nonnegative point labels"
+                )
+            return counts.unsqueeze(1), faces
 
     def _parse_owners_and_neighbors(
         self, mesh_path: str
     ) -> Tuple[pt.Tensor, pt.Tensor]:
-        """Parse face owners and neighbors.
-
-        - owners are parsed from *constant/polyMesh/owner*
-        - neighbors are parsed from *constant/polyMesh/neighbor*
-
-        :param mesh_path: mesh location
-        :type mesh_path: str
-        :return: tensor holding the cell labels owning or neighboring
-            a face
-        :rtype: Tuple[pt.Tensor, pt.Tensor]
-        """
-        with open(join(mesh_path, "owner"), "rb") as file:
-            data = file.readlines()
-            start, length = self._get_list_length(data[:MAX_LINE_HEADER])
-            owner_values: Sequence[int]
-            if self._case.is_binary(data[:MAX_LINE_HEADER]):
-                start += 1
-                buffer = b"".join(data[start:])
-                owner_values = struct.unpack(
-                    "{}i".format(length),
-                    buffer[SIZE_OF_CHAR : SIZE_OF_CHAR + SIZE_OF_INT * length],
-                )
-            else:
-                start += 2
-                owner_values = [int(line[:-1]) for line in data[start : start + length]]
-
-        with open(join(mesh_path, "neighbour"), "rb") as file:
-            data = file.readlines()
-            start, length = self._get_list_length(data[:MAX_LINE_HEADER])
-            neighbor_values: Sequence[int]
-            if self._case.is_binary(data[:MAX_LINE_HEADER]):
-                start += 1
-                buffer = b"".join(data[start:])
-                neighbor_values = struct.unpack(
-                    "{}i".format(length),
-                    buffer[SIZE_OF_CHAR : SIZE_OF_CHAR + SIZE_OF_INT * length],
-                )
-            else:
-                start += 2
-                neighbor_values = [
-                    int(line[:-1]) for line in data[start : start + length]
-                ]
-
+        """Read owner and neighbour labels with their declared integer width."""
         return (
-            pt.tensor(owner_values, dtype=self._itype),
-            pt.tensor(neighbor_values, dtype=self._itype),
+            self._primitive_list(join(mesh_path, "owner"), kind="label"),
+            self._primitive_list(join(mesh_path, "neighbour"), kind="label"),
         )
 
     @staticmethod
@@ -819,62 +783,15 @@ class FOAMMesh(object):
         :return: True if volumes and cell centers are available
         :rtype: bool
         """
-        return isfile(join(path, "C")) and isfile(join(path, "V"))
+        return isfile(resolve(join(path, "C"))) and isfile(resolve(join(path, "V")))
 
     def _parse_cell_centers(self, path: str) -> pt.Tensor:
-        """Parse cell centers from the constant directory.
-
-        :param path: mesh location
-        :type path: str
-        :return: tensor holding the cell center coordinates
-        :rtype: pt.Tensor
-        """
-        with open(join(path, "C"), "rb") as file:
-            data = file.readlines()
-            start, length = self._get_list_length(data[:MAX_LINE_HEADER])
-            if self._case.is_binary(data[:MAX_LINE_HEADER]):
-                start += 1
-                buffer = b"".join(data[start:])
-                values = struct.unpack(
-                    "{}d".format(3 * length),
-                    buffer[SIZE_OF_CHAR : SIZE_OF_CHAR + SIZE_OF_DOUBLE * length * 3],
-                )
-                return pt.tensor(values, dtype=self._dtype).reshape(length, 3)
-            else:
-                start += 2
-                return pt.tensor(
-                    [
-                        list(map(float, line[1:-2].split()))
-                        for line in data[start : start + length]
-                    ],
-                    dtype=self._dtype,
-                )
+        """Read precomputed cell centres from the constant directory."""
+        return self._primitive_list(join(path, "C"), 3)
 
     def _parse_cell_volumes(self, path: str) -> pt.Tensor:
-        """Parse cell volumes from the constant directory.
-
-        :param path: mesh location
-        :type path: str
-        :return: tensor holding the cell volumes
-        :rtype: pt.Tensor
-        """
-        with open(join(path, "V"), "rb") as file:
-            data = file.readlines()
-            start, length = self._get_list_length(data[:MAX_LINE_HEADER])
-            if self._case.is_binary(data[:MAX_LINE_HEADER]):
-                start += 1
-                buffer = b"".join(data[start:])
-                values = struct.unpack(
-                    "{}d".format(length),
-                    buffer[SIZE_OF_CHAR : SIZE_OF_CHAR + SIZE_OF_DOUBLE * length],
-                )
-                return pt.tensor(values, dtype=self._dtype)
-            else:
-                start += 2
-                return pt.tensor(
-                    [float(line[:-1]) for line in data[start : start + length]],
-                    dtype=self._dtype,
-                )
+        """Read precomputed cell volumes from the constant directory."""
+        return self._primitive_list(join(path, "V"))
 
     def _compute_face_centers_and_areas(
         self, points: pt.Tensor, faces: pt.Tensor, n_points_faces: pt.Tensor
@@ -932,6 +849,8 @@ class FOAMMesh(object):
             area_sums += a
             face_areas += n
 
+        if not pt.all(pt.isfinite(area_sums) & (area_sums > 0)):
+            raise ValueError("Mesh contains degenerate or invalid faces")
         face_centers /= area_sums * 3.0
         face_areas *= 0.5
 
@@ -971,27 +890,36 @@ class FOAMMesh(object):
         center_estimate = pt.zeros_like(cell_centers)
         n_faces_cell = pt.zeros(n_cells, dtype=self._itype)
 
-        for i, owner in enumerate(owners):
-            center_estimate[owner] += face_centers[i]
-            n_faces_cell[owner] += 1
-
-        for i, neigh in enumerate(neighbors):
-            center_estimate[neigh] += face_centers[i]
-            n_faces_cell[neigh] += 1
+        if (
+            owners.numel() != faces.shape[0]
+            or neighbors.numel() > owners.numel()
+            or pt.any(owners < 0)
+            or pt.any(owners >= n_cells)
+            or pt.any(neighbors < 0)
+            or pt.any(neighbors >= n_cells)
+        ):
+            raise ValueError("Invalid owner/neighbour addressing")
+        center_estimate.index_add_(0, owners, face_centers)
+        center_estimate.index_add_(0, neighbors, face_centers[: neighbors.numel()])
+        n_faces_cell.index_add_(0, owners, pt.ones_like(owners))
+        n_faces_cell.index_add_(0, neighbors, pt.ones_like(neighbors))
+        if pt.any(n_faces_cell == 0):
+            raise ValueError("Mesh contains cells without faces")
         center_estimate /= n_faces_cell.unsqueeze(-1)
 
-        for i, owner in enumerate(owners):
-            pyr_3vol = pt.dot(face_areas[i], face_centers[i] - center_estimate[owner])
-            pyr_ctr = 3.0 / 4.0 * face_centers[i] + center_estimate[owner] / 4.0
-            cell_centers[owner] += pyr_3vol * pyr_ctr
-            cell_volumes[owner] += pyr_3vol
+        for addressing, sign in ((owners, 1), (neighbors, -1)):
+            centers = face_centers[: addressing.numel()]
+            areas = face_areas[: addressing.numel()]
+            estimates = center_estimate[addressing]
+            pyramid_volume = sign * pt.sum(areas * (centers - estimates), dim=1)
+            pyramid_center = 0.75 * centers + 0.25 * estimates
+            cell_centers.index_add_(
+                0, addressing, pyramid_volume.unsqueeze(1) * pyramid_center
+            )
+            cell_volumes.index_add_(0, addressing, pyramid_volume)
 
-        for i, neigh in enumerate(neighbors):
-            pyr_3vol = pt.dot(face_areas[i], center_estimate[neigh] - face_centers[i])
-            pyr_ctr = 3.0 / 4.0 * face_centers[i] + center_estimate[neigh] / 4.0
-            cell_centers[neigh] += pyr_3vol * pyr_ctr
-            cell_volumes[neigh] += pyr_3vol
-
+        if not pt.all(pt.isfinite(cell_volumes) & (cell_volumes > 0)):
+            raise ValueError("Mesh cell volumes must be finite and positive")
         cell_centers /= cell_volumes.unsqueeze(-1)
         cell_volumes /= 3.0
 
@@ -1055,6 +983,10 @@ class FOAMMesh(object):
                     + 'postProcess -func "writeCellVolumes" -constant -time none'
                 )
                 centers, volumes = self._compute_cell_centers_and_volumes(mesh_location)
+        if not pt.all(pt.isfinite(centers)) or not pt.all(
+            pt.isfinite(volumes) & (volumes > 0)
+        ):
+            raise ValueError("Cell geometry must be finite with positive volumes")
         self._cell_centers = centers
         self._cell_volumes = volumes
 

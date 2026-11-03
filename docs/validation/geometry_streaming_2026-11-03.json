@@ -1,0 +1,63 @@
+{
+  "date": "2026-11-03",
+  "change": "Sequential geometry production/writing; only names, field schemas and signatures retained across zones.",
+  "lifetime_checks": "Weak references confirm geometry objects, point arrays and topology arrays are released before producing the next zone, including multi-snapshot fixed-mesh validation.",
+  "failure_and_reuse_checks": "New output remains incomplete on producer failure; generator cleanup runs on validation failures; reused geometry content is unchanged.",
+  "application": {
+    "source": "/home/andre/datasets/xrf1-bl-analysis/skander/uhbr-wake-re12-m84-aoa4-sa-neg.pval.unsteady_i=15500_t=9.6100000000e-02_extracted_zone_blanking_mean_var.plt",
+    "descriptor": "/tmp/flowtorch-streaming-skander/fields.xdmf",
+    "zone_dimensions": {
+      "wing-upper": 2,
+      "Extracted prism": 3,
+      "Extracted pyra": 3
+    },
+    "passed": true,
+    "seconds": 3.913830319000226,
+    "max_rss_kib": 1949708
+  },
+  "readback": {
+    "descriptor": "/tmp/flowtorch-streaming-skander/fields.xdmf",
+    "steps": [
+      {
+        "time": 0.0961,
+        "zones": [
+          {
+            "name": "wing-upper",
+            "points": 201994,
+            "cells": 200966,
+            "minimum_measure": 4.798398848370562e-13,
+            "fields": {
+              "mean-p": "float32"
+            }
+          },
+          {
+            "name": "Extracted prism",
+            "points": 3435078,
+            "cells": 6375380,
+            "minimum_measure": 5.685977155153741e-18,
+            "fields": {
+              "mean-p": "float32"
+            }
+          },
+          {
+            "name": "Extracted pyra",
+            "points": 2129835,
+            "cells": 1064354,
+            "minimum_measure": 5.189774217282559e-15,
+            "fields": {
+              "mean-p": "float32"
+            }
+          }
+        ]
+      }
+    ],
+    "passed": true
+  },
+  "checks": {
+    "formatting": "passed",
+    "lint": "passed",
+    "Python 3.10": "875 passed, 5 skipped, 73 integration tests deselected",
+    "Sphinx warnings-as-errors": "passed"
+  },
+  "limitations": "Largest individual zone still uses complete geometry and VTK working arrays. Full Skander conversion has not been started; the earlier accumulated-zone feasibility estimate predates this fix. RSS is one application observation, not a controlled before/after benchmark."
+}

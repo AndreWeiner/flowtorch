@@ -1,0 +1,63 @@
+{
+  "complete": true,
+  "scope": "Tecplot and shared HDF5 changes only; isolated snapshot uses the original OpenFOAM reader from HEAD",
+  "baseline_commit": "56ec0ce",
+  "tests": {
+    "passed": 931,
+    "skipped": 5,
+    "integration_deselected": 73
+  },
+  "checks": {
+    "format": "passed",
+    "lint": "passed",
+    "sphinx_warnings_as_errors": "passed",
+    "staged_diff_check": "passed"
+  },
+  "excluded_paths": [
+    "flowtorch/data/foam_dataloader.py",
+    "flowtorch/data/_foam_stream.py",
+    "tests/data/test_foam_stream.py",
+    "docs/source/foam_reader.rst",
+    "docs/validation/openfoam_backend_benchmark_2026-11-03/baseline_foam_dataloader.py",
+    "docs/validation/openfoam_backend_benchmark_2026-11-03/results.json",
+    "docs/validation/openfoam_backend_benchmark_2026-11-03/report.rst",
+    "docs/validation/openfoam_backend_benchmark_2026-11-03/run.log",
+    "docs/validation/openfoam_backend_benchmark_2026-11-03/benchmark.py",
+    "docs/validation/openfoam_backend_benchmark_2026-11-03/__pycache__/benchmark.cpython-310.pyc",
+    "docs/validation/openfoam_backend_benchmark_2026-11-03/__pycache__/baseline_foam_dataloader.cpython-310.pyc"
+  ],
+  "partial_files": {
+    "flowtorch/data/hdf5_file.py": "Excluded the new OpenFOAM stream parser import and field-header parser changes.",
+    "docs/source/index.rst": "Excluded the new foam_reader navigation entry.",
+    "docs/source/foam_hdf5.rst": "Excluded native OpenFOAM gzip/partial-reader claims and reference."
+  },
+  "snapshot_source_hashes": {
+    "flowtorch/data/__init__.py": "d4f0746d3d98cacddf92f4b5dd348ce4cbf8c75d2005d5200e0724b3d47b5b68",
+    "flowtorch/data/hdf5_file.py": "e58b40673c94b3a3e03a6562bf10e8a8cd73c21dc0f4c374c4f454016df45913",
+    "flowtorch/data/tecplot_dataloader.py": "a114f00e830033c0fa32c1bcc0c15955068150f112679ce5d3f00cc637289a30",
+    "flowtorch/data/_hdf5_compression.py": "e647547acb50c9c4b926b2633c1fd6cab56295363e0db43e62d8ea5943f12b75",
+    "flowtorch/data/_hdf5_schema.py": "86d27bd149e431891c6a3a2ca5630b122db424d2367c7e0a0b8525b06006d761",
+    "flowtorch/data/_tecplot71.py": "f32004b0367f6118e1643fa3510489c6dfa2715500de07316d01e5331a47fcf9",
+    "flowtorch/data/_tecplot112.py": "39b6bbc964d501708f01d0c12a2af62b3c34901154ed5f8ddf11efadab2ba9ca",
+    "flowtorch/data/_tecplot_native.py": "d7c57802e014a2242fcdc4009cea666465dd64dd935d8bade7f0c86cb0d22328",
+    "flowtorch/data/plt_converter.py": "c8436017ff3a109ca4093d204a9880ac80d3fbf5783278a03ca5e07ed486aeb2",
+    "flowtorch/data/result_export.py": "ced6e2a1532b452087bb8143bf71958963a63d17ca590df43673b3c137d18943",
+    "flowtorch/data/unstructured.py": "40219ba431441cff139fb5f33cb41c7465c11757abfb95ea97c3589f82278bc7",
+    "pyproject.toml": "3126b14b715d2ffc79799fdf613b75873640d76be4be1626e8808b1c033c3111",
+    "tests/data/test_geometry_streaming.py": "78ada36b918d331a719585a4518196c44f61941a41b0e75b86f5e37fef6671f8",
+    "tests/data/test_hdf5_append.py": "321b3a7bec53cf38ade1de7f714362c129b108b0ab25decb6712c0a1db91a8c6",
+    "tests/data/test_hdf5_compression.py": "f3e0544c85bb9a06ab2661f39a6d7866a7d03dfc476a8031a96d203d7ea9a605",
+    "tests/data/test_mixed_zone_conversion.py": "a80725db40652c42a57297be75d49e762b928f28a65450eb70891f5666f1a358",
+    "tests/data/test_tecplot112.py": "b14675dd0f31750ab3e322746b2b4b2de34c3edadffd3b97ab2692a9be764533",
+    "tests/data/test_unstructured_hdf5.py": "be7f0bcbc0146bd41d2a07649fb9ea34e4e1eb598488ad8be1df4ca858dd690c",
+    "flowtorch/provenance.py": "de68c75d367935479e6bbff20f5cda87b0305aab430edb301f3802906d1aa014",
+    "tests/test_provenance.py": "9dc7f2c683cc17331d9180ec952433d58bb3d71f88c41135dc464377781e3955",
+    "tests/application/benchmark_hdf5_compression.py": "7449617747138b48a516bc8f2cc79138e3a8c3dd79ac94cad34d8d0dc6233a91",
+    "tests/application/benchmark_hdf5_volume_compression.py": "62fd6bb748f58037f0d9e98e62a6f142b8ea93ead45125b78e209b61003e17a0",
+    "tests/application/check_xdmf.py": "a0ec3ebc7c4f3162e9ff4aac49a4ff652ffc1bc43d68470dcbe45e89e9e42920"
+  },
+  "notes": [
+    "Full earlier working-tree reports include separate uncommitted OpenFOAM reader changes; this check validates the proposed committed snapshot independently.",
+    "No external input/output datasets or OpenFOAM reader benchmark artifacts included."
+  ]
+}

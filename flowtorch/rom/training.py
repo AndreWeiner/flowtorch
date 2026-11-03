@@ -4,13 +4,29 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import ceil
-from typing import Any, Callable, Literal, Optional, Sequence, Type, Union
+from typing import (
+    Any,
+    Callable,
+    Literal,
+    Optional,
+    Sequence,
+    Type,
+    Union,
+    Protocol,
+    TYPE_CHECKING,
+)
 
 import torch as pt
 import torch.nn.functional as functional
 
 NoiseInitialization = Union[str, Sequence[pt.Tensor]]
-SchedulerFactory = Callable[[pt.optim.Optimizer], object]
+
+
+class LearningRateScheduler(Protocol):
+    def step(self, *args: Any, **kwargs: Any) -> Any: ...
+
+
+SchedulerFactory = Callable[[pt.optim.Optimizer], LearningRateScheduler]
 ModelRegularizer = Callable[[object], pt.Tensor]
 
 from flowtorch.provenance import describe, tracked
@@ -292,6 +308,13 @@ def _default_loss(prediction: pt.Tensor, target: pt.Tensor) -> pt.Tensor:
 
 class TrajectoryFineTuner:
     """Mixin implementing trajectory-aware multi-step fine-tuning."""
+
+    if TYPE_CHECKING:
+        # Supplied by the nn.Module used together with this training mixin.
+        parameters: Callable[..., Any]
+        state_dict: Callable[..., dict[str, pt.Tensor]]
+        load_state_dict: Callable[..., Any]
+        zero_grad: Callable[..., None]
 
     _latent_trajectories: list[pt.Tensor]
     _trajectory_times: list[pt.Tensor]

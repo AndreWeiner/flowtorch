@@ -1,0 +1,115 @@
+{
+  "complete": true,
+  "timestamp_utc": "2026-11-03T15:40:11.714594+00:00",
+  "feature": "Validated staged append for split HDF5 datasets",
+  "checks": {
+    "regression_suite": {
+      "passed": 966,
+      "skipped": 5,
+      "integration_deselected": 77
+    },
+    "format_check": "passed",
+    "lint": "passed",
+    "sphinx_warnings_as_errors": "passed",
+    "git_diff_check": "passed"
+  },
+  "reader_application": {
+    "passed": true,
+    "source_files": {
+      "1.494200000e-02": "/media/andre/Elements/research_data/FOR-2895/skander_mk2a_surface_plt/uhbr-wake-re12-m84-aoa4-sa-neg.surface.pval.unsteady_i=2410_t=1.494200000e-02.plt",
+      "1.500400000e-02": "/media/andre/Elements/research_data/FOR-2895/skander_mk2a_surface_plt/uhbr-wake-re12-m84-aoa4-sa-neg.surface.pval.unsteady_i=2420_t=1.500400000e-02.plt",
+      "1.506600000e-02": "/media/andre/Elements/research_data/FOR-2895/skander_mk2a_surface_plt/uhbr-wake-re12-m84-aoa4-sa-neg.surface.pval.unsteady_i=2430_t=1.506600000e-02.plt",
+      "1.512800000e-02": "/media/andre/Elements/research_data/FOR-2895/skander_mk2a_surface_plt/uhbr-wake-re12-m84-aoa4-sa-neg.surface.pval.unsteady_i=2440_t=1.512800000e-02.plt"
+    },
+    "zones": [
+      "wing-upper"
+    ],
+    "fields": [
+      "cp",
+      "cf"
+    ],
+    "methods": {
+      "gzip": {
+        "passed": true,
+        "times": [
+          "1.494200000e-02",
+          "1.500400000e-02",
+          "1.506600000e-02",
+          "1.512800000e-02"
+        ],
+        "descriptor": "/home/andre/Development/flowtorch/external_data/append_surface_validation_final/gzip/fields.xdmf",
+        "unchanged_geometry_sha256": "bf644bcfa2ebd747c36e51f7ecd20230cc451e36f8a609ea4bf3e4bd4e758d71",
+        "unchanged_first_field_chunk_sha256": "e7ff5432f7923f32b287d4944d4974a049811cc722b949dfe99b7ce6f0fdf97e",
+        "checks": "Exact full and spatially sliced fields, coordinates, topology, locations and weights; existing compressed chunk and geometry file unchanged."
+      },
+      "zstd": {
+        "passed": true,
+        "times": [
+          "1.494200000e-02",
+          "1.500400000e-02",
+          "1.506600000e-02",
+          "1.512800000e-02"
+        ],
+        "descriptor": "/home/andre/Development/flowtorch/external_data/append_surface_validation_final/zstd/fields.xdmf",
+        "unchanged_geometry_sha256": "63bf3616d57f703258765e0f21fc761788f512ecded2066dd9963197ab5f9305",
+        "unchanged_first_field_chunk_sha256": "a573b4b9eda5877af9f16a395949c502e3b5142b76f1e30b8c682d4ccf9ecda0",
+        "checks": "Exact full and spatially sliced fields, coordinates, topology, locations and weights; existing compressed chunk and geometry file unchanged."
+      }
+    }
+  },
+  "paraview_application": {
+    "passed": true,
+    "version": "6.0.1",
+    "zone": "wing-upper",
+    "fields": [
+      "cp",
+      "cf"
+    ],
+    "methods": {
+      "gzip": {
+        "passed": true,
+        "times": [
+          0.014942,
+          0.015004,
+          0.015066,
+          0.015128
+        ],
+        "checks": "Exact coordinates, integer connectivity, cp and cf in all four frames, including both appended frames"
+      },
+      "zstd": {
+        "passed": true,
+        "times": [
+          0.014942,
+          0.015004,
+          0.015066,
+          0.015128
+        ],
+        "checks": "Exact coordinates, integer connectivity, cp and cf in all four frames, including both appended frames"
+      }
+    }
+  },
+  "code_sha256": {
+    "flowtorch/data/_hdf5_schema.py": "86d27bd149e431891c6a3a2ca5630b122db424d2367c7e0a0b8525b06006d761",
+    "flowtorch/data/_hdf5_compression.py": "e647547acb50c9c4b926b2633c1fd6cab56295363e0db43e62d8ea5943f12b75",
+    "flowtorch/data/hdf5_file.py": "dca1676d791f195b57a356a2ba87255063174d4c4929f8019e31683b2e958888",
+    "flowtorch/data/plt_converter.py": "c8436017ff3a109ca4093d204a9880ac80d3fbf5783278a03ca5e07ed486aeb2",
+    "flowtorch/data/result_export.py": "ced6e2a1532b452087bb8143bf71958963a63d17ca590df43673b3c137d18943",
+    "tests/data/test_hdf5_append.py": "321b3a7bec53cf38ade1de7f714362c129b108b0ab25decb6712c0a1db91a8c6"
+  },
+  "behavior": [
+    "Existing raw compressed chunks and geometry remain unchanged.",
+    "Append inherits uniform stored field filters and validates storage precision, zones, field schema and geometry.",
+    "Duplicate numeric timestamps and append+overwrite are rejected.",
+    "Staged incomplete snapshots and uncommitted frames are hidden from readers and descriptor regeneration.",
+    "Abandoned staging is discarded on a subsequent append; partial snapshot resume is not implemented.",
+    "Descriptor replacement failure after data commit retains the old descriptor; regeneration repairs it.",
+    "Relocated identical geometry can be supplied explicitly; reference updated on commit."
+  ],
+  "limits": [
+    "No concurrent writers or SWMR/live reader refresh.",
+    "No filesystem/power-loss or HDF5 corruption durability guarantee.",
+    "Explicit append requires the split-geometry schema; legacy converter output is unsupported.",
+    "Real application check uses four surface snapshots in one zone, two fields, gzip and Zstd; external files are not unit fixtures.",
+    "No full volume append or Barnard append application test was run."
+  ]
+}

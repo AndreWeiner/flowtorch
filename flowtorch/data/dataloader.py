@@ -45,7 +45,7 @@ class Dataloader(ProvenanceMixin, ABC):
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
         if "__init__" in cls.__dict__:
-            cls.__init__ = tracked(cls.__init__)
+            setattr(cls, "__init__", tracked(cls.__init__))
 
     def _effective_settings(self):
         names = (

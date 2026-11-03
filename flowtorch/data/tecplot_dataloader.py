@@ -1,4 +1,4 @@
-"""Read Tecplot binary data through an isolated ParaView subprocess."""
+"""Read supported Tecplot binary layouts natively or through isolated ParaView."""
 
 # standard library packages
 from collections import deque
@@ -14,7 +14,7 @@ import struct
 import subprocess
 import sys
 from threading import Lock, Thread
-from typing import Any, cast, Dict, List, Literal, Union
+from typing import Any, cast, Dict, List, Literal, Union, TYPE_CHECKING
 
 # third party packages
 import numpy as np
@@ -24,6 +24,9 @@ import torch as pt
 from flowtorch import DEFAULT_DTYPE
 from .dataloader import Dataloader, _preallocate_time_series
 from .utils import check_and_standardize_path, check_list_or_str
+
+if TYPE_CHECKING:
+    from ._tecplot_native import NativeTecplotClient
 
 logger = logging.getLogger(__name__)
 
@@ -232,9 +235,10 @@ def _resolve_pvpython(pvpython: Union[str, Path, None]) -> str:
 
 
 class TecplotDataloader(Dataloader):
-    """Dataloader for Tecplot binary files using an isolated pvpython worker.
+    """Dataloader for Tecplot binary files with native and ParaView backends.
 
-    This loader is supported on Linux and macOS only.
+    The ParaView backend is supported on Linux and macOS only. The native
+    backend reads supported TDV71/TDV112 FE-block files without pvpython.
 
     ParaView and its bundled Python packages remain in a separate process.
     Arrays are transferred through a binary socket protocol without temporary
@@ -270,6 +274,8 @@ class TecplotDataloader(Dataloader):
         pvpython: Union[str, Path, None] = None,
         association: str = "point",
         cell_type: str | None = None,
+        backend: str = "paraview",
+        geometry_dtype: pt.dtype | None = None,
     ):
         """Create a loader backed by a persistent pvpython subprocess.
 
@@ -279,6 +285,10 @@ class TecplotDataloader(Dataloader):
         :param cell_type: optional mesh element type override for legacy files
             misidentified by the reader: line, triangle, quad, tetra, hexahedron
         :param association: field location, ``"point"`` or ``"cell"``
+        :param backend: paraview (legacy default), native (TDV71/TDV112), or auto.
+            Auto selects native for TDV71/TDV112 and does not hide native parsing errors.
+        :param geometry_dtype: coordinate tensor dtype; defaults to the field dtype
+            for compatibility. The geometry() interface always returns Float64.
         :param pvpython: path or command name of ParaView's pvpython executable
         """
         if cell_type not in (None, "line", "triangle", "quad", "tetra", "hexahedron"):
@@ -289,7 +299,25 @@ class TecplotDataloader(Dataloader):
         self._path = path
         self._file_names = file_names
         self._dtype = dtype
-        self._client = _PvpythonClient(_resolve_pvpython(pvpython))
+        if backend not in ("paraview", "native", "auto"):
+            raise ValueError("Expected paraview, native or auto backend")
+        if not file_names:
+            raise ValueError("At least one PLT snapshot is required")
+        if backend == "auto":
+            with open(self._assemble_file_path(next(iter(file_names))), "rb") as stream:
+                backend = (
+                    "native"
+                    if stream.read(8) in (b"#!TDV71 ", b"#!TDV112")
+                    else "paraview"
+                )
+        self.backend = backend
+        self._geometry_dtype = dtype if geometry_dtype is None else geometry_dtype
+        if backend == "native":
+            from ._tecplot_native import NativeTecplotClient
+
+            self._client: NativeTecplotClient | _PvpythonClient = NativeTecplotClient()
+        else:
+            self._client = _PvpythonClient(_resolve_pvpython(pvpython))
         self._zone_names: List[str] | None = None
         self._zone_paths: Dict[str, List[int]] = {}
         self._field_names: Dict[tuple[str, str], Dict[str, List[str]]] = {}
@@ -305,6 +333,8 @@ class TecplotDataloader(Dataloader):
         pvpython: Union[str, Path, None] = None,
         association: str = "point",
         cell_type: str | None = None,
+        backend: str = "paraview",
+        geometry_dtype: pt.dtype | None = None,
     ):
         """Construct a Tecplot dataloader from TAU snapshots.
 
@@ -315,6 +345,10 @@ class TecplotDataloader(Dataloader):
         :param cell_type: optional mesh element type override for legacy files
             misidentified by the reader: line, triangle, quad, tetra, hexahedron
         :param association: field location, ``"point"`` or ``"cell"``
+        :param backend: paraview (legacy default), native (TDV71/TDV112), or auto.
+            Auto selects native for TDV71/TDV112 and does not hide native parsing errors.
+        :param geometry_dtype: coordinate tensor dtype; defaults to the field dtype
+            for compatibility. The geometry() interface always returns Float64.
         :param pvpython: path or command name of ParaView's pvpython executable
         :raises FileNotFoundError: if snapshots or pvpython cannot be found
         :return: Tecplot dataloader object
@@ -339,6 +373,8 @@ class TecplotDataloader(Dataloader):
             pvpython=pvpython,
             association=association,
             cell_type=cell_type,
+            backend=backend,
+            geometry_dtype=geometry_dtype,
         )
 
     def _assemble_file_path(self, time: str) -> str:
@@ -446,6 +482,99 @@ class TecplotDataloader(Dataloader):
         return self._load_single_snapshot(field_name, time, association)
 
     @property
+    def _native_client(self) -> "NativeTecplotClient":
+        """Native-only interface for paths already guarded by backend selection."""
+        return cast("NativeTecplotClient", self._client)
+
+    @property
+    def supports_direct_slicing(self) -> bool:
+        """Whether field slices avoid materializing full snapshots."""
+        return self.backend == "native"
+
+    def snapshot_shape(self, field_name: str, time: str) -> tuple[int, ...]:
+        """Inspect native field shape without reading field values."""
+        if self.backend != "native":
+            return tuple(super().snapshot_shape(field_name, time))
+        return self._native_client.field_arrays(
+            self._assemble_file_path(time), self.zone, self.association
+        )[field_name].shape
+
+    def load_snapshot_slice(self, field_name, time, spatial_slice):
+        """Read native field intervals directly; ParaView uses the base fallback."""
+        if self.backend != "native":
+            return super().load_snapshot_slice(field_name, time, spatial_slice)
+        fields = field_name if isinstance(field_name, list) else [field_name]
+        times = time if isinstance(time, list) else [time]
+        check_list_or_str(field_name, "field_name")
+        check_list_or_str(time, "time")
+
+        def read(name, label):
+            shape = self.snapshot_shape(name, label)
+            start, stop, step = spatial_slice.indices(shape[0])
+            if step != 1:
+                raise ValueError("Spatial slices require unit stride")
+            array = self._native_client.field_arrays(
+                self._assemble_file_path(label), self.zone, self.association
+            )[name]
+            return pt.from_numpy(
+                np.array(
+                    array[start:stop], dtype=array.dtype.newbyteorder("="), copy=True
+                )
+            ).to(self._dtype)
+
+        values = [
+            _preallocate_time_series(lambda label: read(name, label), times)
+            for name in fields
+        ]
+        if not isinstance(time, list):
+            values = [value[..., 0] for value in values]
+        return values if isinstance(field_name, list) else values[0]
+
+    def load_connectivity(
+        self, cell_slice: slice = slice(None), time: str | None = None
+    ) -> pt.Tensor:
+        """Read zero-based integer connectivity for selected native FE cells.
+
+        This does not construct a VTK mesh or load field/coordinate arrays.
+        ParaView-backed topology remains accessible through :attr:`mesh`.
+        """
+        if self.backend != "native":
+            raise ValueError("Direct connectivity slices require the native backend")
+        path = self._assemble_file_path(self.write_times[0] if time is None else time)
+        count = self._native_client.arrays(path, self.zone)["connectivity"].shape[0]
+        start, stop, step = cell_slice.indices(count)
+        if step != 1:
+            raise ValueError("Connectivity slices require unit stride")
+        ids = self._native_client.connectivity(path, self.zone, slice(start, stop))
+        points = self._native_client.arrays(path, self.zone)["fields"]["X"].shape[0]
+        if ids.size and (ids.min() < 0 or ids.max() >= points):
+            raise ValueError("Invalid PLT connectivity indices")
+        return pt.from_numpy(ids)
+
+    def geometry(self, time: str | None = None):
+        """Return Float64 coordinates, integer topology and raw geometric weights.
+
+        ParaView may have rounded coordinates internally; Float64 output cannot
+        recover precision discarded by that backend.
+        """
+        from .unstructured import geometry_from_mesh
+
+        if time is None or time == self.write_times[0]:
+            mesh = self.mesh
+        elif self.backend == "native":
+            mesh = self._native_client.mesh(
+                self._assemble_file_path(time), self.zone, self._cell_type
+            )
+        else:
+            original = self._file_names
+            try:
+                self._file_names = {time: original[time]}
+                mesh = self.mesh
+            finally:
+                self._file_names = original
+        return geometry_from_mesh(mesh, self.association)
+
+    @property
     def zone_names(self) -> List[str]:
         """Names of available leaf blocks/zones.
 
@@ -516,7 +645,7 @@ class TecplotDataloader(Dataloader):
             self.write_times[0],
             block_path=self._zone_paths[self.zone],
         )
-        return pt.from_numpy(array).to(dtype=self._dtype)
+        return pt.from_numpy(array).to(dtype=self._geometry_dtype)
 
     @property
     def mesh(self):
@@ -526,9 +655,15 @@ class TecplotDataloader(Dataloader):
         topology only; source fields are loaded separately. A fresh, independent
         mesh is returned, with any configured cell-type correction applied.
         """
-        from vtkmodules.vtkCommonDataModel import vtkUnstructuredGrid  # type: ignore[import-not-found]
-        from vtkmodules.vtkIOXML import vtkXMLUnstructuredGridReader  # type: ignore[import-not-found]
+        from vtkmodules.vtkCommonDataModel import vtkUnstructuredGrid
+        from vtkmodules.vtkIOXML import vtkXMLUnstructuredGridReader
 
+        if self.backend == "native":
+            return self._native_client.mesh(
+                self._assemble_file_path(self.write_times[0]),
+                self.zone,
+                self._cell_type,
+            )
         serialized = self._request_for_time(
             "mesh",
             self.write_times[0],

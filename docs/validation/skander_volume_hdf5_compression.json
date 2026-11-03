@@ -1,0 +1,108 @@
+{
+  "complete": true,
+  "mode": "full",
+  "job_id": "40584778",
+  "node": "n1714",
+  "samples_per_dataset": null,
+  "chunk_rows": 65536,
+  "versions": {
+    "h5py": "3.16.0",
+    "hdf5plugin": "7.1.0",
+    "numpy": "1.25.1"
+  },
+  "hdf5": "2.0.0",
+  "inputs": {
+    "geometry": {
+      "path": "/data/horse/ws/anwe312f-flowtorch-skander-conversion/converted/geometry.h5",
+      "bytes": 18373451616,
+      "mtime_ns": 1793703538000000000,
+      "geometry_id": "0f0947e10133f2ebacf7b1312852c56af9dcf57934ff227bdf97ef5ace326f14"
+    },
+    "fields": {
+      "path": "/data/horse/ws/anwe312f-flowtorch-skander-conversion/converted/fields.h5",
+      "bytes": 10645547528,
+      "mtime_ns": 1793703954000000000,
+      "geometry_id": "0f0947e10133f2ebacf7b1312852c56af9dcf57934ff227bdf97ef5ace326f14"
+    }
+  },
+  "harness_sha256": "62fd6bb748f58037f0d9e98e62a6f142b8ea93ead45125b78e209b61003e17a0",
+  "helper_sha256": "37eb087adee21f9e2bb797b61d7f94be96ff97db2fd2b9fcf6f88ef3bb5f39b2",
+  "timing_scope": "Source HDF5 reads, compression, chunk writes, attributes, close and fsync; validation timed separately. One trial; cache state uncontrolled. No PLT parsing or geometry computation.",
+  "elapsed_seconds": 314.03800993300683,
+  "max_rss_kib": 306360,
+  "methods": {
+    "zstd_shuffle": {
+      "geometry": {
+        "source": {
+          "path": "/data/horse/ws/anwe312f-flowtorch-skander-conversion/converted/geometry.h5",
+          "bytes": 18373451616,
+          "mtime_ns": 1793703538000000000,
+          "geometry_id": "0f0947e10133f2ebacf7b1312852c56af9dcf57934ff227bdf97ef5ace326f14"
+        },
+        "output": "compression_full_zstd_20261103/zstd_shuffle/geometry.h5",
+        "file_bytes": 6862928074,
+        "write_seconds": 59.439757945991005,
+        "validation_seconds": 69.47323478500766,
+        "exact_readback": true,
+        "logical_source_sha256": "e936f5c24d1a2da5b642b444396b197bf792fdb9e73194979267968cb54502e6",
+        "logical_output_sha256": "e936f5c24d1a2da5b642b444396b197bf792fdb9e73194979267968cb54502e6",
+        "estimated_compressed_payload_bytes": 6862443923.0,
+        "dataset_count": 20,
+        "reduction_percent": 62.6475840390076
+      },
+      "fields": {
+        "source": {
+          "path": "/data/horse/ws/anwe312f-flowtorch-skander-conversion/converted/fields.h5",
+          "bytes": 10645547528,
+          "mtime_ns": 1793703954000000000,
+          "geometry_id": "0f0947e10133f2ebacf7b1312852c56af9dcf57934ff227bdf97ef5ace326f14"
+        },
+        "output": "compression_full_zstd_20261103/zstd_shuffle/fields.h5",
+        "file_bytes": 7197976632,
+        "write_seconds": 117.03611732099671,
+        "validation_seconds": 67.85141825799656,
+        "exact_readback": true,
+        "logical_source_sha256": "327707a2e5629c68fd9d6ce94c552c983c0671c71b4039b89162c883ebc4e6fe",
+        "logical_output_sha256": "327707a2e5629c68fd9d6ce94c552c983c0671c71b4039b89162c883ebc4e6fe",
+        "estimated_compressed_payload_bytes": 7196250457.0,
+        "dataset_count": 95,
+        "reduction_percent": 32.385097027016904
+      }
+    }
+  },
+  "total": {
+    "uncompressed_hdf5_bytes": 29018999144,
+    "compressed_hdf5_bytes": 14060904706,
+    "reduction_percent": 51.5458660850912,
+    "saved_bytes": 14958094438
+  },
+  "allocation": {
+    "cpus": 1,
+    "memory_gib": 8,
+    "time_limit_minutes": 20
+  },
+  "slurm": {
+    "state": "COMPLETED",
+    "exit_code": "0:0",
+    "elapsed": "00:06:29"
+  },
+  "output_directory": "/data/horse/ws/anwe312f-flowtorch-skander-conversion/compression_full_zstd_20261103/zstd_shuffle",
+  "descriptor_check": {
+    "passed": true,
+    "descriptor_references_checked": 105,
+    "validation": "HDF references, shapes, completion, Zstd filter and shuffle; no full ParaView readback"
+  },
+  "pilot_estimates": {
+    "gzip": 17799436109.125,
+    "gzip_shuffle": 13777892175.0,
+    "zstd": 18304675607.5,
+    "zstd_shuffle": 13887230279.75
+  },
+  "pilot_estimates_units": "Estimated compressed chunk payload bytes, excluding full-file metadata. Gzip was not fully recompressed.",
+  "limits": [
+    "Full run is a single trial; measured file sizes, not a repeated timing benchmark.",
+    "Recompression from converted HDF5: no PLT parsing or geometry computation.",
+    "No full-volume ParaView rendering/readback performed.",
+    "Original uncompressed converted files remain unchanged."
+  ]
+}

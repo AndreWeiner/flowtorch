@@ -41,14 +41,17 @@ classifiers = [
 dependencies = ["matplotlib", "numpy", "psutil", "scipy", "torch>=1.9"]
 
 [project.scripts]
+flowtorch-plt-to-hdf5 = "flowtorch.data.plt_converter:main"
 flowtorch-mask-psp = "flowtorch.data.psp_mask_cli:main"
 flowtoch-mask-psp = "flowtorch.data.psp_mask_cli:main"  # legacy misspelling
 
 [project.optional-dependencies]
+compression = ["h5py", "hdf5plugin>=5"]
 data = ["h5py", "netCDF4", "pandas", "Pillow", "vtk"]
 rom = []
 psp = ["h5py", "plotly"]
 all = [
+    "hdf5plugin>=5",
     "h5py",
     "jupyterlab",
     "netCDF4",

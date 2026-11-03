@@ -1,0 +1,113 @@
+{
+  "date": "2026-11-03",
+  "memory": {
+    "MemTotal": 33156947968,
+    "MemAvailable": 24001765376,
+    "SwapTotal": 8589930496,
+    "SwapFree": 8589930496
+  },
+  "disk_free_bytes": 1146230378496,
+  "files": [
+    {
+      "source": "/home/andre/datasets/xrf1-bl-analysis/skander/uhbr-wake-re12-m84-aoa4-sa-neg.pval.unsteady_i=15500_t=9.6100000000e-02_extracted_zone_blanking_mean_var.plt",
+      "zones": [
+        {
+          "name": "wing-upper",
+          "points": 201994,
+          "cells": 200966,
+          "saved_geometry_bytes": 17742576,
+          "field_bytes_float32": 10503688,
+          "known_geometry_working_buffers_bytes": 32380206
+        },
+        {
+          "name": "Extracted tetra",
+          "points": 13466456,
+          "cells": 76547976,
+          "saved_geometry_bytes": 3203656768,
+          "field_bytes_float32": 700255712,
+          "known_geometry_working_buffers_bytes": 10823162384
+        },
+        {
+          "name": "Extracted prism",
+          "points": 3435078,
+          "cells": 6375380,
+          "saved_geometry_bytes": 600388688,
+          "field_bytes_float32": 178624056,
+          "known_geometry_working_buffers_bytes": 4257249804
+        },
+        {
+          "name": "Extracted hexa",
+          "points": 120600681,
+          "cells": 118915900,
+          "saved_geometry_bytes": 14364255736,
+          "field_bytes_float32": 6271235412,
+          "known_geometry_working_buffers_bytes": 30207815612
+        },
+        {
+          "name": "Extracted pyra",
+          "points": 2129835,
+          "cells": 1064354,
+          "saved_geometry_bytes": 187389416,
+          "field_bytes_float32": 110751420,
+          "known_geometry_working_buffers_bytes": 15146193954
+        }
+      ],
+      "geometry_bytes": 18373433184,
+      "fields_float32_bytes": 7271370288,
+      "total_output_bytes": 25644803472,
+      "estimated_peak_geometry_buffers_bytes": 30207815612
+    },
+    {
+      "source": "/home/andre/datasets/xrf1-bl-analysis/skander/uhbr-wake-re12-m84-aoa4-sa-neg.pval.unsteady_i=15500_t=9.6100000000e-02_extracted_zone_blanking_mean_var_vorticity_wallnormal.plt",
+      "zones": [
+        {
+          "name": "wing-upper",
+          "points": 201994,
+          "cells": 200966,
+          "saved_geometry_bytes": 17742576,
+          "field_bytes_float32": 15351544,
+          "known_geometry_working_buffers_bytes": 32380206
+        },
+        {
+          "name": "Extracted tetra",
+          "points": 13466456,
+          "cells": 76547976,
+          "saved_geometry_bytes": 3203656768,
+          "field_bytes_float32": 1023450656,
+          "known_geometry_working_buffers_bytes": 10823162384
+        },
+        {
+          "name": "Extracted prism",
+          "points": 3435078,
+          "cells": 6375380,
+          "saved_geometry_bytes": 600388688,
+          "field_bytes_float32": 261065928,
+          "known_geometry_working_buffers_bytes": 4257249804
+        },
+        {
+          "name": "Extracted hexa",
+          "points": 120600681,
+          "cells": 118915900,
+          "saved_geometry_bytes": 14364255736,
+          "field_bytes_float32": 9165651756,
+          "known_geometry_working_buffers_bytes": 30207815612
+        },
+        {
+          "name": "Extracted pyra",
+          "points": 2129835,
+          "cells": 1064354,
+          "saved_geometry_bytes": 187389416,
+          "field_bytes_float32": 161867460,
+          "known_geometry_working_buffers_bytes": 15146193954
+        }
+      ],
+      "geometry_bytes": 18373433184,
+      "fields_float32_bytes": 10627387344,
+      "total_output_bytes": 29000820528,
+      "estimated_peak_geometry_buffers_bytes": 30207815612
+    }
+  ],
+  "decision": "Do not launch full conversion with the current implementation on this workstation.",
+  "limitations": "Static allocation estimate, not measured full-file peak. Excludes Python/library baseline, further VTK/internal filter allocations, HDF5 caches and allocator retention. No source data changed; no full conversion started.",
+  "assumptions": "All zones and available non-coordinate fields; Float64 geometry, Float32 fields, no compression. Analysis weights remain separate by zone."
+}

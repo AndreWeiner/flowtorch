@@ -1,0 +1,162 @@
+{
+  "date": "2026-11-02",
+  "scope": "Bounded application checks after manufactured unit fixtures; original inputs unchanged. No full-collection conversion or performance benchmark.",
+  "surface": {
+    "source_files": [
+      "/media/andre/Elements/research_data/FOR-2895/skander_mk2a_surface_plt/uhbr-wake-re12-m84-aoa4-sa-neg.surface.pval.unsteady_i=10000_t=6.2000000000e-02.plt",
+      "/media/andre/Elements/research_data/FOR-2895/skander_mk2a_surface_plt/uhbr-wake-re12-m84-aoa4-sa-neg.surface.pval.unsteady_i=10010_t=6.2062000000e-02.plt"
+    ],
+    "fields": [
+      "cp"
+    ],
+    "elapsed_seconds": 2.9697442130000127,
+    "max_rss_kib": 522708,
+    "descriptor": "/tmp/flowtorch-application/surface/fields.xdmf",
+    "field_precision": "float32",
+    "geometry_precision": "float64",
+    "zone_count": 23
+  },
+  "modal": {
+    "snapshot_count": 8,
+    "fields": [
+      "cp"
+    ],
+    "zones": [
+      "core",
+      "coreTE",
+      "HTP-TE",
+      "HTP-lower",
+      "HTP-upper",
+      "Nacelle",
+      "NacelleTE",
+      "Plug",
+      "PlugSupport",
+      "Pylon",
+      "PylonTE",
+      "VTP",
+      "VTP-TE",
+      "fuselage",
+      "sting",
+      "symmetry",
+      "wing-TE",
+      "wing-lower",
+      "wing-lower-FTF1",
+      "wing-lower-FTF2",
+      "wing-lower-FTF3",
+      "wing-lower-FTF4",
+      "wing-upper"
+    ],
+    "spatial_size": 1996981,
+    "singular_values": [
+      0.08747538573928784,
+      0.014153459011899993,
+      0.0030802924148541034
+    ],
+    "weighted_orthogonality_error": 4.563643909437202e-15,
+    "conversion_seconds": 3.877231911999843,
+    "svd_seconds": 1.2817425709999952,
+    "total_seconds": 6.559320395999748,
+    "geometry_unchanged": true,
+    "max_rss_kib": 600936,
+    "outputs": [
+      "/tmp/flowtorch-application/spod/frequency_1_mode_0.xdmf",
+      "/tmp/flowtorch-application/spod/frequency_1_mode_0_animation.xdmf"
+    ],
+    "field_precision": "float64",
+    "geometry_precision": "float64",
+    "spatial_chunk": 65536,
+    "svd_rank": 3,
+    "source_files": [
+      "/media/andre/Elements/research_data/FOR-2895/skander_mk2a_surface_plt/uhbr-wake-re12-m84-aoa4-sa-neg.surface.pval.unsteady_i=10000_t=6.2000000000e-02.plt",
+      "/media/andre/Elements/research_data/FOR-2895/skander_mk2a_surface_plt/uhbr-wake-re12-m84-aoa4-sa-neg.surface.pval.unsteady_i=10010_t=6.2062000000e-02.plt",
+      "/media/andre/Elements/research_data/FOR-2895/skander_mk2a_surface_plt/uhbr-wake-re12-m84-aoa4-sa-neg.surface.pval.unsteady_i=10020_t=6.2124000000e-02.plt",
+      "/media/andre/Elements/research_data/FOR-2895/skander_mk2a_surface_plt/uhbr-wake-re12-m84-aoa4-sa-neg.surface.pval.unsteady_i=10030_t=6.2186000000e-02.plt",
+      "/media/andre/Elements/research_data/FOR-2895/skander_mk2a_surface_plt/uhbr-wake-re12-m84-aoa4-sa-neg.surface.pval.unsteady_i=10040_t=6.2248000000e-02.plt",
+      "/media/andre/Elements/research_data/FOR-2895/skander_mk2a_surface_plt/uhbr-wake-re12-m84-aoa4-sa-neg.surface.pval.unsteady_i=10050_t=6.2310000000e-02.plt",
+      "/media/andre/Elements/research_data/FOR-2895/skander_mk2a_surface_plt/uhbr-wake-re12-m84-aoa4-sa-neg.surface.pval.unsteady_i=10060_t=6.2372000000e-02.plt",
+      "/media/andre/Elements/research_data/FOR-2895/skander_mk2a_surface_plt/uhbr-wake-re12-m84-aoa4-sa-neg.surface.pval.unsteady_i=10070_t=6.2434000000e-02.plt"
+    ]
+  },
+  "foam": [
+    {
+      "case": "of_cavity_ascii",
+      "split": false,
+      "passed": true
+    },
+    {
+      "case": "of_cavity_ascii",
+      "split": true,
+      "passed": true
+    },
+    {
+      "case": "of_cavity_binary",
+      "split": false,
+      "passed": true
+    },
+    {
+      "case": "of_cavity_binary",
+      "split": true,
+      "passed": true
+    }
+  ],
+  "readback": {
+    "surface": {
+      "passed": true,
+      "steps": 2,
+      "zones_per_step": 23
+    },
+    "foam": {
+      "passed": true,
+      "steps": 2,
+      "zones_per_step": 1
+    },
+    "animation": {
+      "passed": true,
+      "steps": 3,
+      "zones_per_step": 23
+    }
+  },
+  "volume": [
+    {
+      "directory": "/home/andre/datasets/xrf1-bl-analysis/skander",
+      "encoding": "TDV112",
+      "backend": "paraview",
+      "log": "file /home/andre/datasets/xrf1-bl-analysis/skander/uhbr-wake-re12-m84-aoa4-sa-neg.pval.unsteady_i=15500_t=9.6100000000e-02_extracted_zone_blanking_mean_var.plt\nbackend paraview zones ['wing_upper']\nfields {'0': ['X', 'Y', 'Z', 'mean_rho', 'mean_u', 'mean_v', 'mean_w', 'mean_p', 'resolved_uu', 'resolved_vv', 'resolved_ww', 'resolved_pp', 'resolved_uv', 'resolved_uw', 'resolved_vw', 'wall_distance']}\nelapsed_seconds 54.30736180400163\n",
+      "status": "zone and field discovery only; full field, geometry and conversion not validated"
+    },
+    {
+      "directory": "/home/andre/datasets/xrf1-bl-analysis/sebastian/volume/DDES_LD2_Re3M0.84A4",
+      "encoding": "TDV112",
+      "backend": "paraview",
+      "log": "file /home/andre/datasets/xrf1-bl-analysis/sebastian/volume/DDES_LD2_Re3M0.84A4/xrf1-uhbr-Re3.3-M0.84A4.pval.unsteady_i=50500_t=2.0180180000e00_mean.plt\n",
+      "status": "probe exited with signal 9 before metadata discovery; cause not established; conversion not validated"
+    }
+  ],
+  "environment": {
+    "python": "3.10.20",
+    "flowtorch_checkout": "/home/andre/Development/flowtorch",
+    "revision_before_changes": "56ec0ce406cb25622d02bd9f64232ff78f8cbef2",
+    "timing_note": "Warm filesystem cache, CPU-only, no repeat trials; timings are observations, not performance claims. RSS includes Python/torch/VTK and conversion/analysis.",
+    "application_python": "3.14.6",
+    "torch": "2.12.1+cpu",
+    "vtk": "9.6.2",
+    "h5py": "3.16.0",
+    "device": "cpu",
+    "application_rank_count": 1,
+    "distributed_export_test_rank_count": 2
+  },
+  "validation_commands": [
+    "tox -e format-check,lint,py310",
+    "sphinx-build -W --keep-going -b html docs/source /tmp/flowtorch-docs",
+    "pvpython --force-offscreen-rendering tests/application/check_xdmf.py DESCRIPTOR REPORT.json"
+  ],
+  "additional_environment_check": "Python 3.14 / VTK 9.6: two existing EnSight wedge-connectivity tests fail; both failures reproduce on an unchanged HEAD archive. Python 3.10 / VTK 9.7 regression checks pass.",
+  "checks": {
+    "python_3_10_regression": "848 passed, 5 skipped, 73 integration tests deselected",
+    "new_manufactured_tests": "16 passed, including two-process export",
+    "format_check": "passed",
+    "lint": "passed",
+    "sphinx_warnings_as_errors": "passed",
+    "source_and_wheel_metadata": "passed"
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "complete": true,
+  "date": "2026-11-03",
+  "tested_source_commit": "06790169013b7b4e3c9383671a08ea5f316fbb14",
+  "openfoam_reader_commit": "721cf38",
+  "tests": {
+    "py310": {
+      "passed": 1045,
+      "skipped": 5,
+      "warnings": 273,
+      "command_exit_code": 0,
+      "scope": "All tests, including integration tests"
+    },
+    "py312": {
+      "passed": 1045,
+      "skipped": 5,
+      "warnings": 280,
+      "command_exit_code": 0,
+      "scope": "All tests, including integration tests"
+    },
+    "py314": {
+      "passed": 1045,
+      "skipped": 5,
+      "warnings": 280,
+      "command_exit_code": 0,
+      "scope": "All tests, including integration tests"
+    }
+  },
+  "test_command": "FLOWTORCH_DATASETS=/tmp/flowtorch-final-datasets/ tox -e py310,py312,py314 -- -q",
+  "data_setup": "Disposable copy of repository datasets; HDF5 conversion tests additionally copy cavity cases into per-test temporary directories and exclude archived output files. Original datasets are unchanged.",
+  "quality_command": "tox -e format-check,lint,type-check,docs,package",
+  "quality_checks": {
+    "format-check": "passed",
+    "lint": "passed",
+    "type-check": "passed",
+    "docs": "passed",
+    "package": "passed"
+  },
+  "mypy_source_files": 77,
+  "fixes": [
+    "Explicit collection types, optional-value narrowing, and dynamic interface contracts across loaders, result export, analysis, provenance and ROM training.",
+    "External dependency-stub policy covers vtkmodules and psutil; project errors are not globally ignored.",
+    "Integration tests isolate conversion outputs from archived dataset files.",
+    "Default OpenFOAM conversion exports supported volume fields and skips face fields such as phi; explicit unsupported requests fail before output creation."
+  ],
+  "limitations": [
+    "Five CUDA-dependent tests skipped in each environment because CUDA is unavailable.",
+    "Non-failing numerical precision and deprecation warnings remain; counts are recorded per environment.",
+    "No additional full Skander volume conversion or performance benchmark was performed during this final test audit."
+  ],
+  "raw_logs": {
+    "test_matrix": "/tmp/flowtorch-final-all-tests-fixed.log",
+    "quality": "/tmp/flowtorch-final-quality-passed.log"
+  }
+}

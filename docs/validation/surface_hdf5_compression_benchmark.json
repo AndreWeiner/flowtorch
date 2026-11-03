@@ -1,0 +1,749 @@
+{
+  "complete": true,
+  "pilot": false,
+  "python": "3.10.20 (main, Jun 22 2026, 16:39:56) [GCC 13.3.0]",
+  "executable": "/home/andre/Development/flowtorch/.tox/py310/bin/python",
+  "platform": "Linux-7.0.0-113038-tuxedo-x86_64-with-glibc2.39",
+  "cpu": "Intel(R) Core(TM) Ultra 7 255H",
+  "versions": {
+    "h5py": "3.16.0",
+    "numpy": "2.2.6",
+    "hdf5plugin": "7.1.0"
+  },
+  "hdf5": "2.0.0",
+  "harness_sha256": "7449617747138b48a516bc8f2cc79138e3a8c3dd79ac94cad34d8d0dc6233a91",
+  "chunk_rows": 65536,
+  "repeats": 3,
+  "methods": {
+    "none": {},
+    "gzip4": {
+      "compression": "gzip",
+      "compression_opts": 4
+    },
+    "gzip4_shuffle": {
+      "compression": "gzip",
+      "compression_opts": 4,
+      "shuffle": true
+    },
+    "zstd3": {
+      "compression": 32015,
+      "compression_opts": [
+        3
+      ]
+    },
+    "zstd3_shuffle": {
+      "compression": 32015,
+      "compression_opts": [
+        3
+      ],
+      "shuffle": true
+    }
+  },
+  "cache": "Warm OS cache: reads follow writes; no cold-cache claim. Reopened HDF5 handles.",
+  "write_timing": "dataset creation, source-array slice writes, attributes, HDF5 close, fsync; input loading excluded",
+  "read_timing": "file open, all requested dataset allocations/reads, close; verification excluded",
+  "slice": "One central contiguous slice of up to 8192 rows per dataset",
+  "validation": "Every dataset, shape, dtype and bytes checked for full and sliced reads in every trial",
+  "source_manifest": {
+    "source_directory": "/media/andre/Elements/research_data/FOR-2895/skander_mk2a_surface_plt",
+    "source_files": {
+      "1.494200000e-02": "/media/andre/Elements/research_data/FOR-2895/skander_mk2a_surface_plt/uhbr-wake-re12-m84-aoa4-sa-neg.surface.pval.unsteady_i=2410_t=1.494200000e-02.plt",
+      "1.500400000e-02": "/media/andre/Elements/research_data/FOR-2895/skander_mk2a_surface_plt/uhbr-wake-re12-m84-aoa4-sa-neg.surface.pval.unsteady_i=2420_t=1.500400000e-02.plt",
+      "1.506600000e-02": "/media/andre/Elements/research_data/FOR-2895/skander_mk2a_surface_plt/uhbr-wake-re12-m84-aoa4-sa-neg.surface.pval.unsteady_i=2430_t=1.506600000e-02.plt",
+      "1.512800000e-02": "/media/andre/Elements/research_data/FOR-2895/skander_mk2a_surface_plt/uhbr-wake-re12-m84-aoa4-sa-neg.surface.pval.unsteady_i=2440_t=1.512800000e-02.plt",
+      "1.519000000e-02": "/media/andre/Elements/research_data/FOR-2895/skander_mk2a_surface_plt/uhbr-wake-re12-m84-aoa4-sa-neg.surface.pval.unsteady_i=2450_t=1.519000000e-02.plt",
+      "1.525200000e-02": "/media/andre/Elements/research_data/FOR-2895/skander_mk2a_surface_plt/uhbr-wake-re12-m84-aoa4-sa-neg.surface.pval.unsteady_i=2460_t=1.525200000e-02.plt",
+      "1.531400000e-02": "/media/andre/Elements/research_data/FOR-2895/skander_mk2a_surface_plt/uhbr-wake-re12-m84-aoa4-sa-neg.surface.pval.unsteady_i=2470_t=1.531400000e-02.plt",
+      "1.537600000e-02": "/media/andre/Elements/research_data/FOR-2895/skander_mk2a_surface_plt/uhbr-wake-re12-m84-aoa4-sa-neg.surface.pval.unsteady_i=2480_t=1.537600000e-02.plt",
+      "1.543800000e-02": "/media/andre/Elements/research_data/FOR-2895/skander_mk2a_surface_plt/uhbr-wake-re12-m84-aoa4-sa-neg.surface.pval.unsteady_i=2490_t=1.543800000e-02.plt",
+      "1.550000000e-02": "/media/andre/Elements/research_data/FOR-2895/skander_mk2a_surface_plt/uhbr-wake-re12-m84-aoa4-sa-neg.surface.pval.unsteady_i=2500_t=1.550000000e-02.plt"
+    },
+    "zones": [
+      "core",
+      "coreTE",
+      "HTP-TE",
+      "HTP-lower",
+      "HTP-upper",
+      "Nacelle",
+      "NacelleTE",
+      "Plug",
+      "PlugSupport",
+      "Pylon",
+      "PylonTE",
+      "VTP",
+      "VTP-TE",
+      "fuselage",
+      "sting",
+      "symmetry",
+      "wing-TE",
+      "wing-lower",
+      "wing-lower-FTF1",
+      "wing-lower-FTF2",
+      "wing-lower-FTF3",
+      "wing-lower-FTF4",
+      "wing-upper"
+    ],
+    "fields": [
+      "cp",
+      "cf",
+      "cfx",
+      "cfy",
+      "cfz"
+    ],
+    "times": [
+      "1.494200000e-02",
+      "1.500400000e-02",
+      "1.506600000e-02",
+      "1.512800000e-02",
+      "1.519000000e-02",
+      "1.525200000e-02",
+      "1.531400000e-02",
+      "1.537600000e-02",
+      "1.543800000e-02",
+      "1.550000000e-02"
+    ],
+    "geometry_precision": "float64",
+    "field_precision": "float32",
+    "points": 1996981,
+    "elapsed_seconds": 39.347666195000784,
+    "files": {
+      "geometry.h5": 178652116,
+      "fields.h5": 474043724,
+      "fields.xdmf": 321731
+    },
+    "validation": {
+      "paraview_all_10_times": "passed: coordinates, topology, field arrays, association and positive cell measures",
+      "source_comparison": "exact Float32 agreement at three spatial intervals in every zone and field, first and last snapshots"
+    }
+  },
+  "inputs": {
+    "geometry": {
+      "path": "/home/andre/Development/flowtorch/external_data/surface_first10/geometry.h5",
+      "sha256": "919e2f82957c47f3c1c4d6d413c147c10557a456005f63951864e8ef678bac82",
+      "datasets": 92,
+      "array_bytes": 178584152,
+      "source_file_bytes": 178652116
+    },
+    "fields": {
+      "path": "/home/andre/Development/flowtorch/external_data/surface_first10/fields.h5",
+      "sha256": "eff7427c2cfbbb65d9d77d0c8d62e319d0762b8b97bf7f09fea9d23965167ea2",
+      "datasets": 1150,
+      "array_bytes": 399396200,
+      "source_file_bytes": 474043724
+    }
+  },
+  "trials": [
+    {
+      "category": "geometry",
+      "method": "zstd3",
+      "repeat": 0,
+      "file_bytes": 110706109,
+      "write_seconds": 0.33815519800009497,
+      "full_read_seconds": 0.17116985200118506,
+      "slice_read_seconds": 0.059960471000522375
+    },
+    {
+      "category": "geometry",
+      "method": "zstd3_shuffle",
+      "repeat": 0,
+      "file_bytes": 89336388,
+      "write_seconds": 0.23031754399926285,
+      "full_read_seconds": 0.15661488800105872,
+      "slice_read_seconds": 0.043833310999616515
+    },
+    {
+      "category": "geometry",
+      "method": "gzip4_shuffle",
+      "repeat": 0,
+      "file_bytes": 89375665,
+      "write_seconds": 1.6142244190014026,
+      "full_read_seconds": 0.3184892810004385,
+      "slice_read_seconds": 0.10498759400070412
+    },
+    {
+      "category": "geometry",
+      "method": "none",
+      "repeat": 0,
+      "file_bytes": 209806656,
+      "write_seconds": 0.11182024399931834,
+      "full_read_seconds": 0.10223869099900185,
+      "slice_read_seconds": 0.01939939500152832
+    },
+    {
+      "category": "geometry",
+      "method": "gzip4",
+      "repeat": 0,
+      "file_bytes": 108283746,
+      "write_seconds": 2.5069196980002744,
+      "full_read_seconds": 0.5477653649995773,
+      "slice_read_seconds": 0.23792154600050708
+    },
+    {
+      "category": "geometry",
+      "method": "zstd3",
+      "repeat": 1,
+      "file_bytes": 110706109,
+      "write_seconds": 0.3396420240005682,
+      "full_read_seconds": 0.17159440999967046,
+      "slice_read_seconds": 0.06287495799915632
+    },
+    {
+      "category": "geometry",
+      "method": "gzip4_shuffle",
+      "repeat": 1,
+      "file_bytes": 89375665,
+      "write_seconds": 1.634284106999985,
+      "full_read_seconds": 0.31139004500073497,
+      "slice_read_seconds": 0.11047815600068134
+    },
+    {
+      "category": "geometry",
+      "method": "none",
+      "repeat": 1,
+      "file_bytes": 209806656,
+      "write_seconds": 0.1297136760003923,
+      "full_read_seconds": 0.09396455599926412,
+      "slice_read_seconds": 0.01674005200038664
+    },
+    {
+      "category": "geometry",
+      "method": "gzip4",
+      "repeat": 1,
+      "file_bytes": 108283746,
+      "write_seconds": 2.5301892179995775,
+      "full_read_seconds": 0.5356827420000627,
+      "slice_read_seconds": 0.23132000899931882
+    },
+    {
+      "category": "geometry",
+      "method": "zstd3_shuffle",
+      "repeat": 1,
+      "file_bytes": 89336388,
+      "write_seconds": 0.2262032039998303,
+      "full_read_seconds": 0.1471973940006137,
+      "slice_read_seconds": 0.041033431998585
+    },
+    {
+      "category": "geometry",
+      "method": "zstd3",
+      "repeat": 2,
+      "file_bytes": 110706109,
+      "write_seconds": 0.3261088950002886,
+      "full_read_seconds": 0.16563051299999643,
+      "slice_read_seconds": 0.05612524499883875
+    },
+    {
+      "category": "geometry",
+      "method": "gzip4",
+      "repeat": 2,
+      "file_bytes": 108283746,
+      "write_seconds": 2.459936906998337,
+      "full_read_seconds": 0.5398121300004277,
+      "slice_read_seconds": 0.23144313899865665
+    },
+    {
+      "category": "geometry",
+      "method": "zstd3_shuffle",
+      "repeat": 2,
+      "file_bytes": 89336388,
+      "write_seconds": 0.22590807800042967,
+      "full_read_seconds": 0.15096691100006865,
+      "slice_read_seconds": 0.041162326000630856
+    },
+    {
+      "category": "geometry",
+      "method": "gzip4_shuffle",
+      "repeat": 2,
+      "file_bytes": 89375665,
+      "write_seconds": 1.6133681729988893,
+      "full_read_seconds": 0.30566402499971446,
+      "slice_read_seconds": 0.10062742400077695
+    },
+    {
+      "category": "geometry",
+      "method": "none",
+      "repeat": 2,
+      "file_bytes": 209806656,
+      "write_seconds": 0.11340223899969715,
+      "full_read_seconds": 0.09331861499958904,
+      "slice_read_seconds": 0.014391015000001062
+    },
+    {
+      "category": "fields",
+      "method": "zstd3",
+      "repeat": 0,
+      "file_bytes": 304302898,
+      "write_seconds": 0.7676894720007112,
+      "full_read_seconds": 0.3991193290003139,
+      "slice_read_seconds": 0.17575197299993306
+    },
+    {
+      "category": "fields",
+      "method": "zstd3_shuffle",
+      "repeat": 0,
+      "file_bytes": 241407688,
+      "write_seconds": 0.9513449460009724,
+      "full_read_seconds": 0.3861676490014361,
+      "slice_read_seconds": 0.161825126999247
+    },
+    {
+      "category": "fields",
+      "method": "gzip4_shuffle",
+      "repeat": 0,
+      "file_bytes": 238777371,
+      "write_seconds": 4.527677702999426,
+      "full_read_seconds": 0.9746740120008326,
+      "slice_read_seconds": 0.44653692599968053
+    },
+    {
+      "category": "fields",
+      "method": "none",
+      "repeat": 0,
+      "file_bytes": 474051072,
+      "write_seconds": 0.48673522700119065,
+      "full_read_seconds": 0.2517027899993991,
+      "slice_read_seconds": 0.08719427899995935
+    },
+    {
+      "category": "fields",
+      "method": "gzip4",
+      "repeat": 0,
+      "file_bytes": 298994949,
+      "write_seconds": 7.242675638999572,
+      "full_read_seconds": 1.4207663830002275,
+      "slice_read_seconds": 0.7252908299997216
+    },
+    {
+      "category": "fields",
+      "method": "zstd3",
+      "repeat": 1,
+      "file_bytes": 304302898,
+      "write_seconds": 0.7751460879990191,
+      "full_read_seconds": 0.39199563700094586,
+      "slice_read_seconds": 0.17636411500097893
+    },
+    {
+      "category": "fields",
+      "method": "gzip4_shuffle",
+      "repeat": 1,
+      "file_bytes": 238777371,
+      "write_seconds": 4.440565988001254,
+      "full_read_seconds": 0.8203676480006834,
+      "slice_read_seconds": 0.43197697899995546
+    },
+    {
+      "category": "fields",
+      "method": "none",
+      "repeat": 1,
+      "file_bytes": 474051072,
+      "write_seconds": 0.49680176000038045,
+      "full_read_seconds": 0.1279336619991227,
+      "slice_read_seconds": 0.07721598399984941
+    },
+    {
+      "category": "fields",
+      "method": "gzip4",
+      "repeat": 1,
+      "file_bytes": 298994949,
+      "write_seconds": 7.305282428000282,
+      "full_read_seconds": 1.3224547849986266,
+      "slice_read_seconds": 0.7184763100012788
+    },
+    {
+      "category": "fields",
+      "method": "zstd3_shuffle",
+      "repeat": 1,
+      "file_bytes": 241407688,
+      "write_seconds": 0.9475407890004135,
+      "full_read_seconds": 0.29195204700044997,
+      "slice_read_seconds": 0.15989192699998966
+    },
+    {
+      "category": "fields",
+      "method": "zstd3",
+      "repeat": 2,
+      "file_bytes": 304302898,
+      "write_seconds": 0.7979576699999598,
+      "full_read_seconds": 0.3041096069991909,
+      "slice_read_seconds": 0.17888501800007361
+    },
+    {
+      "category": "fields",
+      "method": "gzip4",
+      "repeat": 2,
+      "file_bytes": 298994949,
+      "write_seconds": 7.336955126998873,
+      "full_read_seconds": 1.3212786760013842,
+      "slice_read_seconds": 0.7221225819994288
+    },
+    {
+      "category": "fields",
+      "method": "zstd3_shuffle",
+      "repeat": 2,
+      "file_bytes": 241407688,
+      "write_seconds": 0.9486425979994237,
+      "full_read_seconds": 0.3096088049987884,
+      "slice_read_seconds": 0.16394249400036642
+    },
+    {
+      "category": "fields",
+      "method": "gzip4_shuffle",
+      "repeat": 2,
+      "file_bytes": 238777371,
+      "write_seconds": 4.657635673000186,
+      "full_read_seconds": 0.8290918650000094,
+      "slice_read_seconds": 0.4384300269994128
+    },
+    {
+      "category": "fields",
+      "method": "none",
+      "repeat": 2,
+      "file_bytes": 474051072,
+      "write_seconds": 0.49678841100103455,
+      "full_read_seconds": 0.13447846200142521,
+      "slice_read_seconds": 0.08328416299991659
+    }
+  ],
+  "summary": [
+    {
+      "category": "geometry",
+      "method": "none",
+      "file_bytes": 209806656,
+      "write_seconds": {
+        "median": 0.11340223899969715,
+        "minimum": 0.11182024399931834,
+        "maximum": 0.1297136760003923
+      },
+      "full_read_seconds": {
+        "median": 0.09396455599926412,
+        "minimum": 0.09331861499958904,
+        "maximum": 0.10223869099900185
+      },
+      "slice_read_seconds": {
+        "median": 0.01674005200038664,
+        "minimum": 0.014391015000001062,
+        "maximum": 0.01939939500152832
+      }
+    },
+    {
+      "category": "geometry",
+      "method": "gzip4",
+      "file_bytes": 108283746,
+      "write_seconds": {
+        "median": 2.5069196980002744,
+        "minimum": 2.459936906998337,
+        "maximum": 2.5301892179995775
+      },
+      "full_read_seconds": {
+        "median": 0.5398121300004277,
+        "minimum": 0.5356827420000627,
+        "maximum": 0.5477653649995773
+      },
+      "slice_read_seconds": {
+        "median": 0.23144313899865665,
+        "minimum": 0.23132000899931882,
+        "maximum": 0.23792154600050708
+      }
+    },
+    {
+      "category": "geometry",
+      "method": "gzip4_shuffle",
+      "file_bytes": 89375665,
+      "write_seconds": {
+        "median": 1.6142244190014026,
+        "minimum": 1.6133681729988893,
+        "maximum": 1.634284106999985
+      },
+      "full_read_seconds": {
+        "median": 0.31139004500073497,
+        "minimum": 0.30566402499971446,
+        "maximum": 0.3184892810004385
+      },
+      "slice_read_seconds": {
+        "median": 0.10498759400070412,
+        "minimum": 0.10062742400077695,
+        "maximum": 0.11047815600068134
+      }
+    },
+    {
+      "category": "geometry",
+      "method": "zstd3",
+      "file_bytes": 110706109,
+      "write_seconds": {
+        "median": 0.33815519800009497,
+        "minimum": 0.3261088950002886,
+        "maximum": 0.3396420240005682
+      },
+      "full_read_seconds": {
+        "median": 0.17116985200118506,
+        "minimum": 0.16563051299999643,
+        "maximum": 0.17159440999967046
+      },
+      "slice_read_seconds": {
+        "median": 0.059960471000522375,
+        "minimum": 0.05612524499883875,
+        "maximum": 0.06287495799915632
+      }
+    },
+    {
+      "category": "geometry",
+      "method": "zstd3_shuffle",
+      "file_bytes": 89336388,
+      "write_seconds": {
+        "median": 0.2262032039998303,
+        "minimum": 0.22590807800042967,
+        "maximum": 0.23031754399926285
+      },
+      "full_read_seconds": {
+        "median": 0.15096691100006865,
+        "minimum": 0.1471973940006137,
+        "maximum": 0.15661488800105872
+      },
+      "slice_read_seconds": {
+        "median": 0.041162326000630856,
+        "minimum": 0.041033431998585,
+        "maximum": 0.043833310999616515
+      }
+    },
+    {
+      "category": "fields",
+      "method": "none",
+      "file_bytes": 474051072,
+      "write_seconds": {
+        "median": 0.49678841100103455,
+        "minimum": 0.48673522700119065,
+        "maximum": 0.49680176000038045
+      },
+      "full_read_seconds": {
+        "median": 0.13447846200142521,
+        "minimum": 0.1279336619991227,
+        "maximum": 0.2517027899993991
+      },
+      "slice_read_seconds": {
+        "median": 0.08328416299991659,
+        "minimum": 0.07721598399984941,
+        "maximum": 0.08719427899995935
+      }
+    },
+    {
+      "category": "fields",
+      "method": "gzip4",
+      "file_bytes": 298994949,
+      "write_seconds": {
+        "median": 7.305282428000282,
+        "minimum": 7.242675638999572,
+        "maximum": 7.336955126998873
+      },
+      "full_read_seconds": {
+        "median": 1.3224547849986266,
+        "minimum": 1.3212786760013842,
+        "maximum": 1.4207663830002275
+      },
+      "slice_read_seconds": {
+        "median": 0.7221225819994288,
+        "minimum": 0.7184763100012788,
+        "maximum": 0.7252908299997216
+      }
+    },
+    {
+      "category": "fields",
+      "method": "gzip4_shuffle",
+      "file_bytes": 238777371,
+      "write_seconds": {
+        "median": 4.527677702999426,
+        "minimum": 4.440565988001254,
+        "maximum": 4.657635673000186
+      },
+      "full_read_seconds": {
+        "median": 0.8290918650000094,
+        "minimum": 0.8203676480006834,
+        "maximum": 0.9746740120008326
+      },
+      "slice_read_seconds": {
+        "median": 0.4384300269994128,
+        "minimum": 0.43197697899995546,
+        "maximum": 0.44653692599968053
+      }
+    },
+    {
+      "category": "fields",
+      "method": "zstd3",
+      "file_bytes": 304302898,
+      "write_seconds": {
+        "median": 0.7751460879990191,
+        "minimum": 0.7676894720007112,
+        "maximum": 0.7979576699999598
+      },
+      "full_read_seconds": {
+        "median": 0.39199563700094586,
+        "minimum": 0.3041096069991909,
+        "maximum": 0.3991193290003139
+      },
+      "slice_read_seconds": {
+        "median": 0.17636411500097893,
+        "minimum": 0.17575197299993306,
+        "maximum": 0.17888501800007361
+      }
+    },
+    {
+      "category": "fields",
+      "method": "zstd3_shuffle",
+      "file_bytes": 241407688,
+      "write_seconds": {
+        "median": 0.9486425979994237,
+        "minimum": 0.9475407890004135,
+        "maximum": 0.9513449460009724
+      },
+      "full_read_seconds": {
+        "median": 0.3096088049987884,
+        "minimum": 0.29195204700044997,
+        "maximum": 0.3861676490014361
+      },
+      "slice_read_seconds": {
+        "median": 0.161825126999247,
+        "minimum": 0.15989192699998966,
+        "maximum": 0.16394249400036642
+      }
+    }
+  ],
+  "combined_summary": [
+    {
+      "method": "none",
+      "combined_bytes": 683857728,
+      "geometry_bytes": 209806656,
+      "field_bytes": 474051072,
+      "write_seconds": {
+        "median": 0.6101906500007317,
+        "min": 0.598555471000509,
+        "max": 0.6265154360007728
+      },
+      "full_read_seconds": {
+        "median": 0.22779707700101426,
+        "min": 0.22189821799838683,
+        "max": 0.35394148099840095
+      },
+      "slice_read_seconds": {
+        "median": 0.09767517799991765,
+        "min": 0.09395603600023605,
+        "max": 0.10659367400148767
+      }
+    },
+    {
+      "method": "gzip4",
+      "combined_bytes": 407278695,
+      "geometry_bytes": 108283746,
+      "field_bytes": 298994949,
+      "write_seconds": {
+        "median": 9.79689203399721,
+        "min": 9.749595336999846,
+        "max": 9.83547164599986
+      },
+      "full_read_seconds": {
+        "median": 1.8610908060018119,
+        "min": 1.8581375269986893,
+        "max": 1.9685317479998048
+      },
+      "slice_read_seconds": {
+        "median": 0.9535657209980855,
+        "min": 0.9497963190005976,
+        "max": 0.9632123760002287
+      }
+    },
+    {
+      "method": "gzip4_shuffle",
+      "combined_bytes": 328153036,
+      "geometry_bytes": 89375665,
+      "field_bytes": 238777371,
+      "write_seconds": {
+        "median": 6.141902122000829,
+        "min": 6.0748500950012385,
+        "max": 6.271003845999076
+      },
+      "full_read_seconds": {
+        "median": 1.1347558899997239,
+        "min": 1.1317576930014184,
+        "max": 1.293163293001271
+      },
+      "slice_read_seconds": {
+        "median": 0.5424551350006368,
+        "min": 0.5390574510001898,
+        "max": 0.5515245200003847
+      }
+    },
+    {
+      "method": "zstd3",
+      "combined_bytes": 415009007,
+      "geometry_bytes": 110706109,
+      "field_bytes": 304302898,
+      "write_seconds": {
+        "median": 1.1147881119995873,
+        "min": 1.1058446700008062,
+        "max": 1.1240665650002484
+      },
+      "full_read_seconds": {
+        "median": 0.5635900470006163,
+        "min": 0.4697401199991873,
+        "max": 0.570289181001499
+      },
+      "slice_read_seconds": {
+        "median": 0.23571244400045543,
+        "min": 0.23501026299891237,
+        "max": 0.23923907300013525
+      }
+    },
+    {
+      "method": "zstd3_shuffle",
+      "combined_bytes": 330744076,
+      "geometry_bytes": 89336388,
+      "field_bytes": 241407688,
+      "write_seconds": {
+        "median": 1.1745506759998534,
+        "min": 1.1737439930002438,
+        "max": 1.1816624900002353
+      },
+      "full_read_seconds": {
+        "median": 0.46057571599885705,
+        "min": 0.4391494410010637,
+        "max": 0.5427825370024948
+      },
+      "slice_read_seconds": {
+        "median": 0.20510482000099728,
+        "min": 0.20092535899857467,
+        "max": 0.20565843799886352
+      }
+    }
+  ],
+  "native_plt_check": {
+    "passed": true,
+    "comparisons": 115,
+    "snapshot": "/media/andre/Elements/research_data/FOR-2895/skander_mk2a_surface_plt/uhbr-wake-re12-m84-aoa4-sa-neg.surface.pval.unsteady_i=2410_t=1.494200000e-02.plt",
+    "scope": "All five fields in all 23 zones of first snapshot, exact Float32 bytes"
+  },
+  "notes": [
+    "Plain HDF5 Zstd filter, not Blosc-Zstd. All codecs single-process; no Blosc threading.",
+    "All options use identical chunk rows. Geometry baseline differs from original contiguous layout and includes edge-chunk padding.",
+    "Pilot passed; full run uses same harness after formatting-only change. Self-reviewed timer and validation boundaries before run."
+  ],
+  "paraview_check": {
+    "passed": true,
+    "version": "6.0.1",
+    "methods": [
+      "gzip4",
+      "gzip4_shuffle",
+      "zstd3",
+      "zstd3_shuffle"
+    ],
+    "zone": "wing-upper",
+    "time": "first",
+    "field": "cp",
+    "checks": [
+      "coordinates",
+      "connectivity",
+      "cp"
+    ],
+    "plugin_path": "/tmp/flowtorch-compression-deps/hdf5plugin/plugins"
+  },
+  "resource_log": "\tCommand being timed: \".tox/py310/bin/python tests/application/benchmark_hdf5_compression.py external_data/surface_first10 external_data/compression_surface_full --repeats 3\"\n\tUser time (seconds): 76.17\n\tSystem time (seconds): 4.38\n\tPercent of CPU this job got: 99%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 1:20.69\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 870116\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 1392678\n\tVoluntary context switches: 2996\n\tInvoluntary context switches: 6318\n\tSwaps: 0\n\tFile system inputs: 344\n\tFile system outputs: 12932768\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n",
+  "reproduction_command": "PYTHONPATH=/tmp/flowtorch-compression-deps .tox/py310/bin/python tests/application/benchmark_hdf5_compression.py external_data/surface_first10 external_data/compression_surface_NEW --repeats 3",
+  "original_conversion_bytes": 652695840
+}
