@@ -1,0 +1,88 @@
+{
+  "complete": true,
+  "source": "/data/horse/ws/anwe312f-flowtorch-skander-conversion/input/uhbr-wake-re12-m84-aoa4-sa-neg.pval.unsteady_i=15500_t=9.6100000000e-02_extracted_zone_blanking_mean_var_vorticity_wallnormal.plt",
+  "source_sha256": "ce98454c441ae841a1b0b402d66302f0b70d49442d895fcbdbbad678b46b409c",
+  "source_bytes": 29882160376,
+  "flowtorch_import": "/data/horse/ws/anwe312f-flowtorch-skander-conversion/code/flowtorch/__init__.py",
+  "python": "3.11.3",
+  "torch": "2.1.2",
+  "vtk": "9.7.1",
+  "h5py": "3.16.0",
+  "job_id": "40572697",
+  "node": "n1280",
+  "geometry_id": "0f0947e10133f2ebacf7b1312852c56af9dcf57934ff227bdf97ef5ace326f14",
+  "zones": [
+    {
+      "name": "wing-upper",
+      "points": 201994,
+      "dimension": 2
+    },
+    {
+      "name": "Extracted tetra",
+      "points": 13466456,
+      "dimension": 3
+    },
+    {
+      "name": "Extracted prism",
+      "points": 3435078,
+      "dimension": 3
+    },
+    {
+      "name": "Extracted hexa",
+      "points": 120600681,
+      "dimension": 3
+    },
+    {
+      "name": "Extracted pyra",
+      "points": 2129835,
+      "dimension": 3
+    }
+  ],
+  "fields": [
+    "mean-rho",
+    "mean-u",
+    "mean-v",
+    "mean-w",
+    "mean-p",
+    "resolved-uu",
+    "resolved-vv",
+    "resolved-ww",
+    "resolved-pp",
+    "resolved-uv",
+    "resolved-uw",
+    "resolved-vw",
+    "wall_distance",
+    "X Vorticity",
+    "Y Vorticity",
+    "Z Vorticity",
+    "X Grid K Unit Normal",
+    "Y Grid K Unit Normal",
+    "Z Grid K Unit Normal"
+  ],
+  "source_comparisons": 285,
+  "descriptor": "/data/horse/ws/anwe312f-flowtorch-skander-conversion/converted/fields.xdmf",
+  "field_precision": "float32",
+  "geometry_precision": "float64",
+  "elapsed_seconds": 648.2024540739949,
+  "max_rss_kib": 26510448,
+  "output_bytes": {
+    "fields.h5": 10645547528,
+    "fields.xdmf": 22160,
+    "geometry.h5": 18373451616
+  },
+  "validation_limit": "Full-field streaming conversion, geometry validation, descriptor reference/shape checks, source sample comparisons; ParaView full readback is separate.",
+  "slurm": {
+    "state": "COMPLETED",
+    "exit_code": "0:0",
+    "elapsed": "00:11:41",
+    "requested_memory": "128G",
+    "cpus": 16
+  },
+  "workspace": "/data/horse/ws/anwe312f-flowtorch-skander-conversion",
+  "workspace_expiration_approximate": "2026-11-17",
+  "notes": [
+    "Application test on external Skander extended volume PLT; not a unit fixture.",
+    "Full ParaView readback has not been run.",
+    "Peak memory is process ru_maxrss; sampled Slurm MaxRSS was lower."
+  ]
+}

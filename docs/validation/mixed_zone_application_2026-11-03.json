@@ -1,0 +1,62 @@
+{
+  "source": "/home/andre/datasets/xrf1-bl-analysis/skander/uhbr-wake-re12-m84-aoa4-sa-neg.pval.unsteady_i=15500_t=9.6100000000e-02_extracted_zone_blanking_mean_var.plt",
+  "descriptor": "/tmp/flowtorch-mixed-skander/fields.xdmf",
+  "zone_dimensions": {
+    "wing-upper": 2,
+    "Extracted pyra": 3
+  },
+  "weight_sums": {
+    "wing-upper": 0.11579352617263794,
+    "Extracted pyra": 0.000256342813372612
+  },
+  "passed": true,
+  "date": "2026-11-03",
+  "scope": "Two selected zones of the actual Skander volume file; not all zones or complete-file conversion.",
+  "paraview_readback": {
+    "descriptor": "/tmp/flowtorch-mixed-skander/fields.xdmf",
+    "steps": [
+      {
+        "time": 0.0961,
+        "zones": [
+          {
+            "name": "wing-upper",
+            "points": 201994,
+            "cells": 200966,
+            "minimum_measure": 4.798398848370562e-13,
+            "fields": {
+              "mean-p": "float32"
+            }
+          },
+          {
+            "name": "Extracted pyra",
+            "points": 2129835,
+            "cells": 1064354,
+            "minimum_measure": 5.189774217282559e-15,
+            "fields": {
+              "mean-p": "float32"
+            }
+          }
+        ]
+      }
+    ],
+    "passed": true
+  },
+  "stored_weights": {
+    "wing-upper": {
+      "dimension": 2,
+      "dtype": "float64",
+      "sum": 0.1157935240367781
+    },
+    "Extracted pyra": {
+      "dimension": 3,
+      "dtype": "float64",
+      "sum": 0.00025634280909193
+    }
+  },
+  "checks": {
+    "tox -e format-check,lint,py310": "872 passed, 5 skipped, 73 integration tests deselected",
+    "mixed TDV71 and TDV112 generated fixtures": "passed",
+    "Sphinx warnings-as-errors": "passed",
+    "mixed weights": "stored separately; automatic combined weights require compatible dimensions or explicit user scaling"
+  }
+}

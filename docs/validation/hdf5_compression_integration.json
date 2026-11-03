@@ -1,0 +1,114 @@
+{
+  "complete": true,
+  "timestamp_utc": "2026-11-03T12:47:33.412625+00:00",
+  "application_scope": {
+    "source_files": {
+      "1.494200000e-02": "/media/andre/Elements/research_data/FOR-2895/skander_mk2a_surface_plt/uhbr-wake-re12-m84-aoa4-sa-neg.surface.pval.unsteady_i=2410_t=1.494200000e-02.plt",
+      "1.500400000e-02": "/media/andre/Elements/research_data/FOR-2895/skander_mk2a_surface_plt/uhbr-wake-re12-m84-aoa4-sa-neg.surface.pval.unsteady_i=2420_t=1.500400000e-02.plt"
+    },
+    "zone": "wing-upper",
+    "fields": [
+      "cp",
+      "cf"
+    ],
+    "field_precision": "float32",
+    "geometry_precision": "float64",
+    "codecs": [
+      "gzip",
+      "zstd"
+    ],
+    "shuffle": true,
+    "gzip_level": 4,
+    "zstd_level": 3,
+    "chunk_rows": 65536
+  },
+  "versions": {
+    "h5py": "3.16.0",
+    "hdf5plugin": "7.1.0",
+    "numpy": "2.2.6",
+    "torch": "2.14.0"
+  },
+  "hdf5_version": "2.0.0",
+  "reader_check": {
+    "passed": true,
+    "codecs": [
+      "gzip",
+      "zstd"
+    ],
+    "snapshot_count": 2,
+    "zone": "wing-upper",
+    "fields": [
+      "cp",
+      "cf"
+    ],
+    "checks": [
+      "exact full and sliced field values against existing PLT conversion",
+      "exact coordinates topology locations weights",
+      "automatic Zstd registration in fresh reader process"
+    ]
+  },
+  "paraview_check": {
+    "passed": true,
+    "version": "6.0.1",
+    "zone": "wing-upper",
+    "fields": [
+      "cp",
+      "cf"
+    ],
+    "checks": [
+      {
+        "codec": "gzip",
+        "times": [
+          0.014942,
+          0.015004
+        ],
+        "passed": true
+      },
+      {
+        "codec": "zstd",
+        "times": [
+          0.014942,
+          0.015004
+        ],
+        "passed": true
+      }
+    ],
+    "validation": "Exact coordinates, integer connectivity and fields against original uncompressed conversion",
+    "HDF5_PLUGIN_PATH": "/tmp/flowtorch-compression-deps/hdf5plugin/plugins"
+  },
+  "regression_tests": {
+    "passed": 907,
+    "skipped": 5,
+    "integration_deselected": 73,
+    "command": "PYTHONPATH=/tmp/flowtorch-compression-deps .tox/py310/bin/python -m pytest -m 'not integration' -q"
+  },
+  "checks": {
+    "format_check": "passed",
+    "lint": "passed",
+    "sphinx_warnings_as_errors": "passed",
+    "git_diff_check": "passed"
+  },
+  "code_sha256": {
+    "flowtorch/data/_hdf5_compression.py": "37eb087adee21f9e2bb797b61d7f94be96ff97db2fd2b9fcf6f88ef3bb5f39b2",
+    "flowtorch/data/_hdf5_schema.py": "4fe7171cd0917f52966a3eb74448204ffc0adbf2119f5f4f1e4928521ffd4f49",
+    "flowtorch/data/hdf5_file.py": "3c9a5d23bb01d4497f415ed9f93f7c4169aa18dde63dda0ce284088345909bb6",
+    "flowtorch/data/plt_converter.py": "8ee1b7580221f0ae98a1f07335408b014945fa7d32fa5dd748534c69c7ef0ca8",
+    "flowtorch/data/result_export.py": "2dc96b586efe03522c8b126b819fecd98ecffbed8f288c1d7f1bb7faa5c2f912",
+    "tests/data/test_hdf5_compression.py": "f3e0544c85bb9a06ab2661f39a6d7866a7d03dfc476a8031a96d203d7ea9a605",
+    "pyproject.toml": "3126b14b715d2ffc79799fdf613b75873640d76be4be1626e8808b1c033c3111"
+  },
+  "output_bytes": {
+    "external_data/compression_integrated_surface/zstd/geometry.h5": 8919997,
+    "external_data/compression_integrated_surface/zstd/fields.h5": 2239578,
+    "external_data/compression_integrated_surface/zstd/fields.xdmf": 1957,
+    "external_data/compression_integrated_surface/gzip/geometry.h5": 8999905,
+    "external_data/compression_integrated_surface/gzip/fields.h5": 2218125,
+    "external_data/compression_integrated_surface/gzip/fields.xdmf": 1957
+  },
+  "limits": [
+    "External files are application checks, not unit fixtures.",
+    "No Barnard ParaView/compression validation performed in this integration.",
+    "Existing full volume conversion has not been recompressed.",
+    "Zstd tests use optional hdf5plugin installed in an isolated temporary directory."
+  ]
+}

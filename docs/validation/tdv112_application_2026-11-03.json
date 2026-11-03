@@ -1,0 +1,468 @@
+{
+  "date": "2026-11-03",
+  "implementation": "Native Python TDV112 FE-block extension behind TecplotDataloader; no meshio++ or construct runtime dependency.",
+  "import_path": "/home/andre/Development/flowtorch/flowtorch/__init__.py",
+  "version": "1.10.1",
+  "revision_before_changes": "56ec0ce406cb25622d02bd9f64232ff78f8cbef2",
+  "environment": {
+    "python": "3.10.20",
+    "torch": "2.14.0+cu130",
+    "vtk": "9.7.0",
+    "h5py": "3.16.0",
+    "device": "cpu"
+  },
+  "direct_read_tests": [
+    {
+      "file": "/home/andre/datasets/xrf1-bl-analysis/skander/uhbr-wake-re12-m84-aoa4-sa-neg.pval.unsteady_i=15500_t=9.6100000000e-02_extracted_zone_blanking_mean_var.plt",
+      "passed": true,
+      "checks": 255,
+      "zones": [
+        {
+          "zone": "wing-upper",
+          "points": 201994,
+          "cells": 200966,
+          "fields": [
+            "X",
+            "Y",
+            "Z",
+            "mean-rho",
+            "mean-u",
+            "mean-v",
+            "mean-w",
+            "mean-p",
+            "resolved-uu",
+            "resolved-vv",
+            "resolved-ww",
+            "resolved-pp",
+            "resolved-uv",
+            "resolved-uw",
+            "resolved-vw",
+            "wall_distance"
+          ]
+        },
+        {
+          "zone": "Extracted tetra",
+          "points": 13466456,
+          "cells": 76547976,
+          "fields": [
+            "X",
+            "Y",
+            "Z",
+            "mean-rho",
+            "mean-u",
+            "mean-v",
+            "mean-w",
+            "mean-p",
+            "resolved-uu",
+            "resolved-vv",
+            "resolved-ww",
+            "resolved-pp",
+            "resolved-uv",
+            "resolved-uw",
+            "resolved-vw",
+            "wall_distance"
+          ]
+        },
+        {
+          "zone": "Extracted prism",
+          "points": 3435078,
+          "cells": 6375380,
+          "fields": [
+            "X",
+            "Y",
+            "Z",
+            "mean-rho",
+            "mean-u",
+            "mean-v",
+            "mean-w",
+            "mean-p",
+            "resolved-uu",
+            "resolved-vv",
+            "resolved-ww",
+            "resolved-pp",
+            "resolved-uv",
+            "resolved-uw",
+            "resolved-vw",
+            "wall_distance"
+          ]
+        },
+        {
+          "zone": "Extracted hexa",
+          "points": 120600681,
+          "cells": 118915900,
+          "fields": [
+            "X",
+            "Y",
+            "Z",
+            "mean-rho",
+            "mean-u",
+            "mean-v",
+            "mean-w",
+            "mean-p",
+            "resolved-uu",
+            "resolved-vv",
+            "resolved-ww",
+            "resolved-pp",
+            "resolved-uv",
+            "resolved-uw",
+            "resolved-vw",
+            "wall_distance"
+          ]
+        },
+        {
+          "zone": "Extracted pyra",
+          "points": 2129835,
+          "cells": 1064354,
+          "fields": [
+            "X",
+            "Y",
+            "Z",
+            "mean-rho",
+            "mean-u",
+            "mean-v",
+            "mean-w",
+            "mean-p",
+            "resolved-uu",
+            "resolved-vv",
+            "resolved-ww",
+            "resolved-pp",
+            "resolved-uv",
+            "resolved-uw",
+            "resolved-vw",
+            "wall_distance"
+          ]
+        }
+      ],
+      "seconds": 0.038838204000057885,
+      "max_rss_kib": 541784
+    },
+    {
+      "file": "/home/andre/datasets/xrf1-bl-analysis/skander/uhbr-wake-re12-m84-aoa4-sa-neg.pval.unsteady_i=15500_t=9.6100000000e-02_extracted_zone_blanking_mean_var_vorticity_wallnormal.plt",
+      "passed": true,
+      "checks": 345,
+      "zones": [
+        {
+          "zone": "wing-upper",
+          "points": 201994,
+          "cells": 200966,
+          "fields": [
+            "X",
+            "Y",
+            "Z",
+            "mean-rho",
+            "mean-u",
+            "mean-v",
+            "mean-w",
+            "mean-p",
+            "resolved-uu",
+            "resolved-vv",
+            "resolved-ww",
+            "resolved-pp",
+            "resolved-uv",
+            "resolved-uw",
+            "resolved-vw",
+            "wall_distance",
+            "X Vorticity",
+            "Y Vorticity",
+            "Z Vorticity",
+            "X Grid K Unit Normal",
+            "Y Grid K Unit Normal",
+            "Z Grid K Unit Normal"
+          ]
+        },
+        {
+          "zone": "Extracted tetra",
+          "points": 13466456,
+          "cells": 76547976,
+          "fields": [
+            "X",
+            "Y",
+            "Z",
+            "mean-rho",
+            "mean-u",
+            "mean-v",
+            "mean-w",
+            "mean-p",
+            "resolved-uu",
+            "resolved-vv",
+            "resolved-ww",
+            "resolved-pp",
+            "resolved-uv",
+            "resolved-uw",
+            "resolved-vw",
+            "wall_distance",
+            "X Vorticity",
+            "Y Vorticity",
+            "Z Vorticity",
+            "X Grid K Unit Normal",
+            "Y Grid K Unit Normal",
+            "Z Grid K Unit Normal"
+          ]
+        },
+        {
+          "zone": "Extracted prism",
+          "points": 3435078,
+          "cells": 6375380,
+          "fields": [
+            "X",
+            "Y",
+            "Z",
+            "mean-rho",
+            "mean-u",
+            "mean-v",
+            "mean-w",
+            "mean-p",
+            "resolved-uu",
+            "resolved-vv",
+            "resolved-ww",
+            "resolved-pp",
+            "resolved-uv",
+            "resolved-uw",
+            "resolved-vw",
+            "wall_distance",
+            "X Vorticity",
+            "Y Vorticity",
+            "Z Vorticity",
+            "X Grid K Unit Normal",
+            "Y Grid K Unit Normal",
+            "Z Grid K Unit Normal"
+          ]
+        },
+        {
+          "zone": "Extracted hexa",
+          "points": 120600681,
+          "cells": 118915900,
+          "fields": [
+            "X",
+            "Y",
+            "Z",
+            "mean-rho",
+            "mean-u",
+            "mean-v",
+            "mean-w",
+            "mean-p",
+            "resolved-uu",
+            "resolved-vv",
+            "resolved-ww",
+            "resolved-pp",
+            "resolved-uv",
+            "resolved-uw",
+            "resolved-vw",
+            "wall_distance",
+            "X Vorticity",
+            "Y Vorticity",
+            "Z Vorticity",
+            "X Grid K Unit Normal",
+            "Y Grid K Unit Normal",
+            "Z Grid K Unit Normal"
+          ]
+        },
+        {
+          "zone": "Extracted pyra",
+          "points": 2129835,
+          "cells": 1064354,
+          "fields": [
+            "X",
+            "Y",
+            "Z",
+            "mean-rho",
+            "mean-u",
+            "mean-v",
+            "mean-w",
+            "mean-p",
+            "resolved-uu",
+            "resolved-vv",
+            "resolved-ww",
+            "resolved-pp",
+            "resolved-uv",
+            "resolved-uw",
+            "resolved-vw",
+            "wall_distance",
+            "X Vorticity",
+            "Y Vorticity",
+            "Z Vorticity",
+            "X Grid K Unit Normal",
+            "Y Grid K Unit Normal",
+            "Z Grid K Unit Normal"
+          ]
+        }
+      ],
+      "seconds": 0.043759779000083654,
+      "max_rss_kib": 541784
+    },
+    {
+      "file": "/home/andre/datasets/xrf1-bl-analysis/sebastian/volume/DDES_LD2_Re3M0.84A4/xrf1-uhbr-Re3.3-M0.84A4.pval.unsteady_i=50500_t=2.0180180000e00_mean.plt",
+      "passed": true,
+      "checks": 108,
+      "zones": [
+        {
+          "zone": "tetra",
+          "points": 10333475,
+          "cells": 35761218,
+          "fields": [
+            "X",
+            "Y",
+            "Z",
+            "mean-rho",
+            "mean-u",
+            "mean-v",
+            "mean-w",
+            "mean-p"
+          ]
+        },
+        {
+          "zone": "prism",
+          "points": 11877800,
+          "cells": 4451775,
+          "fields": [
+            "X",
+            "Y",
+            "Z",
+            "mean-rho",
+            "mean-u",
+            "mean-v",
+            "mean-w",
+            "mean-p"
+          ]
+        },
+        {
+          "zone": "hexa",
+          "points": 290472891,
+          "cells": 283411359,
+          "fields": [
+            "X",
+            "Y",
+            "Z",
+            "mean-rho",
+            "mean-u",
+            "mean-v",
+            "mean-w",
+            "mean-p"
+          ]
+        },
+        {
+          "zone": "pyra",
+          "points": 14758600,
+          "cells": 6637155,
+          "fields": [
+            "X",
+            "Y",
+            "Z",
+            "mean-rho",
+            "mean-u",
+            "mean-v",
+            "mean-w",
+            "mean-p"
+          ]
+        }
+      ],
+      "seconds": 0.020187697999972443,
+      "max_rss_kib": 542056
+    }
+  ],
+  "geometry_tests": [
+    {
+      "file": "/home/andre/datasets/xrf1-bl-analysis/skander/uhbr-wake-re12-m84-aoa4-sa-neg.pval.unsteady_i=15500_t=9.6100000000e-02_extracted_zone_blanking_mean_var.plt",
+      "zone": "Extracted pyra",
+      "passed": true,
+      "points": 2129835,
+      "cells": 1064354,
+      "topology_type": "Hexahedron",
+      "min_weight": 2.5948871086412794e-15,
+      "total_measure": 0.00025634280909193,
+      "seconds": 0.45431300100017324,
+      "max_rss_kib": 902456
+    },
+    {
+      "file": "/home/andre/datasets/xrf1-bl-analysis/sebastian/volume/DDES_LD2_Re3M0.84A4/xrf1-uhbr-Re3.3-M0.84A4.pval.unsteady_i=50500_t=2.0180180000e00_mean.plt",
+      "zone": "prism",
+      "passed": true,
+      "points": 11877800,
+      "cells": 4451775,
+      "topology_type": "Hexahedron",
+      "min_weight": 6.076673076777585e-20,
+      "total_measure": 2290.0553171447846,
+      "seconds": 1.5706165729998247,
+      "max_rss_kib": 1925596
+    }
+  ],
+  "conversion_tests": [
+    {
+      "file": "/home/andre/datasets/xrf1-bl-analysis/skander/uhbr-wake-re12-m84-aoa4-sa-neg.pval.unsteady_i=15500_t=9.6100000000e-02_extracted_zone_blanking_mean_var.plt",
+      "zone": "Extracted pyra",
+      "descriptor": "/tmp/flowtorch-native112/skander/fields.xdmf",
+      "passed": true,
+      "geometry_dtype": "float64",
+      "field_dtype": "float32",
+      "seconds": 1.2357016099999782,
+      "max_rss_kib": 965788
+    },
+    {
+      "file": "/home/andre/datasets/xrf1-bl-analysis/sebastian/volume/DDES_LD2_Re3M0.84A4/xrf1-uhbr-Re3.3-M0.84A4.pval.unsteady_i=50500_t=2.0180180000e00_mean.plt",
+      "zone": "prism",
+      "descriptor": "/tmp/flowtorch-native112/sebastian/fields.xdmf",
+      "passed": true,
+      "geometry_dtype": "float64",
+      "field_dtype": "float32",
+      "seconds": 4.257576110000173,
+      "max_rss_kib": 2284620
+    }
+  ],
+  "paraview_readback": {
+    "skander": {
+      "descriptor": "/tmp/flowtorch-native112/skander/fields.xdmf",
+      "steps": [
+        {
+          "time": 0.0961,
+          "zones": [
+            {
+              "name": "Extracted pyra",
+              "points": 2129835,
+              "cells": 1064354,
+              "minimum_measure": 5.189774217282559e-15,
+              "fields": {
+                "mean-p": "float32"
+              }
+            }
+          ]
+        }
+      ],
+      "passed": true
+    },
+    "sebastian": {
+      "descriptor": "/tmp/flowtorch-native112/sebastian/fields.xdmf",
+      "steps": [
+        {
+          "time": 2.018018,
+          "zones": [
+            {
+              "name": "prism",
+              "points": 11877800,
+              "cells": 4451775,
+              "minimum_measure": 4.0452760573838096e-19,
+              "fields": {
+                "mean-p": "float32"
+              }
+            }
+          ]
+        }
+      ],
+      "passed": true
+    }
+  },
+  "scope_and_limits": [
+    "Original files were opened read-only and remain unchanged.",
+    "Sampled fields and topology across every zone in all three actual volume files were compared to meshio++ 18.0.0 parser offsets and independently read source bytes.",
+    "Geometry and one-field conversion were verified only for the specified representative volume zones, not the largest zones or complete volume files.",
+    "Application timings are single observations with filesystem cache effects; no performance benchmark or 64 GiB memory claim.",
+    "Ordered zones, face-based polygon/polyhedron topology, face-neighbour records, bit-packed variables, forward sharing and separate grid/solution containers are unsupported and rejected.",
+    "Native geometry uses complete selected-zone VTK meshes; geometry memory optimization remains deferred."
+  ],
+  "checks": {
+    "tox -e format-check,lint,py310": "passed: 870 tests passed, 5 skipped, 73 integration tests deselected",
+    "TDV112 generated tests": "22 passed",
+    "Sphinx warnings-as-errors": "passed",
+    "source and wheel metadata": "passed",
+    "application field/connectivity comparisons": 708
+  }
+}
