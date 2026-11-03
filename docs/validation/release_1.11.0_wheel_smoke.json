@@ -1,0 +1,23 @@
+{
+  "passed": true,
+  "version": "1.11.0",
+  "import_path": "/tmp/flowtorch-release-1.11.0/venv/lib/python3.12/site-packages/flowtorch/__init__.py",
+  "conversion": {
+    "gzip": {
+      "conversion": true,
+      "append": true,
+      "exact_readback": true,
+      "geometry_unchanged": true
+    },
+    "zstd": {
+      "conversion": true,
+      "append": true,
+      "exact_readback": true,
+      "geometry_unchanged": true
+    }
+  },
+  "complex_export_and_append": true,
+  "cli_conversion_and_append": true,
+  "wheel_sha256": "0ceab11a3b53c0f92352a42c68bd81606e45fefec7a6edbc6907753ce97c6592",
+  "runtime_dependencies": "Reused installed test-environment dependencies via a path entry; flowtorch itself is imported from the new wheel in the isolated environment."
+}
