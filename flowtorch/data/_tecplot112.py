@@ -8,6 +8,7 @@ calculations are handled by the existing VTK path, not by this parser.
 
 from pathlib import Path
 import struct
+from typing import Any
 from typing import BinaryIO
 
 import numpy as np
@@ -27,7 +28,7 @@ class _Reader:
         return struct.unpack(self.endian + code, data)[0]
 
     def string(self) -> str:
-        values = []
+        values: list[str] = []
         for _ in range(65536):
             value = self.read("i")
             if value == 0:
@@ -146,7 +147,7 @@ def index_by_zone(path: str | Path) -> dict:
         if not headers:
             raise ValueError("TDV112 file has no zones")
         result = {}
-        previous = []
+        previous: list[dict[str, Any]] = []
         formats = {1: "f4", 2: "f8", 3: "i4", 4: "i2", 5: "u1"}
         for index, zone in enumerate(headers):
             if reader.read("f") != 299:
@@ -165,7 +166,7 @@ def index_by_zone(path: str | Path) -> dict:
                 raise ValueError("TDV112 sharing must reference an earlier zone")
             owned = [i for i in range(nvars) if not passive[i] and shared[i] == -1]
             extrema = {names[i]: (reader.read("d"), reader.read("d")) for i in owned}
-            arrays = {}
+            arrays: dict[str, ArrayReference | _PassiveArray] = {}
             for i, name in enumerate(names):
                 count = zone["cells"] if zone["locations"][i] else zone["points"]
                 dtype = np.dtype(reader.endian + formats[codes[i]])

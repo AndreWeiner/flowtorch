@@ -6,7 +6,7 @@ averaged squared FFT magnitudes. Real spectra include one-sided energy factors.
 
 import logging
 from math import isfinite
-from typing import Any, Literal, Set
+from typing import cast, Any, Literal, Set
 
 import torch as pt
 
@@ -266,12 +266,17 @@ class DFT(ProvenanceMixin):
         supports negative frequencies. The upper frequency bound is exclusive.
         """
         return AMSPOD.top_modes(
-            self, n=n, eig_idx=0, f_min=f_min, f_max=f_max, spacing=spacing
+            cast(AMSPOD, self),
+            n=n,
+            eig_idx=0,
+            f_min=f_min,
+            f_max=f_max,
+            spacing=spacing,
         )
 
     def mode_similarity(self) -> pt.Tensor:
         """Absolute weighted similarities across Fourier frequency bins."""
-        modes = DFT.modes.fget(self)
+        modes = DFT.__dict__["modes"].fget(self)
         if self._sqrt_weight is not None:
             modes = modes * self._sqrt_weight
         return mode_similarity(modes, modes)
@@ -457,7 +462,7 @@ class PDFT(DFT):
     @property
     def modes(self) -> pt.Tensor | StateVectorResult:
         """Weighted unit-norm Fourier modes in physical coordinates."""
-        return self._project(DFT.modes.fget(self))
+        return self._project(DFT.__dict__["modes"].fget(self))
 
     def get_mode(self, f_idx: int) -> pt.Tensor | StateVectorResult:
         """Project only one Fourier mode to physical coordinates."""

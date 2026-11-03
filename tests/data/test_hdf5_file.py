@@ -1,5 +1,7 @@
 # standard library packages
 import os
+import shutil
+import sys
 import pytest
 
 # third party packages
@@ -25,6 +27,32 @@ from flowtorch.data import (
     XDMFWriter,
     copy_hdf5_mesh,
 )
+
+
+@pytest.fixture(autouse=True)
+def isolated_conversion_cases(tmp_path, monkeypatch):
+    """Keep converter outputs independent of archived files and other tests."""
+    root = tmp_path / "datasets"
+    root.mkdir()
+    cases = [
+        "of_cavity_ascii",
+        "of_cavity_binary",
+        "of_cavity_ascii_parallel",
+        "of_cavity_binary_parallel",
+    ]
+    paths = {}
+    for case in cases:
+        target = root / case
+        shutil.copytree(
+            DATASETS[case],
+            target,
+            ignore=shutil.ignore_patterns(
+                "flowtorch.hdf5", "flowtorch.xdmf", "test_file.hdf5"
+            ),
+        )
+        paths[case] = str(target)
+    monkeypatch.setattr(sys.modules[__name__], "DATASET_PATH", str(root) + os.sep)
+    monkeypatch.setattr(sys.modules[__name__], "DATASETS", paths)
 
 
 class HDF5TestData:

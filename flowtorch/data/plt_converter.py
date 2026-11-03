@@ -1,6 +1,7 @@
 """Fixed-mesh PLT conversion using the shared FlowTorch HDF5 interfaces."""
 
 from pathlib import Path
+from typing import Any
 import re
 import warnings
 
@@ -64,7 +65,7 @@ class PLT2HDF5:
         if not self.files or len({float(t) for t in self.files}) != len(self.files):
             raise ValueError("Need unique numeric snapshot times")
         self.files = dict(sorted(self.files.items(), key=lambda pair: float(pair[0])))
-        self.options = dict(
+        self.options: dict[str, Any] = dict(
             backend=backend,
             pvpython=pvpython,
             association=association,

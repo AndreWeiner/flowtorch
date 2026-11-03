@@ -74,6 +74,7 @@ class UnstructuredGeometry:
             (self.locations, "<f8"),
             (self.weights, "<f8"),
         ):
+            assert value is not None  # Established by validate().
             digest.update(str(value.shape).encode())
             for start in range(0, len(value), 65536):
                 digest.update(

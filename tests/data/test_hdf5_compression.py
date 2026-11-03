@@ -258,3 +258,22 @@ def test_invalid_compressed_shape_preserves_existing_dataset(tmp_path):
         with pytest.raises(ValueError, match="positive"):
             writer.write("p", (0,), time="0")
         np.testing.assert_array_equal(writer._file["variable/0/p"][:], np.arange(3.0))
+
+
+@pytest.mark.parametrize("split", [False, True])
+def test_foam_default_excludes_surface_fields(tmp_path, split):
+    case = make_foam(tmp_path / "foam")
+    (case / "0/phi").write_text(
+        "FoamFile { version 2.0; format ascii; class surfaceScalarField; object phi; }\ninternalField uniform 1;\nboundaryField {}\n"
+    )
+    converter = FOAM2HDF5(str(case))
+    path = converter.convert(
+        "fields.h5",
+        times=["0"],
+        geometry_file=str(tmp_path / "geometry.h5") if split else None,
+    )
+    with HDF5Dataloader(path) as reader:
+        assert set(reader.field_names["0"]) == {"p", "U"}
+    with pytest.raises(ValueError, match="Unsupported OpenFOAM field type"):
+        converter.convert("bad.h5", fields=["phi"], times=["0"])
+    assert not (case / "bad.h5").exists()

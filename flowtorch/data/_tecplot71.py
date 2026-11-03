@@ -58,7 +58,7 @@ def index_by_zone(path):
             return struct.unpack(endian + code, data)[0]
 
         def string():
-            values = []
+            values: list[str] = []
             for _ in range(65536):
                 code = read("i")
                 if code == 0:

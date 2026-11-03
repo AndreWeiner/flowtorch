@@ -15,6 +15,9 @@ single-file output remains the default. For separate reusable Float64 geometry::
     )
 
 The converter retains polyhedral connectivity, cell centres and raw volumes.
+With ``fields=None``, it exports supported cell-associated volume fields;
+face-associated fields such as ``phi`` are excluded. Explicitly requesting an
+unsupported field raises an error before creating output.
 Field precision is honored, including double fields. Geometry uses Float64 for
 both layouts. Unknown selections fail and replacing fields requires explicit
 ``overwrite=True``. Decomposed cases and time-dependent mesh directories are

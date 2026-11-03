@@ -12,7 +12,7 @@ of reconstructed OpenFOAM simulation cases into the HDF5-based flowTorch format.
 from functools import partial
 import logging
 from os.path import isfile, join
-from typing import List, Dict, Union
+from typing import List, Dict, Union, cast
 
 # third party packages
 import torch as pt
@@ -700,8 +700,10 @@ class FOAM2HDF5(object):
             raise ValueError("Expected float32/float64 fields and positive chunks")
         selected_times = select_names(self._loader.write_times, times, "time")
         selected_times.sort(key=float)
+        select_names(self._loader.field_names[selected_times[0]], fields, "field")
+        supported = self._gather_field_information(fields, [selected_times[0]])
         selected_fields = select_names(
-            self._loader.field_names[selected_times[0]], fields, "field"
+            [name for name, _, _ in supported], fields, "field"
         )
         case = Path(self._loader._case.path)
         for time in selected_times:
@@ -738,17 +740,22 @@ class FOAM2HDF5(object):
                 "mesh": {
                     name: (
                         n_cells,
-                        *self._loader.load_snapshot(name, selected_times[0]).shape[1:],
+                        *cast(
+                            pt.Tensor,
+                            self._loader.load_snapshot(name, selected_times[0]),
+                        ).shape[1:],
                     )
                     for name in selected_fields
                 }
             }
             validate_append_selection(info, selected_times, schemas)
+        self._gather_field_information(selected_fields, selected_times)
         if geometry_file is not None:
             from .unstructured import UnstructuredGeometry
 
             mesh_path = str(case / POLYMESH_PATH)
             n_cells, _, _ = self._gather_mesh_information(mesh_path)
+            assert self._mesh_points is not None and self._topology is not None
             geometry = UnstructuredGeometry(
                 self._mesh_points.numpy(),
                 self._topology.numpy(),
@@ -785,7 +792,7 @@ class FOAM2HDF5(object):
             ) as writer:
                 for time in selected_times:
                     for name in selected_fields:
-                        value = self._loader.load_snapshot(name, time)
+                        value = cast(pt.Tensor, self._loader.load_snapshot(name, time))
                         writer.allocate_field(
                             name, tuple(value.shape[1:]), time, "mesh"
                         )
@@ -940,6 +947,8 @@ class FOAM2HDF5(object):
                 with foam_open(path) as stream:
                     field_type = foam_header(stream).get(b"class")
                 if field_type not in FIELD_TYPE_DIMENSION:
+                    if fields is None:
+                        continue  # Default export contains supported cell fields only.
                     raise ValueError(
                         f"Unsupported OpenFOAM field type for {name}: {field_type!r}"
                     )

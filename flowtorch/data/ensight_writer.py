@@ -8,7 +8,7 @@ from typing import Mapping, Optional, Sequence, Union
 
 import numpy as np
 import torch as pt
-from vtkmodules.util.numpy_support import vtk_to_numpy  # type: ignore[import-not-found]
+from vtkmodules.util.numpy_support import vtk_to_numpy
 
 from .ensight_dataloader import EnSightDataloader
 from .tecplot_dataloader import TecplotDataloader

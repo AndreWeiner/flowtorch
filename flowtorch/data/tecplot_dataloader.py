@@ -14,7 +14,7 @@ import struct
 import subprocess
 import sys
 from threading import Lock, Thread
-from typing import Any, cast, Dict, List, Literal, Union
+from typing import Any, cast, Dict, List, Literal, Union, TYPE_CHECKING
 
 # third party packages
 import numpy as np
@@ -24,6 +24,9 @@ import torch as pt
 from flowtorch import DEFAULT_DTYPE
 from .dataloader import Dataloader, _preallocate_time_series
 from .utils import check_and_standardize_path, check_list_or_str
+
+if TYPE_CHECKING:
+    from ._tecplot_native import NativeTecplotClient
 
 logger = logging.getLogger(__name__)
 
@@ -312,7 +315,7 @@ class TecplotDataloader(Dataloader):
         if backend == "native":
             from ._tecplot_native import NativeTecplotClient
 
-            self._client = NativeTecplotClient()
+            self._client: NativeTecplotClient | _PvpythonClient = NativeTecplotClient()
         else:
             self._client = _PvpythonClient(_resolve_pvpython(pvpython))
         self._zone_names: List[str] | None = None
@@ -479,6 +482,11 @@ class TecplotDataloader(Dataloader):
         return self._load_single_snapshot(field_name, time, association)
 
     @property
+    def _native_client(self) -> "NativeTecplotClient":
+        """Native-only interface for paths already guarded by backend selection."""
+        return cast("NativeTecplotClient", self._client)
+
+    @property
     def supports_direct_slicing(self) -> bool:
         """Whether field slices avoid materializing full snapshots."""
         return self.backend == "native"
@@ -487,7 +495,7 @@ class TecplotDataloader(Dataloader):
         """Inspect native field shape without reading field values."""
         if self.backend != "native":
             return tuple(super().snapshot_shape(field_name, time))
-        return self._client.field_arrays(
+        return self._native_client.field_arrays(
             self._assemble_file_path(time), self.zone, self.association
         )[field_name].shape
 
@@ -505,7 +513,7 @@ class TecplotDataloader(Dataloader):
             start, stop, step = spatial_slice.indices(shape[0])
             if step != 1:
                 raise ValueError("Spatial slices require unit stride")
-            array = self._client.field_arrays(
+            array = self._native_client.field_arrays(
                 self._assemble_file_path(label), self.zone, self.association
             )[name]
             return pt.from_numpy(
@@ -533,12 +541,12 @@ class TecplotDataloader(Dataloader):
         if self.backend != "native":
             raise ValueError("Direct connectivity slices require the native backend")
         path = self._assemble_file_path(self.write_times[0] if time is None else time)
-        count = self._client.arrays(path, self.zone)["connectivity"].shape[0]
+        count = self._native_client.arrays(path, self.zone)["connectivity"].shape[0]
         start, stop, step = cell_slice.indices(count)
         if step != 1:
             raise ValueError("Connectivity slices require unit stride")
-        ids = self._client.connectivity(path, self.zone, slice(start, stop))
-        points = self._client.arrays(path, self.zone)["fields"]["X"].shape[0]
+        ids = self._native_client.connectivity(path, self.zone, slice(start, stop))
+        points = self._native_client.arrays(path, self.zone)["fields"]["X"].shape[0]
         if ids.size and (ids.min() < 0 or ids.max() >= points):
             raise ValueError("Invalid PLT connectivity indices")
         return pt.from_numpy(ids)
@@ -554,7 +562,7 @@ class TecplotDataloader(Dataloader):
         if time is None or time == self.write_times[0]:
             mesh = self.mesh
         elif self.backend == "native":
-            mesh = self._client.mesh(
+            mesh = self._native_client.mesh(
                 self._assemble_file_path(time), self.zone, self._cell_type
             )
         else:
@@ -647,11 +655,11 @@ class TecplotDataloader(Dataloader):
         topology only; source fields are loaded separately. A fresh, independent
         mesh is returned, with any configured cell-type correction applied.
         """
-        from vtkmodules.vtkCommonDataModel import vtkUnstructuredGrid  # type: ignore[import-not-found]
-        from vtkmodules.vtkIOXML import vtkXMLUnstructuredGridReader  # type: ignore[import-not-found]
+        from vtkmodules.vtkCommonDataModel import vtkUnstructuredGrid
+        from vtkmodules.vtkIOXML import vtkXMLUnstructuredGridReader
 
         if self.backend == "native":
-            return self._client.mesh(
+            return self._native_client.mesh(
                 self._assemble_file_path(self.write_times[0]),
                 self.zone,
                 self._cell_type,

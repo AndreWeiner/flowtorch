@@ -4,7 +4,7 @@ import gzip
 import re
 from itertools import islice
 from os.path import isfile
-from typing import BinaryIO, Optional, Tuple, List
+from typing import BinaryIO, Optional, Tuple, List, cast
 
 import numpy as np
 
@@ -16,14 +16,16 @@ def resolve(path: str) -> str:
 
 def foam_open(path: str) -> BinaryIO:
     path = resolve(path)
-    return gzip.open(path, "rb") if path.endswith(".gz") else open(path, "rb")
+    return cast(
+        BinaryIO, gzip.open(path, "rb") if path.endswith(".gz") else open(path, "rb")
+    )
 
 
 def token(stream: BinaryIO) -> bytes:
     """Read a dictionary token without reading ahead into binary payloads."""
     pending = getattr(stream, "_foam_token", None)
     if pending is not None:
-        del stream._foam_token
+        delattr(stream, "_foam_token")
         return pending
     while True:
         char = stream.read(1)
@@ -65,7 +67,7 @@ def token(stream: BinaryIO) -> bytes:
         if not char or char.isspace():
             return bytes(value)
         if char in b"{}();":
-            stream._foam_token = char
+            setattr(stream, "_foam_token", char)
             return bytes(value)
         value.extend(char)
 
@@ -75,7 +77,7 @@ def header(stream: BinaryIO) -> dict:
         pass
     if token(stream) != b"{":
         raise ValueError("Missing FoamFile dictionary")
-    result = {}
+    result: dict[bytes, bytes] = {}
     while True:
         key = token(stream)
         if key == b"}":

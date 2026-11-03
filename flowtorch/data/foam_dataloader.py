@@ -130,7 +130,7 @@ class FOAMDataloader(Dataloader):
 
         stream = BytesIO(b"".join(data))
         metadata, dim, count, uniform = field_info(stream)
-        if uniform is not None:
+        if uniform is not None or count is None:
             raise ValueError("Uniform fields require a cell count; use load_snapshot")
         values = read_values(stream, metadata, dim, count, 0, count)
         shape = (count,) if dim == 1 else (count, dim)
@@ -158,7 +158,7 @@ class FOAMDataloader(Dataloader):
         return self._load_slice(field_name, time, slice(None))
 
     def _field_layout(self, field_name: str, time: str) -> List[Tuple[str, int, int]]:
-        layout = []
+        layout: List[Tuple[str, int, int]] = []
         for proc in range(self._case.processors):
             path = self._case.build_file_path(field_name, time, proc)
             with foam_open(path) as stream:
@@ -697,7 +697,7 @@ class FOAMMesh(object):
             if metadata.get(b"class", b"").startswith(b"vol"):
                 stream.seek(0)
                 metadata, field_dim, count, uniform = field_info(stream)
-                if field_dim != dim or uniform is not None:
+                if field_dim != dim or uniform is not None or count is None:
                     raise ValueError(
                         "Precomputed geometry requires a matching nonuniform field"
                     )

@@ -40,10 +40,11 @@ class CompressionSettings:
 
     @property
     def dataset_options(self):
-        options = {"shuffle": True} if self.shuffle else {}
+        options: dict[str, object] = {"shuffle": True} if self.shuffle else {}
         if self.codec == "gzip":
             options.update(compression="gzip", compression_opts=self.level)
         elif self.codec == "zstd":
+            assert self.level is not None
             # HDF5 filter options are unsigned; Zstd interprets this as int32.
             options.update(
                 compression=ZSTD_FILTER, compression_opts=(self.level & 0xFFFFFFFF,)

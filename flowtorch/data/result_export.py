@@ -3,6 +3,7 @@
 from pathlib import Path
 import itertools
 import json
+from typing import Any, cast
 
 import numpy as np
 import torch
@@ -262,7 +263,7 @@ def export_spod(
                 raise ValueError("Need a nonempty finite phase sequence")
 
             def produce(part):
-                value = result.read_chunk(part)
+                value = cast(torch.Tensor, result.read_chunk(part))
                 rotations = torch.exp(
                     1j
                     * torch.as_tensor(
@@ -318,7 +319,7 @@ def _export_distributed(result, output_file, geometry_file, staging_directory, o
     root = result.execution.root_rank
     ranks = [None] * size
     dist.all_gather_object(ranks, dist.get_rank(), group=group)
-    status = [None, None]
+    status: list[Any] = [None, None]
     if rank == root:
         try:
             from ._hdf5_compression import compression_settings
@@ -373,14 +374,14 @@ def _export_distributed(result, output_file, geometry_file, staging_directory, o
             record["chunks"].append((part.start, part.stop, paths))
     except Exception as error:
         record["error"] = str(error)
-    records = [None] * size
+    records: list[Any] = [None] * size
     dist.all_gather_object(records, record, group=group)
-    error = next((r["error"] for r in records if r["error"] is not None), None)
-    status = [None, error]
+    staging_error = next((r["error"] for r in records if r["error"] is not None), None)
+    status = [None, staging_error]
     if rank == root:
         try:
-            if error:
-                raise RuntimeError(error)
+            if staging_error:
+                raise RuntimeError(staging_error)
             if any(
                 r["signature"] != record["signature"]
                 or r["trailing_shape"] != record["trailing_shape"]

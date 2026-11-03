@@ -66,14 +66,17 @@ def capture_environment() -> dict:
     """Capture numerical settings without initializing CUDA or optional readers."""
     import flowtorch
 
-    versions = {"python": platform.python_version(), "flowtorch": flowtorch.__version__}
+    versions: dict[str, str | None] = {
+        "python": platform.python_version(),
+        "flowtorch": flowtorch.__version__,
+    }
     for name in ("torch", "numpy", "scipy", "matplotlib", "vtk", "h5py", "netCDF4"):
         try:
             versions[name] = metadata.version(name)
         except metadata.PackageNotFoundError:
             versions[name] = None
     versions["torch"] = str(torch.__version__)
-    code = {
+    code: dict[str, str | bool | None] = {
         "import_path": str(Path(flowtorch.__file__).resolve()),
         "commit": None,
         "dirty": None,
@@ -160,6 +163,9 @@ class ProvenanceMixin:
     Metadata contains descriptions rather than input contents or replayable code.
     """
 
+    _provenance_initializing: bool
+    _provenance_records: list[dict[str, Any]]
+
     def _effective_settings(self) -> dict:
         return {}
 
@@ -235,7 +241,7 @@ def tracked(function: Callable) -> Callable:
             "status": "running",
         }
         initializing = owner is not None and function.__name__ == "__init__"
-        if initializing:
+        if initializing and owner is not None:
             owner._provenance_initializing = True
         target = owner
         try:
@@ -253,7 +259,7 @@ def tracked(function: Callable) -> Callable:
             raise
         finally:
             record["finished_at"] = datetime.now(timezone.utc).isoformat()
-            if initializing:
+            if initializing and owner is not None:
                 owner._provenance_initializing = False
             if target is not None:
                 vars(target).setdefault("_provenance_records", []).append(

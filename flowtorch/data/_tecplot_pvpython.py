@@ -272,8 +272,8 @@ def _copy_field(leaf, wrapper, field_name, association, numpy):
 
 def _integration_mesh(leaf, numpy, cell_type=None):
     """Expose explicit connectivity, optionally correcting a known reader type."""
-    from vtkmodules.vtkFiltersCore import vtkAppendFilter  # type: ignore[import-not-found]
-    from vtkmodules.util.numpy_support import vtk_to_numpy  # type: ignore[import-not-found]
+    from vtkmodules.vtkFiltersCore import vtkAppendFilter
+    from vtkmodules.util.numpy_support import vtk_to_numpy
 
     # Convert implicit structured connectivity and polydata in compiled VTK.
     # With a single input and merging disabled, point/cell order is preserved.
@@ -316,7 +316,7 @@ def _integration_mesh(leaf, numpy, cell_type=None):
 
 def _geometric_weights(leaf, association, numpy, chunk_size=1_000_000, cell_type=None):
     """Compute measures and lump them using compiled bulk-array operations."""
-    from vtkmodules.vtkFiltersVerdict import vtkCellSizeFilter  # type: ignore[import-not-found]
+    from vtkmodules.vtkFiltersVerdict import vtkCellSizeFilter
     from vtkmodules.util.numpy_support import vtk_to_numpy
 
     if association not in ("point", "cell"):
@@ -398,7 +398,7 @@ def _cell_locations(leaf, numpy, cell_type=None):
 
 def _export_mesh(leaf, numpy, cell_type=None):
     """Serialize geometry/topology through VTK, without source field arrays."""
-    from vtkmodules.vtkIOXML import vtkXMLUnstructuredGridWriter  # type: ignore[import-not-found]
+    from vtkmodules.vtkIOXML import vtkXMLUnstructuredGridWriter
 
     source = _integration_mesh(leaf, numpy, cell_type)
     mesh = source.NewInstance()
@@ -511,7 +511,7 @@ def main():
             from paraview import servermanager
             from paraview.simple import Delete, VisItTecplotBinaryReader
             from paraview.vtk.numpy_interface import dataset_adapter
-            from vtkmodules.vtkCommonDataModel import (  # type: ignore[import-not-found]
+            from vtkmodules.vtkCommonDataModel import (
                 vtkCompositeDataSet,
             )
         except Exception as error:

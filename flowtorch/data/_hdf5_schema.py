@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import hashlib
+from typing import Any
 import json
 import xml.etree.ElementTree as ET
 
@@ -114,7 +115,7 @@ def write_geometry(
             file.attrs.update(schema=SCHEMA, schema_version=VERSION, complete=False)
             record_compression(file, geometry=settings)
             zones = file.create_group("zones", track_order=True)
-        signatures = []
+        signatures: list[tuple[str, str]] = []
         names = set()
         association = None
         iterator = iter(geometries)
@@ -247,6 +248,8 @@ def inspect_append(
                 schema[name] = {
                     field: tuple(ds.shape) for field, ds in datasets.items()
                 }
+        assert settings is not None
+        assert reader.geometry is not None
         requested = compression_settings(
             settings.codec if compression is None else compression,
             settings.level if compression_level is None else compression_level,
@@ -301,7 +304,7 @@ class FieldFile:
         self._finished = False
         self._pending_name = None
         self._moved_keys = []
-        self.reference = (
+        self.reference: dict[str, Any] = (
             inspect_append(
                 self.path,
                 dtype,
@@ -311,7 +314,7 @@ class FieldFile:
                 shuffle=shuffle,
             )
             if append
-            else None
+            else {}
         )
         settings = (
             self.reference["compression"]
@@ -635,7 +638,7 @@ class SeriesReader:
         self.path = Path(path).resolve()
         self.dtype = dtype
         self.file = h5py.File(self.path, "r")
-        self.geometry = None
+        self.geometry: Any = None
         try:
             prepare_read(self.file)
             if (
@@ -673,7 +676,7 @@ class SeriesReader:
             self.datasets = {}
             reference = None
             for time, frame in self.frames.items():
-                schema = {}
+                schema: dict[str, tuple[int, ...]] = {}
                 for key in self.keys:
                     datasets = {ds.attrs["name"]: ds for ds in frame[key].values()}
                     for ds in datasets.values():
