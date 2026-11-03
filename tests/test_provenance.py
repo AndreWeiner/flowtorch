@@ -279,3 +279,17 @@ def test_amps_tracking_resolved_settings(tmp_path):
         json.loads((tmp_path / "amps.json").read_text())["records"][0]["status"]
         == "complete"
     )
+
+
+def test_environment_legacy_torch_precision_proxy(monkeypatch):
+    from flowtorch.provenance import capture_environment
+
+    class LegacyMatmul:
+        allow_tf32 = True
+
+        def __getattr__(self, name):
+            raise AssertionError("Unknown attribute " + name)
+
+    monkeypatch.setattr(pt.backends.cuda, "matmul", LegacyMatmul())
+    environment = capture_environment()
+    assert environment["runtime"]["cuda_matmul_precision"] == {"allow_tf32": True}

@@ -124,7 +124,12 @@ def capture_environment() -> dict:
         ("cuda_matmul", torch.backends.cuda.matmul),
         ("cudnn", torch.backends.cudnn),
     ):
-        value = getattr(backend, "fp32_precision", None)
+        try:
+            value = getattr(backend, "fp32_precision", None)
+        except AssertionError:
+            # Older torch CUDA backend proxies raise AssertionError rather
+            # than AttributeError when a newer precision setting is absent.
+            value = None
         runtime[name + "_precision"] = (
             value
             if value is not None
