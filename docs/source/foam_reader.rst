@@ -51,7 +51,9 @@ Geometry is eager: accessing ``vertices`` or ``weights`` loads or computes the
 whole mesh. Binary mesh faces use ``faceCompactList`` connectivity. Geometry
 computation uses tensor reductions across faces and rejects non-finite or
 non-positive volumes instead of returning invalid integration weights.
-``FOAM2HDF5`` accepts gzip inputs but currently loads complete fields and mesh
-geometry; output chunk settings alone do not bound conversion memory.
+``FOAM2HDF5`` accepts gzip inputs and static decomposed cases. Split conversion
+streams fields sequentially in chunks and releases processor geometry between
+zones. Geometry remains eager per processor; legacy single-file conversion loads
+complete fields and mesh. Output chunk settings alone do not bound peak memory.
 
 See :doc:`foam_hdf5` for conversion options.

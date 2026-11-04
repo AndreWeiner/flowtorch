@@ -1,0 +1,109 @@
+{
+  "date": "2026-11-04",
+  "base_commit": "edafcdcce8746da9ad35b8ae1af84121cfd9c94c",
+  "state": "Uncommitted implementation; not a published release",
+  "flowtorch_import": "/home/andre/Development/flowtorch/flowtorch/__init__.py",
+  "version": "1.11.0",
+  "environment": {
+    "python": "3.12.3",
+    "torch": "2.14.0+cu130",
+    "numpy": "2.5.2",
+    "h5py": "3.16.0",
+    "hdf5": "2.0.0"
+  },
+  "source_sha256": {
+    "flowtorch/data/hdf5_file.py": "ed2c72a66e96f7c419a9b9521d12628467039bfe9a7b660ac76516e361c09d7c",
+    "flowtorch/data/_foam_stream.py": "6912df92d6544d5da4931196bc45b4fa58abfcbddfc1e73510814ad34c7d990e",
+    "tests/data/test_foam_distributed_conversion.py": "121b46f11a6a75a158f5b8a601050b2f0fe54502a3b079c83568a6cd64a7ce01",
+    "tests/application/check_foam_xdmf.py": "bd0e22a75e779cd0cede482603b267b44c528d2c2b6bb3051c4849289bcb0549"
+  },
+  "dataset_free_tests": {
+    "3.10": {
+      "passed": 1022,
+      "skipped": 5,
+      "deselected": 79
+    },
+    "3.12": {
+      "passed": 1022,
+      "skipped": 5,
+      "deselected": 79
+    },
+    "3.14": {
+      "passed": 1022,
+      "skipped": 5,
+      "deselected": 79
+    }
+  },
+  "external_tests": {
+    "python": "3.12",
+    "passed": 2,
+    "datasets": [
+      "of_cavity_ascii_parallel",
+      "of_cavity_binary_parallel"
+    ],
+    "inputs": "Disposable copies of local flowtorch.DATASETS paths; original datasets not modified",
+    "command": ".tox/py312/bin/python -m pytest tests/data/test_foam_distributed_conversion.py -m integration -q"
+  },
+  "checks": {
+    "format-check": "passed",
+    "lint": "passed",
+    "type-check": "passed, 77 source files",
+    "docs": "passed, warnings treated as errors",
+    "git diff --check": "passed"
+  },
+  "paraview": {
+    "version": "6.0.1",
+    "input": "Manufactured contiguous unit-cube chain: 2 cells in processor0, 3 in processor1; binary gzip OpenFOAM fields; gzip HDF5 with shuffle; initial time 0, appended times 1 and 2",
+    "check": "tests/application/check_foam_xdmf.py",
+    "command": "pvpython --force-offscreen-rendering tests/application/check_foam_xdmf.py fields.xdmf report.json",
+    "result": {
+      "passed": true,
+      "steps": [
+        {
+          "time": 0.0,
+          "zones": 2,
+          "cells": 5,
+          "volumes": "unit",
+          "fields": "exact"
+        },
+        {
+          "time": 1.0,
+          "zones": 2,
+          "cells": 5,
+          "volumes": "unit",
+          "fields": "exact"
+        },
+        {
+          "time": 2.0,
+          "zones": 2,
+          "cells": 5,
+          "volumes": "unit",
+          "fields": "exact"
+        }
+      ]
+    }
+  },
+  "contracts_checked": [
+    "Numeric processor order including processor10",
+    "Cell centres, raw positive weights and fields match an equivalent reconstructed mesh",
+    "Float64 geometry with Float32/Float64 fields",
+    "ASCII/binary/gzip input and gzip/Zstd output",
+    "Single-open sequential chunks with no prefix rescanning",
+    "Unchanged geometry bytes and raw committed field chunks after append",
+    "Changed decomposition/mesh/schema/precision/filters and duplicate timestamps rejected read-only",
+    "Interrupted append hidden and retry succeeds",
+    "Previous processor geometry released before constructing next",
+    "Unselected mesh update directories rejected"
+  ],
+  "limitations": [
+    "Static nonempty single-region processorN meshes only; no collated output, moving meshes or boundary-field export",
+    "Serial conversion, not MPI-parallel writing",
+    "Geometry and temporary topology allocations remain eager per processor; total peak memory was not benchmarked",
+    "ASCII input memory also depends on longest line; chunk size is not a total memory limit",
+    "ParaView checks used manufactured geometry; no large production OpenFOAM case benchmark was run"
+  ],
+  "environment_notes": [
+    "ParaView/MPI and full test collection require local socket access in this environment",
+    "Independent ParaView checker avoids loading external h5py into ParaView bundled HDF5 runtime"
+  ]
+}

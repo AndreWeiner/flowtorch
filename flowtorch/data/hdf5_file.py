@@ -5,7 +5,7 @@ into an HDF5 file. It also creates an XDMF accessor file for postprocessing
 in ParaView. The XDMF file creation is implemented in the :class:`XDMFWriter`
 class. The :class:`HDF5Dataloader` class is the complementary writer for the
 flowTorch data format. Moreover, the :class:`FOAM2HDF5` class allows conversion
-of reconstructed OpenFOAM simulation cases into the HDF5-based flowTorch format.
+of reconstructed or decomposed OpenFOAM simulation cases into the HDF5-based flowTorch format.
 """
 
 # standard library packages
@@ -614,10 +614,13 @@ class HDF5Writer(object):
 
 
 class FOAM2HDF5(object):
-    """Convert reconstructed OpenFOAM cases to flowTorch HDF5 format.
+    """Convert static reconstructed or decomposed OpenFOAM cases to HDF5.
 
-    Decomposed cases and time-dependent meshes raise ValueError. Existing output
-    requires explicit overwrite. Supply geometry_file for reusable separate geometry.
+    Decomposed cases use one zone per processor and separate geometry (by default
+    ``<filename stem>.geometry.h5`` beside the field file). Supply geometry_file
+    to choose or reuse geometry explicitly. Reconstructed cases retain their
+    single-file default. Time-dependent meshes are rejected. Existing field
+    output requires explicit overwrite; split output supports validated append.
 
     Examples
 
@@ -677,7 +680,11 @@ class FOAM2HDF5(object):
         append=True adds unique new times to complete split output and inherits
         omitted field selections and compression. It rejects legacy single-file
         output and cannot be combined with overwrite=True. The converter dtype
-        must match existing field storage precision.
+        must match existing field storage precision. Decomposed input always
+        uses split output with one zone per processor; geometry_file defaults
+        to <filename stem>.geometry.h5. Split conversion streams fields once in
+        chunks and assembles geometry one processor at a time. Moving meshes,
+        collated output and multi-region conversion are unsupported.
         """
         from pathlib import Path
         from ._hdf5_schema import select_names
@@ -692,12 +699,27 @@ class FOAM2HDF5(object):
         compression_settings(
             geometry_compression, geometry_compression_level, geometry_shuffle
         )
-        if self._loader._case.distributed:
-            raise ValueError(
-                "Decomposed OpenFOAM conversion is unsupported; reconstruct the case first"
-            )
         if self._dtype not in (pt.float32, pt.float64) or spatial_chunk < 1:
             raise ValueError("Expected float32/float64 fields and positive chunks")
+        # A converter can outlive newly written times or a changed decomposition.
+        # Refresh discovery before checking selections or append compatibility.
+        self._loader = FOAMDataloader(self._loader._case.path, pt.float64, None)
+        if self._loader._case.distributed or geometry_file is not None or append:
+            return self._convert_split(
+                filename,
+                fields,
+                times,
+                geometry_file=geometry_file,
+                spatial_chunk=spatial_chunk,
+                compression=compression,
+                compression_level=compression_level,
+                shuffle=shuffle,
+                geometry_compression=geometry_compression,
+                geometry_compression_level=geometry_compression_level,
+                geometry_shuffle=geometry_shuffle,
+                overwrite=overwrite,
+                append=append,
+            )
         selected_times = select_names(self._loader.write_times, times, "time")
         selected_times.sort(key=float)
         select_names(self._loader.field_names[selected_times[0]], fields, "field")
@@ -708,16 +730,69 @@ class FOAM2HDF5(object):
         case = Path(self._loader._case.path)
         for time in selected_times:
             select_names(self._loader.field_names[time], selected_fields, "field")
-            if (case / time / "polyMesh").exists():
-                raise ValueError(
-                    "Time-dependent meshes are unsupported; map to a fixed mesh first"
-                )
+        if any(
+            (case / time / "polyMesh").exists() for time in self._loader.write_times
+        ):
+            raise ValueError(
+                "Time-dependent meshes are unsupported; map to a fixed mesh first"
+            )
         file_path = case / filename
         if file_path.exists() and not overwrite and not append:
             raise FileExistsError(file_path)
-        if append:
-            from ._hdf5_schema import inspect_append, validate_append_selection
+        if file_path.exists():
+            file_path.unlink()
+        with HDF5Writer(
+            str(file_path),
+            compression=compression,
+            compression_level=compression_level,
+            shuffle=shuffle,
+            geometry_compression=geometry_compression,
+            geometry_compression_level=geometry_compression_level,
+            geometry_shuffle=geometry_shuffle,
+            spatial_chunk=spatial_chunk,
+        ) as writer:
+            self._convert_mesh(writer)
+            self._convert_fields(writer, selected_fields, selected_times)
+            writer.write_xdmf()
+        return str(file_path)
 
+    def _convert_split(
+        self,
+        filename: str,
+        fields: List[str] | None,
+        times: List[str] | None,
+        *,
+        geometry_file: str | None,
+        spatial_chunk: int,
+        compression: str | None,
+        compression_level: int | None,
+        shuffle: bool | None,
+        geometry_compression: str | None,
+        geometry_compression_level: int | None,
+        geometry_shuffle: bool,
+        overwrite: bool,
+        append: bool,
+    ) -> str:
+        """Export static processor meshes serially, without global materialization."""
+        from pathlib import Path
+        from ._foam_stream import field_info, field_chunks
+        from ._hdf5_schema import (
+            select_names,
+            inspect_append,
+            validate_append_selection,
+        )
+        from .unstructured import UnstructuredGeometry
+
+        case = self._loader._case
+        root = Path(case.path)
+        file_path = (root / filename).resolve()
+        descriptor = file_path.with_suffix(".xdmf")
+        if not overwrite and not append:
+            for output_path in (file_path, descriptor):
+                if output_path.exists():
+                    raise FileExistsError(output_path)
+        info = None
+        if append:
             info = inspect_append(
                 file_path,
                 self._dtype,
@@ -726,96 +801,160 @@ class FOAM2HDF5(object):
                 compression_level=compression_level,
                 shuffle=shuffle,
             )
-            geometry_file = info["geometry_path"]
-            if info["zone_names"] != ["mesh"]:
-                raise ValueError("OpenFOAM append requires the existing mesh zone")
-            if fields is None:
-                selected_fields = select_names(
-                    self._loader.field_names[selected_times[0]],
-                    list(info["schema"]["mesh"]),
-                    "field",
+            geometry_file = str(info["geometry_path"])
+        geometry_path = (
+            Path(geometry_file).resolve()
+            if geometry_file is not None
+            else file_path.with_suffix(".geometry.h5")
+        )
+        if len({file_path, descriptor, geometry_path}) != 3:
+            raise ValueError("Geometry, field and descriptor paths must be different")
+        zones = (
+            [f"processor{i}" for i in range(case.processors)]
+            if case.distributed
+            else ["mesh"]
+        )
+        if info is not None and zones != info["zone_names"]:
+            raise ValueError("Append processor zones differ from existing geometry")
+        loaders = [
+            (
+                FOAMDataloader(str(root / zone), pt.float64, distributed=False)
+                if case.distributed
+                else self._loader
+            )
+            for zone in zones
+        ]
+        selected_times = select_names(loaders[0].write_times, times, "time")
+        selected_times.sort(key=float)
+        requested = (
+            list(info["schema"][zones[0]])
+            if info is not None and fields is None
+            else fields
+        )
+        selected_fields = select_names(
+            loaders[0].field_names[selected_times[0]], requested, "field"
+        )
+        # Default export excludes unsupported face fields; explicitly requesting
+        # them remains an error. All other processors/times are checked below.
+        if requested is None:
+            supported = []
+            for name in selected_fields:
+                with foam_open(
+                    loaders[0]._case.build_file_path(name, selected_times[0])
+                ) as stream:
+                    if foam_header(stream).get(b"class") in FIELD_TYPE_DIMENSION:
+                        supported.append(name)
+            selected_fields = select_names(supported, None, "supported cell field")
+        schemas = {}
+        counts = []
+        classes: dict[str, bytes] = {}
+        for zone, loader in zip(zones, loaders):
+            select_names(loader.write_times, selected_times, f"time in {zone}")
+            # Reject even unselected mesh updates: later selected snapshots may
+            # inherit them. The supported mesh is exclusively constant/polyMesh.
+            local_root = Path(loader._case.path)
+            if any(
+                (local_root / time / "polyMesh").exists() for time in loader.write_times
+            ):
+                raise ValueError(
+                    f"Time-dependent meshes are unsupported ({zone}); map to a fixed mesh first"
                 )
-            n_cells, _, _ = self._gather_mesh_information(str(case / POLYMESH_PATH))
-            schemas = {
-                "mesh": {
-                    name: (
-                        n_cells,
-                        *cast(
-                            pt.Tensor,
-                            self._loader.load_snapshot(name, selected_times[0]),
-                        ).shape[1:],
-                    )
-                    for name in selected_fields
-                }
-            }
-            validate_append_selection(info, selected_times, schemas)
-        self._gather_field_information(selected_fields, selected_times)
-        if geometry_file is not None:
-            from .unstructured import UnstructuredGeometry
-
-            mesh_path = str(case / POLYMESH_PATH)
-            n_cells, _, _ = self._gather_mesh_information(mesh_path)
-            assert self._mesh_points is not None and self._topology is not None
-            geometry = UnstructuredGeometry(
-                self._mesh_points.numpy(),
-                self._topology.numpy(),
-                "Mixed",
-                n_cells,
-                "cell",
-                self._get_cell_centers().numpy(),
-                self._get_cell_volumes().numpy(),
-            )
-            geometry_path = Path(geometry_file).resolve()
-            HDF5Writer.write_geometry(
-                geometry_path,
-                [("mesh", geometry)],
-                compression=geometry_compression,
-                compression_level=geometry_compression_level,
-                shuffle=geometry_shuffle,
-                spatial_chunk=spatial_chunk,
-            )
-            descriptor = file_path.with_suffix(".xdmf")
-            if descriptor.exists() and not overwrite and not append:
-                raise FileExistsError(descriptor)
-            if descriptor.exists() and not append:
-                descriptor.unlink()
-            with HDF5Writer(
-                str(file_path),
-                geometry_file=geometry_path,
-                field_dtype=self._dtype,
-                spatial_chunk=spatial_chunk,
-                compression=compression,
-                compression_level=compression_level,
-                shuffle=shuffle,
-                overwrite=overwrite,
-                append=append,
-            ) as writer:
-                for time in selected_times:
-                    for name in selected_fields:
-                        value = cast(pt.Tensor, self._loader.load_snapshot(name, time))
-                        writer.allocate_field(
-                            name, tuple(value.shape[1:]), time, "mesh"
+            mesh_path = str(local_root / POLYMESH_PATH)
+            count = loader._mesh._get_n_cells(mesh_path)
+            if count <= 0:
+                raise ValueError(f"Cannot export an empty processor mesh: {zone}")
+            counts.append(count)
+            schema = {}
+            for time in selected_times:
+                select_names(
+                    loader.field_names[time],
+                    selected_fields,
+                    f"field in {zone} at {time}",
+                )
+                for name in selected_fields:
+                    path = loader._case.build_file_path(name, time)
+                    with foam_open(path) as stream:
+                        metadata, dim, size, _ = field_info(stream)
+                    kind = metadata[b"class"]
+                    if classes.setdefault(name, kind) != kind:
+                        raise ValueError(
+                            f"Field class differs across processors/times: {name}"
                         )
-                        for start in range(0, len(value), spatial_chunk):
-                            part = slice(start, min(start + spatial_chunk, len(value)))
-                            writer.write_slice(name, time, "mesh", part, value[part])
-                writer.write_xdmf(descriptor)
-        else:
-            if file_path.exists():
-                file_path.unlink()
-            with HDF5Writer(
-                str(file_path),
-                compression=compression,
-                compression_level=compression_level,
-                shuffle=shuffle,
-                geometry_compression=geometry_compression,
-                geometry_compression_level=geometry_compression_level,
-                geometry_shuffle=geometry_shuffle,
-                spatial_chunk=spatial_chunk,
-            ) as writer:
-                self._convert_mesh(writer)
-                self._convert_fields(writer, selected_fields, selected_times)
-                writer.write_xdmf()
+                    if size is not None and size != count:
+                        raise ValueError(
+                            f"Field cell count does not match mesh: {path}"
+                        )
+                    schema[name] = (count,) if dim == 1 else (count, dim)
+            schemas[zone] = schema
+        if info is not None:
+            validate_append_selection(info, selected_times, schemas)
+
+        def geometries():
+            for zone, loader, count in zip(zones, loaders, counts):
+                local_root = Path(loader._case.path)
+                mesh_path = str(local_root / POLYMESH_PATH)
+                try:
+                    actual, _, _ = self._gather_mesh_information(mesh_path)
+                    if actual != count:
+                        raise ValueError("Mesh cell count changed during conversion")
+                    mesh = loader._mesh
+                    constant = str(local_root / "constant")
+                    if mesh._centers_and_volumes_computed(constant):
+                        centers = mesh._parse_cell_centers(constant)
+                        volumes = mesh._parse_cell_volumes(constant)
+                    else:
+                        centers, volumes = mesh._compute_cell_centers_and_volumes(
+                            mesh_path
+                        )
+                    assert self._mesh_points is not None and self._topology is not None
+                    geom = UnstructuredGeometry(
+                        self._mesh_points.numpy(),
+                        self._topology.numpy(),
+                        "Mixed",
+                        count,
+                        "cell",
+                        centers.numpy(),
+                        volumes.numpy(),
+                    )
+                    try:
+                        yield zone, geom
+                    finally:
+                        del geom, centers, volumes
+                finally:
+                    # Neither this iterator nor the converter may retain the
+                    # previous processor while building the next topology.
+                    self._mesh_points = None
+                    self._topology = None
+
+        HDF5Writer.write_geometry(
+            geometry_path,
+            geometries(),
+            compression=geometry_compression,
+            compression_level=geometry_compression_level,
+            shuffle=geometry_shuffle,
+            spatial_chunk=spatial_chunk,
+        )
+        with HDF5Writer(
+            str(file_path),
+            geometry_file=geometry_path,
+            field_dtype=self._dtype,
+            spatial_chunk=spatial_chunk,
+            compression=compression,
+            compression_level=compression_level,
+            shuffle=shuffle,
+            overwrite=overwrite,
+            append=append,
+        ) as writer:
+            for time in selected_times:
+                for zone, loader, count in zip(zones, loaders, counts):
+                    for name in selected_fields:
+                        writer.allocate_field(name, schemas[zone][name][1:], time, zone)
+                        path = loader._case.build_file_path(name, time)
+                        for part, values in field_chunks(path, count, spatial_chunk):
+                            writer.write_slice(
+                                name, time, zone, part, pt.from_numpy(values)
+                            )
+            writer.write_xdmf(descriptor)
         return str(file_path)
 
     def _convert_mesh(self, writer: HDF5Writer):

@@ -1,6 +1,17 @@
 Release notes
 =============
 
+Unreleased
+----------
+
+* Convert static decomposed OpenFOAM cases directly to split HDF5/XDMF with
+  numerically ordered processor zones and reusable Float64 geometry.
+* Support validated append to decomposed output, preserving committed fields
+  and geometry and rejecting changed decomposition, meshes or field schemas.
+* Stream split OpenFOAM conversion fields sequentially, including ASCII/gzip,
+  and release each processor geometry before assembling the next.
+
+
 1.11.0
 ------
 

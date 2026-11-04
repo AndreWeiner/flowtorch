@@ -4,7 +4,7 @@ import gzip
 import re
 from itertools import islice
 from os.path import isfile
-from typing import BinaryIO, Optional, Tuple, List, cast
+from typing import BinaryIO, Iterator, Optional, Tuple, List, cast
 
 import numpy as np
 
@@ -157,35 +157,7 @@ def read_values(
     if metadata.get(b"format") != b"ascii":
         raise ValueError("Unsupported OpenFOAM file format")
 
-    def numbers():
-        # readline bounds memory by the longest input line, rather than snapshot size.
-        in_comment = False
-        depth = 1
-        for line in stream:
-            line = re.sub(rb"/\*.*?\*/", b" ", line)
-            if in_comment:
-                if b"*/" not in line:
-                    continue
-                line = line.split(b"*/", 1)[1]
-                in_comment = False
-            if b"/*" in line:
-                line = line.split(b"/*", 1)[0]
-                in_comment = True
-            line = line.split(b"//", 1)[0]
-            for value in re.findall(rb"[^\s();]+|[();]", line):
-                if value == b"(":
-                    depth += 1
-                elif value == b")":
-                    depth -= 1
-                    if depth == 0:
-                        return
-                elif value == b";":
-                    raise ValueError("Unexpected internalField terminator")
-                else:
-                    yield float(value)
-        raise ValueError("Missing ASCII internalField closing delimiter")
-
-    source = numbers()
+    source = _ascii_values(stream)
     iterator = islice(source, start * dim, stop * dim)
     try:
         values = np.fromiter(iterator, dtype=np.float64, count=size)
@@ -195,6 +167,88 @@ def read_values(
         return values
     except ValueError as error:
         raise ValueError("Truncated or invalid ASCII internalField") from error
+
+
+def _ascii_values(stream: BinaryIO) -> Iterator[float]:
+    # readline bounds memory by the longest input line, rather than snapshot size.
+    in_comment = False
+    depth = 1
+    for line in stream:
+        line = re.sub(rb"/\*.*?\*/", b" ", line)
+        if in_comment:
+            if b"*/" not in line:
+                continue
+            line = line.split(b"*/", 1)[1]
+            in_comment = False
+        if b"/*" in line:
+            line = line.split(b"/*", 1)[0]
+            in_comment = True
+        line = line.split(b"//", 1)[0]
+        for match in re.finditer(rb"[^\s();]+|[();]", line):
+            value = match[0]
+            if value == b"(":
+                depth += 1
+            elif value == b")":
+                depth -= 1
+                if depth == 0:
+                    tail = line[match.end() :].lstrip()
+                    if not tail:
+                        tail = token(stream)
+                    if not tail.startswith(b";"):
+                        raise ValueError("Missing ASCII internalField terminator")
+                    return
+            elif value == b";":
+                raise ValueError("Unexpected internalField terminator")
+            else:
+                yield float(value)
+    raise ValueError("Missing ASCII internalField closing delimiter")
+
+
+def field_chunks(
+    path: str, n_cells: int, chunk_size: int
+) -> Iterator[Tuple[slice, np.ndarray]]:
+    """Read a complete cell field once in bounded chunks.
+
+    ASCII scanning also retains the current input line. Unlike repeated spatial
+    slices, ASCII/gzip input is consumed sequentially.
+    The caller must exhaust the iterator to validate the list terminator.
+    """
+    if chunk_size < 1:
+        raise ValueError("chunk_size must be positive")
+    with foam_open(path) as stream:
+        metadata, dim, count, uniform = field_info(stream)
+        if count is not None and count != n_cells:
+            raise ValueError(f"Field cell count does not match mesh: {path}")
+        source = (
+            _ascii_values(stream)
+            if uniform is None and metadata.get(b"format") == b"ascii"
+            else None
+        )
+        for start in range(0, n_cells, chunk_size):
+            stop = min(start + chunk_size, n_cells)
+            if uniform is not None:
+                values = np.broadcast_to(uniform, (stop - start, dim)).copy()
+            elif source is not None:
+                try:
+                    values = np.fromiter(
+                        islice(source, (stop - start) * dim),
+                        dtype=np.float64,
+                        count=(stop - start) * dim,
+                    )
+                except ValueError as error:
+                    raise ValueError(
+                        "Truncated or invalid ASCII internalField"
+                    ) from error
+            else:
+                # Stream already points at this chunk; only the final call
+                # consumes the closing delimiters (including for gzip binary).
+                values = read_values(
+                    stream, metadata, dim, n_cells - start, 0, stop - start
+                )
+            shape = (stop - start,) if dim == 1 else (stop - start, dim)
+            yield slice(start, stop), values.reshape(shape)
+        if source is not None and next(source, None) is not None:
+            raise ValueError("More values than declared in internalField")
 
 
 def read_list(
