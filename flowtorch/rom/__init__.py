@@ -13,6 +13,16 @@ from .base import (
     ROMQuery,
     Trajectory,
 )
+from .autoregressive import (
+    AutoregressiveModel,
+    CausalTemporalConv,
+    TCNMLPAutoregressor,
+    MLPAutoregressor,
+    LSTMAutoregressor,
+    GRUAutoregressor,
+    EasyAttentionAutoregressor,
+)
+from .conv_vae import ConvVAE, ConvVAEROM, ImageSequenceDataset, LatentDynamics
 from .dmd import DMD
 from .dmdc import DMDc
 from .embedding import MonomialEmbedding, TimeDelayEmbedding
@@ -26,6 +36,17 @@ from .training import (
 )
 
 __all__ = [
+    "AutoregressiveModel",
+    "CausalTemporalConv",
+    "TCNMLPAutoregressor",
+    "MLPAutoregressor",
+    "LSTMAutoregressor",
+    "GRUAutoregressor",
+    "EasyAttentionAutoregressor",
+    "ConvVAE",
+    "ConvVAEROM",
+    "ImageSequenceDataset",
+    "LatentDynamics",
     "ControlledTrajectory",
     "Decoder",
     "DMD",
